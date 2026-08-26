@@ -1,0 +1,33 @@
+{
+  "name": "drum-hero",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test tests/e2e/navigation.spec.ts tests/e2e/learning.spec.ts tests/e2e/practice.spec.ts tests/e2e/accessibility.spec.ts --project=chromium --project=webkit --project=mobile-chromium",
+    "test:visual": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test tests/e2e/visual.spec.ts --project=chromium",
+    "qa": "npm run lint && npm run typecheck && npm run test && npm run build && npm run test:e2e"
+  },
+  "dependencies": {
+    "next": "^16.3.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^20.17.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.3",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

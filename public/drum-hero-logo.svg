@@ -1,0 +1,22 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Drum Hero</title>
+  <desc id="desc">A warm coral drum head crossed by two golden drumsticks with a rhythm pulse.</desc>
+  <defs>
+    <linearGradient id="head" x1="38" y1="30" x2="151" y2="168" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF725E"/><stop offset="1" stop-color="#C93F3B"/>
+    </linearGradient>
+    <filter id="shadow" x="18" y="22" width="156" height="156" filterUnits="userSpaceOnUse"><feDropShadow dy="7" stdDeviation="7" flood-color="#171615" flood-opacity=".24"/></filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <circle cx="96" cy="100" r="67" fill="#1D1B1A"/>
+    <circle cx="96" cy="96" r="61" fill="url(#head)" stroke="#FFF8EC" stroke-width="5"/>
+    <circle cx="96" cy="96" r="49" stroke="#FFF8EC" stroke-opacity=".25" stroke-width="2"/>
+  </g>
+  <path d="M54 100h18l7-15 12 31 10-23 7 14h29" stroke="#FFF8EC" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke="#F6B83F" stroke-width="9" stroke-linecap="round">
+    <path d="M50 38l91 112"/><path d="M142 39L51 150"/>
+  </g>
+  <g fill="#FFF1C2"><ellipse cx="47" cy="34" rx="8" ry="12" transform="rotate(-39 47 34)"/><ellipse cx="145" cy="35" rx="8" ry="12" transform="rotate(39 145 35)"/></g>
+  <path d="M139 50l3 8 8 3-8 3-3 8-3-8-8-3 8-3 3-8Z" fill="#FFF8EC"/>
+</svg>
+

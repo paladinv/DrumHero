@@ -1,0 +1,11 @@
+{
+  "name": "Drum Hero Practice Studio",
+  "short_name": "Drum Hero",
+  "description": "Learn drum technique, grooves, rudiments, and timing through focused practice.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f0e4",
+  "theme_color": "#e85348",
+  "icons": [{ "src": "/drum-hero-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
+
