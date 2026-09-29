@@ -6,11 +6,13 @@ import { useProgress } from "./ProgressProvider";
 
 const tools = [
   {href:"/learn",number:"01",title:"Learning Path",copy:"Twelve guided lessons from first setup to polyrhythm."},
-  {href:"/practice",number:"02",title:"Practice Pad",copy:"Train timing with five playable kit voices and honest feedback."},
-  {href:"/rudiments",number:"03",title:"Rudiments",copy:"Build control with sticking, accents, and focused coaching."},
-  {href:"/grooves",number:"04",title:"Grooves",copy:"Move from a first backbeat to syncopation and odd meter."},
-  {href:"/kit",number:"05",title:"Kit Guide",copy:"Set up comfortably, understand every voice, and protect your hearing."},
-  {href:"/progress",number:"06",title:"Progress",copy:"See completed lessons, best scores, recent work, and your streak."}
+  {href:"/trainer",number:"02",title:"Trainer",copy:"Practise with adjustable rounds, adaptive tempo, calibrated inputs, and setlist follow-along."},
+  {href:"/practice",number:"03",title:"Practice Pad",copy:"Train timing with five playable kit voices and honest feedback."},
+  {href:"/rudiments",number:"04",title:"Rudiments",copy:"Build control with sticking, accents, and focused coaching."},
+  {href:"/grooves",number:"05",title:"Grooves",copy:"Follow original rock, pop, funk, reggae, shuffle, Latin, and odd-meter patterns from simple to advanced."},
+  {href:"/song-library",number:"06",title:"Song Library",copy:"Build drum parts, organize repertoire, and practice song sections."},
+  {href:"/kit",number:"07",title:"Kit Guide",copy:"Set up comfortably, understand every voice, and protect your hearing."},
+  {href:"/progress",number:"08",title:"Progress",copy:"See completed lessons, best scores, recent work, and your streak."}
 ];
 
 export function Dashboard() {
@@ -26,4 +28,3 @@ export function Dashboard() {
     <section className="card-grid" aria-label="Drum Hero tools">{tools.map((tool)=><Link className="card card-link" href={tool.href} key={tool.href}><span className="number">{tool.number}</span><h3>{tool.title}</h3><p>{tool.copy}</p><span className="label">Open tool →</span></Link>)}</section>
   </main>;
 }
-

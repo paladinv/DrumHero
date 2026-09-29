@@ -9,6 +9,7 @@ type ProgressContextValue = {
   hydrated: boolean;
   completeLesson: (id: string) => void;
   recordSession: (result: SessionResult) => void;
+  recordTrainerRound: (date: string) => void;
   setSound: (sound: boolean) => void;
 };
 
@@ -27,8 +28,9 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { if (hydrated) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress)); }, [hydrated, progress]);
   const completeLesson = useCallback((id: string) => setProgress((state) => ({ ...state, completedLessons: state.completedLessons.includes(id) ? state.completedLessons : [...state.completedLessons, id] })), []);
   const recordSession = useCallback((result: SessionResult) => setProgress((state) => addSession(state, result)), []);
+  const recordTrainerRound = useCallback((date: string) => setProgress((state) => ({ ...state, practiceDates: [...new Set([...state.practiceDates, date])].sort() })), []);
   const setSound = useCallback((sound: boolean) => setProgress((state) => ({ ...state, settings: { ...state.settings, sound } })), []);
-  const value = useMemo(() => ({ progress, hydrated, completeLesson, recordSession, setSound }), [progress, hydrated, completeLesson, recordSession, setSound]);
+  const value = useMemo(() => ({ progress, hydrated, completeLesson, recordSession, recordTrainerRound, setSound }), [progress, hydrated, completeLesson, recordSession, recordTrainerRound, setSound]);
   return <ProgressContext.Provider value={value}>{children}</ProgressContext.Provider>;
 }
 

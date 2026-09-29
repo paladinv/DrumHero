@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const routes:[string,RegExp][]=[
-  ["/",/Build the beat/i],["/learn",/clear path/i],["/practice",/every hit/i],["/rudiments",/with intent/i],
+  ["/",/Build the beat/i],["/learn",/clear path/i],["/trainer",/one round at a time/i],["/practice",/every hit/i],["/rudiments",/with intent/i],
   ["/grooves",/between hits/i],["/kit",/for years/i],["/progress",/without pressure/i],["/about",/Practice deliberately/i]
 ];
 

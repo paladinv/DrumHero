@@ -19,6 +19,6 @@ export const viewport: Viewport = { themeColor: "#e85348" };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return <html lang="en"><body className={`${display.variable} ${body.variable}`}>
     <ProgressProvider><a className="skip-link" href="#main-content">Skip to content</a><SiteHeader />{children}</ProgressProvider>
-    <footer className="site-footer"><div><strong>Drum Hero</strong><span>Practice deliberately. Play musically.</span></div><p>Your progress stays in this browser. No account, uploads, microphone, or analytics.</p></footer>
+    <footer className="site-footer"><div><strong>Drum Hero</strong><span>Practice deliberately. Play musically.</span></div><p>Your progress stays in this browser. Audio input is optional and processed locally. No account, uploads, or analytics.</p></footer>
   </body></html>;
 }

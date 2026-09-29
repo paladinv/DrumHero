@@ -12,7 +12,7 @@ export type PracticePattern = {
   name: string;
   level: Level;
   description: string;
-  subdivision: 4 | 8 | 16;
+  subdivision: 4 | 8 | 12 | 16;
   beats: number;
   defaultBpm: number;
   tempoRange: [number, number];
@@ -31,13 +31,15 @@ export type Lesson = {
 };
 
 export type Rudiment = PracticePattern & { sticking: string; coaching: string };
-export type Groove = PracticePattern & { style: string; focus: string };
+export type Groove = PracticePattern & { style: string; focus: string; meter?: string; feel?: "straight" | "triplet" };
 
 export type HitRating = "great" | "good" | "miss" | "extra";
 export type RatedHit = {
   instrument: Instrument;
   rating: HitRating;
   offsetMs: number | null;
+  velocity?: number;
+  accentTarget?: boolean;
 };
 
 export type SessionResult = {
@@ -63,4 +65,3 @@ export type ProgressState = {
   practiceDates: string[];
   settings: { sound: boolean; preferredBpm: number };
 };
-

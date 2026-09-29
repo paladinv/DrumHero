@@ -13,7 +13,7 @@ Prove that Drum Hero teaches and scores usable drum-practice flows in a real bro
 | `tests/unit/progress.test.ts` | Defaults, corruption, bounds, session history, bests, dates, streak, recommendation | UC-03, 14–15, 70–79 | Critical |
 | `tests/e2e/navigation.spec.ts` | Route content, direct links, menu, console health | UC-01–07, 98–99 | Critical |
 | `tests/e2e/learning.spec.ts` | Filtering, completion, persistence, pattern handoff | UC-10–16, 70–71 | High |
-| `tests/e2e/practice.spec.ts` | Start/count-in, pads/keys, pause/resume/reset, configuration, result recording, audio fallback | UC-20–31, 40–52, 72–74, 97 | Critical |
+| `tests/e2e/practice.spec.ts` | Start/count-in, sample loading, recorded pad/keyboard cues, pause/resume/reset, configuration, result recording | UC-20–31, 40–52, 72–74, 97 | Critical |
 | `tests/e2e/accessibility.spec.ts` | axe scan, keyboard menu, landmarks, status, reduced motion, mobile controls | UC-90–96 | High |
 | `tests/e2e/visual.spec.ts` | Stable dashboard, curriculum, practice, results, and mobile menu snapshots | UC-05, 07, 25, 52, 95–96 | Medium |
 
@@ -70,4 +70,3 @@ Record browser/OS/device, result, evidence path, and issue identifier for every 
 ## Release gate
 
 Release only when lint, typecheck, unit tests, production build, Chromium/WebKit functional tests, accessibility scan, and approved visual snapshots pass. Critical manual failures block release; high failures require explicit triage; medium visual differences require baseline review rather than automatic acceptance.
-

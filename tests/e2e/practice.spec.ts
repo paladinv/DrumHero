@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 async function enterPlaying(page:import("@playwright/test").Page,hitSnare=false){
   await page.getByRole("button",{name:"Start 4-count"}).click();
-  await page.evaluate((shouldHit)=>{const state=JSON.parse(window.render_game_to_text?.()??"{}");window.advanceTime?.(Math.max(0,state.nextTargetInMs??0));if(shouldHit)window.dispatchEvent(new KeyboardEvent("keydown",{code:"KeyF",key:"f"}))},hitSnare);
+  await page.evaluate((shouldHit)=>{const state=JSON.parse(window.render_game_to_text?.()??"{}");window.advanceTime?.(Math.max(0,state.nextTargetInMs??0)+20);if(shouldHit)window.dispatchEvent(new KeyboardEvent("keydown",{code:"KeyF",key:"f"}))},hitSnare);
   await expect(page.getByText("playing",{exact:true})).toBeVisible();
 }
 

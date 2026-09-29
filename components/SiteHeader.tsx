@@ -6,8 +6,8 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 const links = [
-  ["/", "Home"], ["/learn", "Learn"], ["/practice", "Practice"], ["/rudiments", "Rudiments"],
-  ["/grooves", "Grooves"], ["/kit", "Kit Guide"], ["/progress", "Progress"], ["/about", "About"]
+  ["/", "Home"], ["/learn", "Learn"], ["/trainer", "Trainer"], ["/practice", "Practice"], ["/rudiments", "Rudiments"],
+  ["/grooves", "Grooves"], ["/song-library", "Song Library"], ["/kit", "Kit Guide"], ["/progress", "Progress"], ["/about", "About"]
 ] as const;
 
 export function SiteHeader() {
@@ -24,4 +24,3 @@ export function SiteHeader() {
     </nav>
   </header>;
 }
-

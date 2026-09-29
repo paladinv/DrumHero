@@ -31,7 +31,7 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 - **UC-23 — User-initiated audio:** Audio context creation occurs only after the learner presses Start.
 - **UC-24 — Count-in:** Start displays a four-beat count-in before the scoring window begins.
 - **UC-25 — Visible playhead:** During playback the active subdivision is clearly visible and advances through the pattern.
-- **UC-26 — Pattern cues:** Enabled sound produces synthesized metronome and target-drum cues without external samples.
+- **UC-26 — Pattern cues:** Enabled sound produces a short recorded hi-hat count-in click and recorded target-drum cues from bundled samples.
 - **UC-27 — Mute:** The learner disables sound without disabling visual playback or scoring.
 - **UC-28 — Pause/resume:** The learner pauses and resumes without shifting the relationship between remaining targets.
 - **UC-29 — Reset:** Reset returns to an idle, empty-score state and stops scheduled work.
@@ -39,6 +39,18 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 - **UC-31 — Retry:** From results, the learner starts a clean new attempt of the same configuration.
 - **UC-32 — Fullscreen:** Alt+F enters or exits fullscreen when the browser permits it; Escape uses native exit behavior.
 - **UC-33 — Background recovery:** Pausing before a known interruption allows an explicit resume with preserved target spacing.
+
+## Guided trainer
+
+- **UC-T01 — Round setup:** Choose a bundled rudiment, groove, or song part; set 4, 8, 10, or 16 repetitions and a one-, two-, or four-beat count-in.
+- **UC-T01a — Tempo build:** In self-rated practice, optionally raise tempo by 2 BPM after Clean repetitions and lower it after Missed repetitions.
+- **UC-T02 — Self rating:** Practice acoustic drums and rate each repetition Clean, Needs work, or Missed before advancing.
+- **UC-T03 — Scored input:** Score continuous repetitions using keyboard, touch, USB MIDI, timing-only audio, or calibrated five-voice audio classification.
+- **UC-T04 — Device setup:** Use per-device MIDI note maps and latency correction, view MIDI velocity, choose an audio input, and set its transient threshold.
+- **UC-T05 — Input calibration:** Estimate latency by tapping with an eight-beat click, or collect five sample hits for each audio voice; keep uncertain voice hits unscored.
+- **UC-T06 — Round control:** Pause, resume, reset, and complete without duplicating a result or advancing past the chosen repetition count.
+- **UC-T07 — Progress:** Keep up to fifty local Trainer rounds; show accuracy trends, most-practised pattern, focus area, and an adaptive next-round recommendation.
+- **UC-T08 — Setlist rehearsal:** Load an existing setlist and advance through each part in its selected song section, saving section scores as rounds finish.
 
 ## Playable inputs and scoring
 
@@ -62,7 +74,9 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 - **UC-61 — Practice rudiment:** The learner opens Practice from a rudiment with that rudiment selected.
 - **UC-62 — Browse grooves:** The learner sees style, level, subdivision, tempo, focus, and description for each groove.
 - **UC-63 — Practice groove:** The learner opens Practice from a groove with that groove selected.
-- **UC-64 — Representative breadth:** Bundled material includes single/double strokes, paradiddle, six-stroke roll, rock, syncopated funk, and 5/4.
+- **UC-64 — Representative breadth:** The 75-pattern groove library progresses from first pulses through rock, pop, disco, reggae, shuffle, jazz, funk, metal, Latin, compound and odd meters, and groove-to-fill transitions; rudiments include single/double strokes, paradiddle, and six-stroke roll.
+- **UC-68 — Groove follow-along:** Search and filter grooves by level and style; inspect step-by-step voice/accent grids and open any groove in Trainer or Practice Pad.
+- **UC-69 — Custom groove editor:** Create, accent, save, and delete eighth- or sixteenth-note grooves; saved patterns are available in Trainer and Practice Pad on the same browser.
 - **UC-65 — Learn kit voices:** The Kit Guide explains the five playable voices and their mappings.
 - **UC-66 — Ergonomic guidance:** The Kit Guide covers seat height, reach, rebound, and relaxed motion.
 - **UC-67 — Hearing safety:** The Kit Guide explicitly recommends appropriate hearing protection and controlled volume.
@@ -73,13 +87,18 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 - **UC-71 — Level progress:** Beginner, Intermediate, and Advanced each show completed count and percentage.
 - **UC-72 — Session history:** A completed loop appears in recent sessions with pattern, BPM, accuracy, date, score, and combo.
 - **UC-73 — Personal best:** The highest score per pattern is retained when later scores are lower.
+- **UC-74 — Focus plan:** Queue a short practice plan from patterns with weaker recent results and patterns the learner has practiced less often.
+- **UC-75 — Per-voice timing:** Scored Trainer recaps show average early or late timing and hit accuracy for each drum voice.
+- **UC-76 — Velocity coaching:** MIDI recaps compare accented and unaccented note velocities with simple dynamics targets.
+- **UC-77 — Audio setup:** Measure room noise, adjust the detection threshold, and view microphone input-level guidance before voice scoring.
+- **UC-78 — Pattern history:** Review recent pattern accuracy, the highest tempo reached at strong accuracy, and average timing tendency.
 - **UC-74 — History bound:** Only the 50 most recent sessions are retained.
 - **UC-75 — Practice dates:** At most one practice-date entry is stored per calendar date.
 - **UC-76 — Streak:** Consecutive practice dates ending today or yesterday form the current streak.
 - **UC-77 — Versioned storage:** Persisted progress includes an explicit schema version.
 - **UC-78 — Corruption recovery:** Invalid JSON or incompatible data falls back to safe defaults without preventing launch.
 - **UC-79 — Settings bounds:** Restored preferred tempo is clamped to 40–200 BPM and sound defaults on unless explicitly disabled.
-- **UC-80 — Local privacy:** No account, backend, upload, analytics, or microphone permission is used.
+- **UC-80 — Local privacy:** No account, backend, upload, or analytics is used. Microphone/line-in permission is requested only when the learner connects Trainer audio input; recordings are not stored.
 
 ## Accessibility, compatibility, and failure handling
 
@@ -94,3 +113,19 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 - **UC-98 — Console health:** Primary routes and representative flows emit no uncaught page or console errors.
 - **UC-99 — Supported browsers:** Current Chromium and WebKit desktop engines support primary flows; mobile Chromium viewport supports responsive flows.
 
+
+## Song Library (initial web release)
+
+- **UC-S01 — Local repertoire:** Browse two original examples and add personal songs with title, artist, difficulty, tempo, meter, tags, notes, source attribution, and authorization metadata.
+- **UC-S02 — Drum arrangement:** Add sections and editable five-voice grid parts, with bounded beat count, subdivision, and tempo.
+- **UC-S03 — Practice handoff:** Open a part in Practice Pad or Trainer and save completed section scores to the local library.
+- **UC-S04 — Organize:** Search songs, mark favorites, archive, create collections, practice queues, and setlists.
+- **UC-S05 — Import/export:** Review a Drum Hero song JSON before import; export songs and library backups.
+- **UC-S06 — Rehearsal notes:** Add annotations, bookmarks, stage cues, references, journal entries, and schedules.
+- **UC-S07 — Record:** With explicit microphone permission, save a local take, inspect detected onsets and approximate grid-match metrics, export audio, or delete the take.
+- **UC-S08 — Find and order:** Filter by meter, tag, collection, favorite, or due review; sort by title, artist, recent practice, or review date. Reorder arrangement sections/parts and queue/setlist songs.
+- **UC-S09 — Practice plan:** Assign a section to each queue/setlist entry, launch that section in Practice Pad, and edit scheduled practice dates.
+- **UC-S10 — Arrange efficiently:** Copy a part into another section, place accents, record sticking and dynamics notes, and move section/part order.
+- **UC-S11 — Understand readiness:** See the section mastery threshold, outstanding review, and the specific section to practice next; review recent section scores.
+
+Section reviews, tempo ramps, readiness estimates, arrangement snapshots, checklists, local rehearsal roles, encrypted backup, and backup conflict review are available. Optional account sync and sharing permissions remain future work.
