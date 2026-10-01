@@ -13,9 +13,24 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run mobile:content:validate
       - run: PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers npx playwright install --with-deps chromium webkit
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
       - run: npm run test:e2e
+  mobile-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - run: npm ci
+      - run: npm run mobile:content:validate
+      - run: xcodebuild -project ios/DrumHero/DrumHero.xcodeproj -scheme DrumHero -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build-for-testing

@@ -7,8 +7,12 @@ import { CUSTOM_GROOVES_EVENT, readCustomGrooves } from "@/lib/custom-grooves";
 import { grooves } from "@/lib/curriculum";
 import { allSongs, emptySongLibrary, newSong, normalizeSong, readSongLibrary, writeSongLibrary, type DrumPart, type DrumSong, type SongClip, type SongLibraryState, type SongSection } from "@/lib/song-library";
 import { buildArrangementBars, BUILDER_VOICES, cleanMeterLabel, gridBeatLabel, grooveToPart, humanizeArrangementBars, makeBlankPart, meterBeats, partStepCount, sectionClips, varyDrumPart, VOICE_LABEL, type ArrangementBar, type GrooveVariation } from "@/lib/song-builder";
-import { arrangementMidi, arrangementMusicXml, arrangementWav, BARS_PER_SHEET_PAGE, canvasPng, canvasesPdf, drawNotationPage, SHEET_HEIGHT, SHEET_WIDTH, type NotationView } from "@/lib/song-builder-export";
+import { arrangementMidi, arrangementMusicXml, arrangementWav, canvasPng, canvasesPdf, drawNotationPage, SHEET_HEIGHT, SHEET_WIDTH, type NotationView } from "@/lib/song-builder-export";
 import { DEFAULT_SONG_BUILDER_SETTINGS, readSongBuilderSettings, SONG_INSTRUMENTS, writeSongBuilderSettings, type SongBuilderKitPreset, type SongBuilderSettings } from "@/lib/song-builder-settings";
+import { importMidiSong } from "@/lib/song-builder-import";
+import { ARRANGEMENT_TEMPLATES, createArrangementTemplate, type ArrangementTemplateId } from "@/lib/song-builder-templates";
+import { makeSongProjectFile, MAX_PROJECT_SAMPLE_BYTES, readSongProjectFile } from "@/lib/song-builder-project";
+import { deleteCustomSample, readCustomSampleRecords, readCustomSamples, saveCustomSample, saveCustomSampleBlob } from "@/lib/song-builder-samples";
 import type { Groove, SongHitArticulation, SongInstrument } from "@/lib/types";
 
 type PlaybackMode = "idle" | "loading" | "count-in" | "playing" | "paused" | "finished";
@@ -85,6 +89,22 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
+async function encodeSample(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + 0x8000)));
+  }
+  return btoa(binary);
+}
+
+function decodeSample(base64: string, type: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type });
+}
+
 export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) {
   const [library, setLibrary] = useState<SongLibraryState>(emptySongLibrary);
   const libraryRef = useRef<SongLibraryState>(emptySongLibrary());
@@ -115,11 +135,20 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const [midiStatus, setMidiStatus] = useState("Connect a MIDI drum kit to record hits.");
   const [midiRecording, setMidiRecording] = useState(false);
   const [kitPresetName, setKitPresetName] = useState("");
+  const [kitSampleVoice, setKitSampleVoice] = useState<SongInstrument>("kick");
+  const [customSampleNames, setCustomSampleNames] = useState<Partial<Record<SongInstrument, string>>>({});
+  const [templateChoice, setTemplateChoice] = useState<ArrangementTemplateId>("pop-form");
+  const [transitionLength, setTransitionLength] = useState<"keep" | "one-bar">("keep");
+  const [transitionCrash, setTransitionCrash] = useState(false);
+  const [velocityVoice, setVelocityVoice] = useState<SongInstrument>("snare");
+  const [gridPaintMode, setGridPaintMode] = useState<"cycle" | "hit" | "erase">("cycle");
   const [practiceRangeStart, setPracticeRangeStart] = useState(1);
   const [practiceRangeEnd, setPracticeRangeEnd] = useState(1);
   const [grooveVariation, setGrooveVariation] = useState<GrooveVariation>("hat-lift");
   const [gridCellSize, setGridCellSize] = useState(34);
   const [selectedCell, setSelectedCell] = useState<{ instrument: SongInstrument; step: number } | null>(null);
+  const [selectedCells, setSelectedCells] = useState<string[]>([]);
+  const [hasCopiedHits, setHasCopiedHits] = useState(false);
   const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
   const [history, setHistory] = useState<SongHistory>({ songId: "", past: [], future: [] });
   const historyRef = useRef<SongHistory>({ songId: "", past: [], future: [] });
@@ -134,6 +163,11 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const [savedMessage, setSavedMessage] = useState("Changes save on this device.");
   const [playingStatus, setPlayingStatus] = useState("Playback uses the recorded drum samples.");
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const midiFileInputRef = useRef<HTMLInputElement | null>(null);
+  const projectFileInputRef = useRef<HTMLInputElement | null>(null);
+  const paintRef = useRef<{ pointerId: number; mode: "hit" | "erase" } | null>(null);
+  const hitClipboardRef = useRef<Array<{ offset: number; hit: DrumPart["hits"][number] }>>([]);
+  const audioSetupRef = useRef<Promise<DrumAudio | null> | null>(null);
   const audioRef = useRef<DrumAudio | null>(null);
   const timerRef = useRef<number | null>(null);
   const trackRef = useRef<PlaybackTrack | null>(null);
@@ -318,6 +352,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
       setBuilderSettings(storedSettings);
       setReady(true);
       setCustomGrooves(readCustomGrooves());
+      void readCustomSampleRecords().then((records) => setCustomSampleNames(Object.fromEntries(records.map((record) => [record.instrument, record.name])) as Partial<Record<SongInstrument, string>>)).catch(() => {});
       if (initialSongId) setSelectedSongId(initialSongId);
     }, 0);
     const reloadCustom = () => setCustomGrooves(readCustomGrooves());
@@ -338,6 +373,16 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
       audioRef.current?.close();
     };
   }, [initialSongId]);
+
+  useEffect(() => {
+    const stopPainting = () => { paintRef.current = null; };
+    window.addEventListener("pointerup", stopPainting);
+    window.addEventListener("pointercancel", stopPainting);
+    return () => {
+      window.removeEventListener("pointerup", stopPainting);
+      window.removeEventListener("pointercancel", stopPainting);
+    };
+  }, []);
 
   const songs = useMemo(() => allSongs(library), [library]);
   const song = songs.find((item) => item.id === selectedSongId);
@@ -406,14 +451,10 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const beatLabels = part ? Array.from({ length: partStepCount(part) }, (_, step) => gridBeatLabel(part.meter || section?.meter || song?.meter || "4/4", part.subdivision, step, stepsPerMeasure)) : [];
   const sources = useMemo(() => [...grooves, ...customGrooves], [customGrooves]);
   const activeMeter = part?.meter || section?.meter || song?.meter || "4/4";
-  const fillSuggestions = useMemo(() => {
-    if (!part) return [];
-    const signature = meterSignature(activeMeter);
-    return sources
-      .filter((item) => /fill|transition/i.test(`${item.name} ${item.style} ${item.description}`) && meterSignature(item.meter || `${item.beats}/4`) === signature)
-      .sort((left, right) => Math.abs(left.beats - part.beats) - Math.abs(right.beats - part.beats) || left.name.localeCompare(right.name))
-      .slice(0, 3);
-  }, [activeMeter, part, sources]);
+  const fillSuggestions = part ? sources
+    .filter((item) => /fill|transition/i.test(`${item.name} ${item.style} ${item.description}`) && meterSignature(item.meter || `${item.beats}/4`) === meterSignature(activeMeter))
+    .sort((left, right) => Math.abs(left.beats - part.beats) - Math.abs(right.beats - part.beats) || left.name.localeCompare(right.name))
+    .slice(0, 3) : [];
   const visibleSources = useMemo(() => sources.filter((item) => {
     const query = sourceQuery.trim().toLowerCase();
     const isFill = /fill/i.test(`${item.name} ${item.style} ${item.description}`);
@@ -423,22 +464,23 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     const selectedSong = songs.find((item) => item.id === selectedSongId);
     return selectedSong ? buildArrangementBars(selectedSong, previewScope === "song" ? undefined : previewScope) : [];
   }, [songs, selectedSongId, previewScope]);
-  const playbackBars = useMemo(() => song ? buildArrangementBars(song, playScope === "song" ? undefined : playScope) : [], [song, playScope]);
+  const playbackBars = song ? buildArrangementBars(song, playScope === "song" ? undefined : playScope) : [];
   const practiceBarCount = Math.max(1, playbackBars.length);
   const safePracticeStart = Math.max(1, Math.min(practiceBarCount, practiceRangeStart));
   const safePracticeEnd = Math.max(safePracticeStart, Math.min(practiceBarCount, practiceRangeEnd));
   const songTitleDraft = songDraft && songDraft.songId === song?.id ? songDraft.title : song?.title ?? "";
   const songArtistDraft = songDraft && songDraft.songId === song?.id ? songDraft.artist : song?.artist ?? "";
-  const pageCount = Math.max(1, Math.ceil(notationBars.length / BARS_PER_SHEET_PAGE));
+  const pageCount = Math.max(1, Math.ceil(notationBars.length / builderSettings.notation.barsPerPage));
   const currentPage = Math.max(0, Math.min(previewPage, pageCount - 1));
-  const cursorOnPage = position && position.barIndex >= currentPage * BARS_PER_SHEET_PAGE && position.barIndex < (currentPage + 1) * BARS_PER_SHEET_PAGE ? position : null;
-  const cursorPercent = cursorOnPage ? ((130 + (cursorOnPage.barIndex - currentPage * BARS_PER_SHEET_PAGE) * ((SHEET_WIDTH - 172) / Math.max(1, Math.min(BARS_PER_SHEET_PAGE, notationBars.length - currentPage * BARS_PER_SHEET_PAGE))) + 14 + cursorOnPage.fraction * Math.max(1, (SHEET_WIDTH - 172) / Math.max(1, Math.min(BARS_PER_SHEET_PAGE, notationBars.length - currentPage * BARS_PER_SHEET_PAGE)) - 28)) / SHEET_WIDTH) * 100 : 0;
+  const barsPerPage = builderSettings.notation.barsPerPage;
+  const cursorOnPage = position && position.barIndex >= currentPage * barsPerPage && position.barIndex < (currentPage + 1) * barsPerPage ? position : null;
+  const cursorPercent = cursorOnPage ? ((130 + (cursorOnPage.barIndex - currentPage * barsPerPage) * ((SHEET_WIDTH - 172) / Math.max(1, Math.min(barsPerPage, notationBars.length - currentPage * barsPerPage))) + 14 + cursorOnPage.fraction * Math.max(1, (SHEET_WIDTH - 172) / Math.max(1, Math.min(barsPerPage, notationBars.length - currentPage * barsPerPage)) - 28)) / SHEET_WIDTH) * 100 : 0;
 
   useEffect(() => {
     const target = previewCanvasRef.current;
     if (!target || !song) return;
     try {
-      const page = drawNotationPage(song, notationBars, notationView, currentPage);
+      const page = drawNotationPage(song, notationBars, notationView, currentPage, null, builderSettings.notation);
       const context = target.getContext("2d");
       if (!context) return;
       target.width = page.width;
@@ -448,7 +490,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     } catch (error) {
       console.error("Could not draw the notation preview.", error);
     }
-  }, [song, notationBars, notationView, currentPage]);
+  }, [song, notationBars, notationView, currentPage, builderSettings.notation]);
 
   useEffect(() => () => {
     if (timerRef.current) window.clearInterval(timerRef.current);
@@ -572,10 +614,29 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     setMessage(`${source.name} added as an editable pattern. It will play at the song tempo.`);
   };
 
+  const prepareTransitionPart = (source: Groove) => {
+    const next = grooveToPart(source, section?.bpm || song?.bpm || source.defaultBpm);
+    if (transitionLength === "one-bar" && part) {
+      const targetBeats = meterBeats(activeMeter, part.beats);
+      const representableBeats = Math.max(0.5, Math.round(targetBeats * next.subdivision / 4) * 4 / next.subdivision);
+      if (next.beats > representableBeats) {
+        next.beats = representableBeats;
+        next.hits = next.hits.filter((hit) => hit.step < Math.ceil(representableBeats * next.subdivision / 4));
+      }
+    }
+    if (transitionCrash) {
+      const step = Math.max(0, partStepCount(next) - 1);
+      const ending = next.hits.find((hit) => hit.step === step && hit.instrument === "crash");
+      if (ending) Object.assign(ending, { accent: true, velocity: Math.max(ending.velocity ?? 86, 112) });
+      else next.hits.push({ step, instrument: "crash", accent: true, velocity: 112 });
+    }
+    return next;
+  };
+
   const insertFillTransition = (source: Groove) => {
     if (!song || !section) return;
     clearPreview();
-    const next = grooveToPart(source, section.bpm || song.bpm);
+    const next = prepareTransitionPart(source);
     const clip: SongClip = { id: uid(), partId: next.id, repeats: 1 };
     updateSong((current) => ({
       ...current,
@@ -598,14 +659,66 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     setMessage(`${source.name} inserted after ${activeClip ? part?.name : "the current section"} as an independent, editable fill.`);
   };
 
+  const ensureDrumAudio = async () => {
+    if (audioRef.current) return audioRef.current;
+    if (!audioSetupRef.current) {
+      audioSetupRef.current = (async () => {
+        const customSamples = await readCustomSamples().catch(() => ({}));
+        return createDrumAudio(builderSettingsRef.current.mix, customSamples);
+      })();
+    }
+    const audio = await audioSetupRef.current;
+    audioSetupRef.current = null;
+    audioRef.current = audio;
+    return audio;
+  };
+
+  const previewFillInContext = async (source: Groove) => {
+    if (!part || !section || !song || !activeClip || !["idle", "finished"].includes(playbackMode)) return;
+    clearPreview();
+    const request = previewRequestRef.current;
+    const previewToken = `context:${source.id}`;
+    setPreviewSourceId(previewToken);
+    const audio = await ensureDrumAudio();
+    if (request !== previewRequestRef.current) return;
+    if (!audio || !await audio.ready) { setMessage("Samples could not be loaded for this transition preview."); clearPreview(); return; }
+    const fillPart = prepareTransitionPart(source);
+    const currentBeats = meterBeats(part.meter || section.meter || song.meter, part.beats);
+    const previousStart = Math.max(0, part.beats - currentBeats);
+    const fillStart = currentBeats;
+    const nextClip = clips[clips.findIndex((clip) => clip.id === activeClip.id) + 1];
+    const nextPart = nextClip ? section.parts.find((item) => item.id === nextClip.partId) : undefined;
+    const bpm = section.bpm || song.bpm;
+    const quarterMs = 60_000 / bpm;
+    const queue = (pattern: DrumPart | undefined, offset: number, fromBeat: number, toBeat: number) => {
+      if (!pattern) return;
+      for (const hit of pattern.hits) {
+        const beat = hit.step * 4 / pattern.subdivision;
+        if (beat < fromBeat || beat >= toBeat) continue;
+        const timer = window.setTimeout(() => audio.hit(hit.instrument, hit.accent, hit.velocity ?? (hit.accent ? 118 : 86)), Math.max(0, (offset + beat - fromBeat) * quarterMs));
+        previewTimersRef.current.push(timer);
+      }
+    };
+    queue(part, 0, previousStart, part.beats);
+    queue(fillPart, currentBeats, 0, fillPart.beats);
+    const nextStart = currentBeats + fillPart.beats;
+    queue(nextPart, nextStart, 0, Math.min(currentBeats, nextPart?.beats ?? 0));
+    const previewDuration = nextStart + Math.min(currentBeats, nextPart?.beats ?? 0);
+    previewTimersRef.current.push(window.setTimeout(() => {
+      if (request === previewRequestRef.current) setPreviewSourceId("");
+      previewTimersRef.current = [];
+    }, previewDuration * quarterMs + 100));
+    setMessage(nextPart ? `Previewing ${part.name} → ${source.name} → ${nextPart.name}.` : `Previewing ${part.name} → ${source.name} at the end of this section.`);
+  };
+
   const previewSource = async (source: Groove) => {
     if (previewSourceId === source.id) { clearPreview(); return; }
     clearPreview();
     const request = previewRequestRef.current;
     setPreviewSourceId(source.id);
-    if (!audioRef.current) audioRef.current = createDrumAudio(builderSettings.mix);
-    if (!audioRef.current) { setMessage("Audio preview is unavailable in this browser."); setPreviewSourceId(""); return; }
-    const audio = audioRef.current;
+    const audio = await ensureDrumAudio();
+    if (request !== previewRequestRef.current) return;
+    if (!audio) { setMessage("Audio preview is unavailable in this browser."); setPreviewSourceId(""); return; }
     const readyAudio = await audio.ready;
     if (request !== previewRequestRef.current) return;
     if (!readyAudio) { setMessage("Drum samples could not be loaded for preview."); setPreviewSourceId(""); return; }
@@ -758,6 +871,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const cycleCell = (instrument: SongInstrument, step: number) => {
     if (!part) return;
     setSelectedCell({ instrument, step });
+    setSelectedCells([`${instrument}:${step}`]);
     const current = part.hits.find((hit) => hit.step === step && hit.instrument === instrument);
     const hits = !current
       ? [...part.hits, { step, instrument, accent: false }]
@@ -765,6 +879,90 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         ? part.hits.filter((hit) => hit !== current)
         : part.hits.map((hit) => hit === current ? { ...hit, accent: true } : hit);
     updatePart(part.id, (item) => ({ ...item, hits }));
+  };
+
+  const selectGridCell = (event: React.PointerEvent<HTMLButtonElement> | React.MouseEvent<HTMLButtonElement>, instrument: SongInstrument, step: number) => {
+    const key = `${instrument}:${step}`;
+    setSelectedCell({ instrument, step });
+    if (event.shiftKey && selectedCell?.instrument === instrument) {
+      const first = Math.min(selectedCell.step, step);
+      const last = Math.max(selectedCell.step, step);
+      const range = Array.from({ length: last - first + 1 }, (_, index) => `${instrument}:${first + index}`);
+      setSelectedCells((current) => [...new Set([...current, ...range])]);
+    } else if (event.metaKey || event.ctrlKey) {
+      setSelectedCells((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+    } else setSelectedCells([key]);
+  };
+
+  const paintGridCell = (instrument: SongInstrument, step: number, mode: "hit" | "erase") => {
+    if (!part) return;
+    setSelectedCell({ instrument, step });
+    const existing = part.hits.some((hit) => hit.step === step && hit.instrument === instrument);
+    if ((mode === "hit" && existing) || (mode === "erase" && !existing)) return;
+    updatePart(part.id, (current) => ({
+      ...current,
+      hits: mode === "erase"
+        ? current.hits.filter((hit) => hit.step !== step || hit.instrument !== instrument)
+        : [...current.hits, { step, instrument, accent: false, velocity: 86 }]
+    }));
+  };
+
+  const handleGridCellClick = (event: React.MouseEvent<HTMLButtonElement>, instrument: SongInstrument, step: number) => {
+    if (event.detail > 0) return;
+    if (event.shiftKey || event.metaKey || event.ctrlKey) selectGridCell(event, instrument, step);
+    else cycleCell(instrument, step);
+  };
+
+  const selectedHitLocations = selectedCells.flatMap((key) => {
+    const [instrument, rawStep] = key.split(":");
+    const step = Number(rawStep);
+    return SONG_INSTRUMENTS.includes(instrument as SongInstrument) && Number.isInteger(step) ? [{ instrument: instrument as SongInstrument, step }] : [];
+  });
+
+  const copySelectedHits = () => {
+    if (!part || !selectedHitLocations.length) return;
+    const startStep = Math.min(...selectedHitLocations.map((cell) => cell.step));
+    const selectedKeys = new Set(selectedHitLocations.map((cell) => `${cell.instrument}:${cell.step}`));
+    hitClipboardRef.current = part.hits
+      .filter((hit) => selectedKeys.has(`${hit.instrument}:${hit.step}`))
+      .map((hit) => ({ offset: hit.step - startStep, hit: structuredClone(hit) }));
+    setHasCopiedHits(hitClipboardRef.current.length > 0);
+    setMessage(`${hitClipboardRef.current.length} note${hitClipboardRef.current.length === 1 ? "" : "s"} copied.`);
+  };
+
+  const pasteHits = () => {
+    if (!part || !selectedCell || !hitClipboardRef.current.length) return;
+    const copied = hitClipboardRef.current.flatMap(({ offset, hit }) => {
+      const step = selectedCell.step + offset;
+      return step < partStepCount(part) ? [{ ...hit, step }] : [];
+    });
+    if (!copied.length) return;
+    const copiedKeys = new Set(copied.map((hit) => `${hit.instrument}:${hit.step}`));
+    updatePart(part.id, (current) => ({ ...current, hits: [...current.hits.filter((hit) => !copiedKeys.has(`${hit.instrument}:${hit.step}`)), ...copied] }));
+    setSelectedCells(copied.map((hit) => `${hit.instrument}:${hit.step}`));
+    setMessage(`${copied.length} note${copied.length === 1 ? "" : "s"} pasted.`);
+  };
+
+  const deleteSelectedHits = () => {
+    if (!part || !selectedHitLocations.length) return;
+    const keys = new Set(selectedHitLocations.map((cell) => `${cell.instrument}:${cell.step}`));
+    updatePart(part.id, (current) => ({ ...current, hits: current.hits.filter((hit) => !keys.has(`${hit.instrument}:${hit.step}`)) }));
+    setMessage(`${keys.size} selected cell${keys.size === 1 ? "" : "s"} cleared.`);
+  };
+
+  const moveSelectedHits = (offset: -1 | 1) => {
+    if (!part || !selectedHitLocations.length) return;
+    const keys = new Set(selectedHitLocations.map((cell) => `${cell.instrument}:${cell.step}`));
+    const moved = part.hits.filter((hit) => keys.has(`${hit.instrument}:${hit.step}`)).map((hit) => ({ ...hit, step: Math.max(0, Math.min(partStepCount(part) - 1, hit.step + offset)) }));
+    const destinationKeys = new Set(moved.map((hit) => `${hit.instrument}:${hit.step}`));
+    updatePart(part.id, (current) => ({ ...current, hits: [...current.hits.filter((hit) => !keys.has(`${hit.instrument}:${hit.step}`) && !destinationKeys.has(`${hit.instrument}:${hit.step}`)), ...moved] }));
+    setSelectedCells(moved.map((hit) => `${hit.instrument}:${hit.step}`));
+    if (moved[0]) setSelectedCell({ instrument: moved[0].instrument, step: moved[0].step });
+  };
+
+  const changeVelocity = (instrument: SongInstrument, step: number, velocity: number) => {
+    if (!part) return;
+    updatePart(part.id, (current) => ({ ...current, hits: current.hits.map((hit) => hit.instrument === instrument && hit.step === step ? { ...hit, velocity } : hit) }));
   };
 
   const changeSelectedHit = (change: (hit: DrumPart["hits"][number]) => DrumPart["hits"][number]) => {
@@ -817,11 +1015,12 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         downloadBlob(arrangementMusicXml(bars, song.title, song.artist, builderSettings.midiNotes), `${name}.musicxml`);
       } else if (format === "wav") {
         setMessage("Rendering WAV audio from the drum samples…");
-        downloadBlob(await arrangementWav(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed), swing, builderSettings.mix), `${name}.wav`);
+        const customSamples = await readCustomSamples().catch(() => ({}));
+        downloadBlob(await arrangementWav(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed), swing, builderSettings.mix, customSamples), `${name}.wav`);
       } else {
-        const pages = Math.ceil(bars.length / BARS_PER_SHEET_PAGE);
+        const pages = Math.ceil(bars.length / builderSettings.notation.barsPerPage);
         if (format === "png" && pages > 30) { setMessage("This arrangement is too long for one PNG. Export the PDF or choose a section."); return; }
-        const canvases = Array.from({ length: pages }, (_, page) => drawNotationPage(song, bars, notationView, page));
+        const canvases = Array.from({ length: pages }, (_, page) => drawNotationPage(song, bars, notationView, page, null, builderSettings.notation));
         if (format === "pdf") {
           downloadBlob(canvasesPdf(canvases), `${name}.pdf`);
         } else {
@@ -925,11 +1124,12 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     cueIndexRef.current = 0;
     lastCountRef.current = -1;
     previousPositionRef.current = "";
-    if ((playDrums || metronome) && !audioRef.current) audioRef.current = createDrumAudio(builderSettings.mix);
-    if (audioRef.current && (playDrums || metronome)) {
+    const audio = (playDrums || metronome) ? await ensureDrumAudio() : audioRef.current;
+    if (requestRef.current !== request) return;
+    if (audio && (playDrums || metronome)) {
       setPlaybackMode("loading");
       setPlayingStatus("Loading drum sounds…");
-      const readyAudio = await audioRef.current.ready;
+      const readyAudio = await audio.ready;
       if (requestRef.current !== request) return;
       setPlayingStatus(readyAudio ? "Drum sounds are ready." : "Some drum samples are unavailable; visual follow-along still works.");
     } else {
@@ -981,12 +1181,153 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     setMessage(`Kit preset “${name}” saved on this device.`);
   };
 
+  const addArrangementTemplate = () => {
+    if (!song) return;
+    const nextSections = createArrangementTemplate(song, templateChoice);
+    const first = nextSections[0];
+    const firstClip = first ? sectionClips(first)[0] : undefined;
+    updateSong((current) => ({ ...current, meter: current.sections.length ? current.meter : "4/4", sections: [...current.sections, ...nextSections] }));
+    if (first && firstClip) {
+      setActiveSectionId(first.id);
+      setActiveClipId(firstClip.id);
+      setActivePartId(firstClip.partId);
+      setSelectedCell(null);
+      setSelectedCells([]);
+      setSelectedClipIds([]);
+    }
+    setMessage(`${ARRANGEMENT_TEMPLATES.find((item) => item.id === templateChoice)?.label ?? "Arrangement"} template added. Fill the blank patterns with your grooves.`);
+  };
+
+  const selectImportedSong = (imported: DrumSong) => {
+    const firstSection = imported.sections[0];
+    const firstClip = firstSection ? sectionClips(firstSection)[0] : undefined;
+    saveHistory({ songId: imported.id, past: [], future: [] });
+    setActiveSectionId(firstSection?.id ?? "");
+    setActiveClipId(firstClip?.id ?? "");
+    setActivePartId(firstClip?.partId ?? "");
+    setSelectedCell(null);
+    setSelectedCells([]);
+    setSelectedClipIds([]);
+    setPreviewScope("song");
+    setPlayScope("song");
+    persistSong(imported, false);
+  };
+
+  const importMidiFile = async (file?: File) => {
+    if (!file) return;
+    try {
+      if (file.size > 16 * 1024 * 1024) throw new Error("MIDI files must be 16 MB or smaller.");
+      const result = importMidiSong(await file.arrayBuffer(), file.name.replace(/\.midi?$/i, ""));
+      selectImportedSong(result.song);
+      setMessage(`Imported ${result.noteCount} drum notes${result.ignoredNoteCount ? `; skipped ${result.ignoredNoteCount} unrecognized pitches` : ""}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not import that MIDI file.");
+    } finally {
+      if (midiFileInputRef.current) midiFileInputRef.current.value = "";
+    }
+  };
+
+  const exportProjectFile = async () => {
+    if (!song) return;
+    try {
+      const records = await readCustomSampleRecords();
+      const selectedCustom = records.filter((record) => builderSettings.mix.sampleIndex[record.instrument] < 0);
+      const sampleBytes = selectedCustom.reduce((sum, record) => sum + record.blob.size, 0);
+      if (sampleBytes > MAX_PROJECT_SAMPLE_BYTES) throw new Error("The selected custom samples exceed the 24 MB project-file limit. Choose a smaller set of custom samples, then export again.");
+      const customSamples = Object.fromEntries(await Promise.all(selectedCustom.map(async (record) => [record.instrument, {
+        name: record.name,
+        type: record.blob.type || "audio/wav",
+        base64: await encodeSample(record.blob)
+      }] as const))) as Partial<Record<SongInstrument, { name: string; type: string; base64: string }>>;
+      const settings = structuredClone(builderSettings);
+      for (const voice of SONG_INSTRUMENTS) {
+        if (settings.mix.sampleIndex[voice] < 0 && !customSamples[voice]) settings.mix.sampleIndex[voice] = 0;
+      }
+      const project = makeSongProjectFile(song, settings, customSamples);
+      downloadBlob(new Blob([JSON.stringify(project, null, 2)], { type: "application/vnd.drum-hero.song+json" }), `${safeName(song.title)}.drumsong.json`);
+      setMessage(`Song project exported with its arrangement, mix, MIDI map${selectedCustom.length ? `, and ${selectedCustom.length} selected custom sample${selectedCustom.length === 1 ? "" : "s"}` : ""}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not export the song project.");
+    }
+  };
+
+  const importProjectFile = async (file?: File) => {
+    if (!file) return;
+    try {
+      if (file.size > 64 * 1024 * 1024) throw new Error("Song project files must be 64 MB or smaller.");
+      const input: unknown = JSON.parse(await file.text());
+      const project = readSongProjectFile(input);
+      if (!project) throw new Error("That is not a supported Drum Hero song project file.");
+      const existingRecords = await readCustomSampleRecords().catch(() => []);
+      const availableCustomSamples = new Set(existingRecords.map((record) => record.instrument));
+      const nextSampleNames = Object.fromEntries(existingRecords.map((record) => [record.instrument, record.name])) as Partial<Record<SongInstrument, string>>;
+      const unavailableSamples: SongInstrument[] = [];
+      for (const [voice, sample] of Object.entries(project.customSamples ?? {}) as Array<[SongInstrument, NonNullable<typeof project.customSamples>[SongInstrument]]>) {
+        if (!sample) continue;
+        const previousRecord = existingRecords.find((record) => record.instrument === voice);
+        const blob = decodeSample(sample.base64, sample.type);
+        const record = await saveCustomSampleBlob(voice, sample.name, blob);
+        availableCustomSamples.add(voice);
+        nextSampleNames[voice] = record.name;
+        if (audioRef.current && !await audioRef.current.setCustomSample(voice, record.blob)) {
+          if (previousRecord) await saveCustomSampleBlob(voice, previousRecord.name, previousRecord.blob);
+          else await deleteCustomSample(voice);
+          availableCustomSamples.delete(voice);
+          delete nextSampleNames[voice];
+          unavailableSamples.push(voice);
+        }
+      }
+      const importedMix = structuredClone(project.mix);
+      for (const voice of SONG_INSTRUMENTS) {
+        if (importedMix.sampleIndex[voice] < 0 && !availableCustomSamples.has(voice)) importedMix.sampleIndex[voice] = 0;
+      }
+      stopPlayback();
+      clearPreview();
+      selectImportedSong(project.song);
+      changeBuilderSettings((current) => ({ ...current, mix: importedMix, midiNotes: project.midiNotes }));
+      setCustomSampleNames(nextSampleNames);
+      setMessage(`Imported “${project.song.title}” with its saved mix and MIDI map${Object.keys(project.customSamples ?? {}).length ? ` and ${Object.keys(project.customSamples ?? {}).length} custom sample${Object.keys(project.customSamples ?? {}).length === 1 ? "" : "s"}` : ""}${unavailableSamples.length ? `; ${unavailableSamples.length} sample${unavailableSamples.length === 1 ? " was" : "s were"} unavailable and reverted to the built-in kit` : ""}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not import that song project.");
+    } finally {
+      if (projectFileInputRef.current) projectFileInputRef.current.value = "";
+    }
+  };
+
+  const importCustomSample = async (file?: File) => {
+    if (!file) return;
+    try {
+      const previousRecord = (await readCustomSampleRecords().catch(() => [])).find((record) => record.instrument === kitSampleVoice);
+      const record = await saveCustomSample(kitSampleVoice, file);
+      if (audioRef.current && !await audioRef.current.setCustomSample(kitSampleVoice, record.blob)) {
+        if (previousRecord) await saveCustomSampleBlob(kitSampleVoice, previousRecord.name, previousRecord.blob);
+        else await deleteCustomSample(kitSampleVoice);
+        throw new Error("The browser could not decode that audio file.");
+      }
+      setCustomSampleNames((current) => ({ ...current, [kitSampleVoice]: record.name }));
+      changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, sampleIndex: { ...current.mix.sampleIndex, [kitSampleVoice]: -1 } } }));
+      setMessage(`${VOICE_LABEL[kitSampleVoice]} sample “${record.name}” saved on this device.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save that custom sample.");
+    }
+  };
+
+  const removeCustomSample = async () => {
+    try {
+      await deleteCustomSample(kitSampleVoice);
+      await audioRef.current?.setCustomSample(kitSampleVoice, null);
+      setCustomSampleNames((current) => { const next = { ...current }; delete next[kitSampleVoice]; return next; });
+      changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, sampleIndex: { ...current.mix.sampleIndex, [kitSampleVoice]: 0 } } }));
+      setMessage(`${VOICE_LABEL[kitSampleVoice]} custom sample removed.`);
+    } catch { setMessage("Could not remove that custom sample from this browser."); }
+  };
+
   if (!ready) return <p>Loading Song Builder…</p>;
 
   return <div className="song-builder">
     <section className="song-builder-toolbar card" aria-label="Song and playback controls">
       <div className="song-builder-song-picker">
-        <label>Song<select value={selectedSongId} onChange={(event) => { stopPlayback(); clearPreview(); saveHistory({ songId: "", past: [], future: [] }); setSelectedClipIds([]); setSelectedCell(null); setSelectedSongId(event.target.value); setActiveSectionId(""); setActiveClipId(""); setActivePartId(""); setPreviewScope("song"); setPlayScope("song"); }}>
+        <label>Song<select value={selectedSongId} onChange={(event) => { stopPlayback(); clearPreview(); saveHistory({ songId: "", past: [], future: [] }); setSelectedClipIds([]); setSelectedCell(null); setSelectedCells([]); setSelectedSongId(event.target.value); setActiveSectionId(""); setActiveClipId(""); setActivePartId(""); setPreviewScope("song"); setPlayScope("song"); }}>
           <option value="">Choose a song…</option>
           {songs.filter((item) => !item.archived).map((item) => <option key={item.id} value={item.id}>{item.title} · {item.artist}{item.bundled ? " · example" : ""}</option>)}
         </select></label>
@@ -1015,7 +1356,22 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         <div className="song-builder-tools-grid">
           <section><h3>Live recording</h3><div className="song-builder-tool-actions"><button type="button" onClick={() => void connectMidi()}>Connect MIDI kit</button><label>MIDI input<select value={builderSettings.midiInputId} onChange={(event) => changeBuilderSettings((current) => ({ ...current, midiInputId: event.target.value }))}><option value="">Choose input…</option>{midiInputs.map((input) => <option key={input.id} value={input.id}>{input.name}</option>)}</select></label><button className={midiRecording ? "recording" : ""} type="button" onClick={toggleLiveRecording}>{midiRecording ? "Stop recording" : "Record live input"}</button></div><p role="status">{midiStatus}</p><small>While recording, use A kick · S snare · D closed hat · F tom · G crash · H open hat · J ride · K rimshot. Notes follow the playhead and keep their input velocity.</small></section>
           <section><h3>Practice range and feel</h3><div className="song-builder-tool-fields"><label>Start measure<select disabled={!['idle', 'finished'].includes(playbackMode)} value={safePracticeStart} onChange={(event) => { const value = Number(event.target.value); setPracticeRangeStart(value); if (value > safePracticeEnd) setPracticeRangeEnd(value); }}>{Array.from({ length: practiceBarCount }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select></label><label>End measure<select disabled={!['idle', 'finished'].includes(playbackMode)} value={safePracticeEnd} onChange={(event) => setPracticeRangeEnd(Math.max(safePracticeStart, Number(event.target.value)))}>{Array.from({ length: practiceBarCount - safePracticeStart + 1 }, (_, index) => <option key={safePracticeStart + index} value={safePracticeStart + index}>{safePracticeStart + index}</option>)}</select></label><label>Raise tempo each loop<select disabled={!['idle', 'finished'].includes(playbackMode)} value={builderSettings.practiceTempoStep} onChange={(event) => changeBuilderSettings((current) => ({ ...current, practiceTempoStep: Number(event.target.value) }))}><option value={0}>Off</option><option value={1}>+1 BPM</option><option value={2}>+2 BPM</option><option value={3}>+3 BPM</option><option value={5}>+5 BPM</option></select></label></div><p>Turn on “Loop range” in the transport to repeat these measures and apply the tempo step.</p><label className="song-builder-setting-slider">Humanize timing and velocity · {builderSettings.humanizeAmount}%<input type="range" min={0} max={100} step={5} value={builderSettings.humanizeAmount} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, humanizeAmount: Number(event.target.value) }))} /></label><label>Repeatable humanize seed<input type="number" min={0} max={2147483647} value={builderSettings.humanizeSeed} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, humanizeSeed: Math.max(0, Number(event.target.value) || 0) }))} /></label></section>
-          <section className="song-builder-mixer"><h3>Drum kit mixer</h3><label>Load saved kit<select value="" onChange={(event) => { const preset = builderSettings.kitPresets.find((item) => item.id === event.target.value); if (preset) changeBuilderSettings((current) => ({ ...current, mix: structuredClone(preset.mix) })); }}><option value="">Choose a kit preset…</option>{builderSettings.kitPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label><div className="song-builder-mix-head"><span>Voice</span><span>Level</span><span>Pan</span><span>Sample</span></div>{SONG_INSTRUMENTS.map((voice) => <div className="song-builder-mix-row" key={voice}><strong>{VOICE_LABEL[voice]}</strong><label><span className="visually-hidden">{VOICE_LABEL[voice]} volume</span><input aria-label={`${VOICE_LABEL[voice]} volume`} type="range" min={0} max={100} step={1} value={Math.round(builderSettings.mix.levels[voice] * 100)} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, levels: { ...current.mix.levels, [voice]: Number(event.target.value) / 100 } } }))} /></label><label><span className="visually-hidden">{VOICE_LABEL[voice]} pan</span><input aria-label={`${VOICE_LABEL[voice]} pan`} type="range" min={-100} max={100} step={1} value={Math.round(builderSettings.mix.pan[voice] * 100)} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, pan: { ...current.mix.pan, [voice]: Number(event.target.value) / 100 } } }))} /></label><label><span className="visually-hidden">{VOICE_LABEL[voice]} sample</span><select aria-label={`${VOICE_LABEL[voice]} sample`} value={builderSettings.mix.sampleIndex[voice]} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, sampleIndex: { ...current.mix.sampleIndex, [voice]: Number(event.target.value) } } }))}>{Array.from({ length: voice === "snare" || voice === "tom" || voice === "rimshot" ? 3 : 4 }, (_, index) => <option key={index} value={index}>Sample {index + 1}</option>)}</select></label></div>)}<div className="song-builder-tool-actions"><label>Save kit preset<input maxLength={40} value={kitPresetName} onChange={(event) => setKitPresetName(event.target.value)} placeholder="Warm club kit" /></label><button type="button" onClick={saveKitPreset} disabled={!kitPresetName.trim()}>Save preset</button></div></section>
+          <section className="song-builder-mixer">
+            <h3>Drum kit mixer</h3>
+            <label>Load saved kit<select value="" onChange={(event) => { const preset = builderSettings.kitPresets.find((item) => item.id === event.target.value); if (preset) changeBuilderSettings((current) => ({ ...current, mix: structuredClone(preset.mix) })); }}><option value="">Choose a kit preset…</option>{builderSettings.kitPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
+            <div className="song-builder-mix-head"><span>Voice</span><span>Level</span><span>Pan</span><span>Sample</span><span>Mute</span><span>Solo</span></div>
+            {SONG_INSTRUMENTS.map((voice) => <div className="song-builder-mix-row" key={voice}>
+              <strong>{VOICE_LABEL[voice]}</strong>
+              <label><span className="visually-hidden">{VOICE_LABEL[voice]} volume</span><input aria-label={`${VOICE_LABEL[voice]} volume`} type="range" min={0} max={100} step={1} value={Math.round(builderSettings.mix.levels[voice] * 100)} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, levels: { ...current.mix.levels, [voice]: Number(event.target.value) / 100 } } }))} /></label>
+              <label><span className="visually-hidden">{VOICE_LABEL[voice]} pan</span><input aria-label={`${VOICE_LABEL[voice]} pan`} type="range" min={-100} max={100} step={1} value={Math.round(builderSettings.mix.pan[voice] * 100)} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, pan: { ...current.mix.pan, [voice]: Number(event.target.value) / 100 } } }))} /></label>
+              <label><span className="visually-hidden">{VOICE_LABEL[voice]} sample</span><select aria-label={`${VOICE_LABEL[voice]} sample`} value={builderSettings.mix.sampleIndex[voice]} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, sampleIndex: { ...current.mix.sampleIndex, [voice]: Number(event.target.value) } } }))}><option value={-1} disabled={!customSampleNames[voice]}>Custom · {customSampleNames[voice] ?? "none"}</option>{Array.from({ length: voice === "snare" || voice === "tom" || voice === "rimshot" ? 3 : 4 }, (_, index) => <option key={index} value={index}>Sample {index + 1}</option>)}</select></label>
+              <label className="song-builder-mix-toggle"><input type="checkbox" aria-label={`Mute ${VOICE_LABEL[voice]}`} checked={builderSettings.mix.muted[voice]} onChange={(event) => changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, muted: { ...current.mix.muted, [voice]: event.target.checked } } }))} />Mute</label>
+              <button className="song-builder-solo-button" type="button" aria-pressed={builderSettings.mix.solo === voice} onClick={() => changeBuilderSettings((current) => ({ ...current, mix: { ...current.mix, solo: current.mix.solo === voice ? "" : voice } }))}>Solo</button>
+            </div>)}
+            <div className="song-builder-tool-actions"><label>Sample voice<select value={kitSampleVoice} onChange={(event) => setKitSampleVoice(event.target.value as SongInstrument)}>{SONG_INSTRUMENTS.map((voice) => <option key={voice} value={voice}>{VOICE_LABEL[voice]}</option>)}</select></label><label>Import sample<input type="file" accept="audio/*" onChange={(event) => void importCustomSample(event.target.files?.[0])} /></label><button type="button" onClick={() => void removeCustomSample()} disabled={!customSampleNames[kitSampleVoice]}>Remove custom</button></div>
+            <p>Import a WAV, MP3, or OGG sample up to 12 MB per voice. Open hi-hats are choked when another hi-hat voice plays.</p>
+            <div className="song-builder-tool-actions"><label>Save kit preset<input maxLength={40} value={kitPresetName} onChange={(event) => setKitPresetName(event.target.value)} placeholder="Warm club kit" /></label><button type="button" onClick={saveKitPreset} disabled={!kitPresetName.trim()}>Save preset</button></div>
+          </section>
           <section><h3>MIDI drum map</h3><p>Choose the note numbers your DAW expects. The MIDI and MusicXML exports use this map.</p><div className="song-builder-midi-map">{SONG_INSTRUMENTS.map((voice) => <label key={voice}>{VOICE_LABEL[voice]}<input aria-label={`${VOICE_LABEL[voice]} MIDI note`} type="number" min={0} max={127} value={builderSettings.midiNotes[voice]} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, midiNotes: { ...current.midiNotes, [voice]: Math.max(0, Math.min(127, Number(event.target.value) || 0)) } }))} /></label>)}</div><button className="button-secondary" type="button" onClick={() => changeBuilderSettings((current) => ({ ...current, midiNotes: { ...DEFAULT_SONG_BUILDER_SETTINGS.midiNotes } }))}>Reset General MIDI map</button></section>
         </div>
       </details>}
@@ -1030,6 +1386,20 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
           <label>Artist<input required maxLength={120} value={artistDraft} onChange={(event) => setArtistDraft(event.target.value)} placeholder="Your name" /></label>
           <button className="button" type="submit">Create new song</button>
         </form>
+        {song && <section className="song-builder-template-panel" aria-label="Arrangement templates">
+          <strong>Start from an arrangement</strong>
+          <label>Template<select value={templateChoice} onChange={(event) => setTemplateChoice(event.target.value as ArrangementTemplateId)}>{ARRANGEMENT_TEMPLATES.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select></label>
+          <small>{ARRANGEMENT_TEMPLATES.find((template) => template.id === templateChoice)?.description}</small>
+          <button type="button" onClick={addArrangementTemplate}>Add template</button>
+        </section>}
+        <section className="song-builder-file-tools" aria-label="Import and share song files">
+          <strong>Bring in or share a song</strong>
+          <button type="button" onClick={() => midiFileInputRef.current?.click()}>Import MIDI</button>
+          <input ref={midiFileInputRef} className="visually-hidden" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" aria-label="Choose a MIDI file" onChange={(event) => void importMidiFile(event.target.files?.[0])} />
+          <button type="button" onClick={exportProjectFile} disabled={!song}>Export song project</button>
+          <button type="button" onClick={() => projectFileInputRef.current?.click()}>Import song project</button>
+          <input ref={projectFileInputRef} className="visually-hidden" type="file" accept=".json,application/json,application/vnd.drum-hero.song+json" aria-label="Choose a Drum Hero song project file" onChange={(event) => void importProjectFile(event.target.files?.[0])} />
+        </section>
         {songs.length > 0 && <p className="song-builder-library-note">{songs.filter((item) => !item.bundled).length} personal songs · all edits are shared with your local Song Library.</p>}
         {!songs.length && <p className="song-builder-library-note">Songs are saved in this browser and are available from Song Library.</p>}
         <Link href="/song-library">Browse library and backups</Link>
@@ -1080,7 +1450,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
               const playing = position?.partId === clip.partId && (playScope === "song" || playScope === section.id);
               return <li className={`${active ? "active" : ""} ${playing ? "playing" : ""}`} key={clip.id} draggable onDragStart={(event) => { draggedClipIdRef.current = clip.id; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", clip.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); reorderClip(draggedClipIdRef.current || event.dataTransfer.getData("text/plain"), clip.id); draggedClipIdRef.current = ""; }} onDragEnd={() => { draggedClipIdRef.current = ""; }}>
                 <label className="song-builder-clip-check"><input type="checkbox" aria-label={`Select clip ${index + 1}, ${clipPart.name}`} checked={selectedClipIds.includes(clip.id)} onChange={(event) => setSelectedClipIds((current) => event.target.checked ? [...current, clip.id] : current.filter((id) => id !== clip.id))} /></label>
-                <button className="song-builder-clip-select" type="button" aria-pressed={active} onClick={() => { setSelectedCell(null); setActiveClipId(clip.id); setActivePartId(clip.partId); }}><span className="song-builder-clip-number">{index + 1}</span><span><strong>{clipPart.name}</strong><small>{clipPart.meter || section.meter || song.meter} · {barsInClip} {barsInClip === 1 ? "bar" : "bars"}</small></span></button>
+                <button className="song-builder-clip-select" type="button" aria-pressed={active} onClick={() => { setSelectedCell(null); setSelectedCells([]); setActiveClipId(clip.id); setActivePartId(clip.partId); }}><span className="song-builder-clip-number">{index + 1}</span><span><strong>{clipPart.name}</strong><small>{clipPart.meter || section.meter || song.meter} · {barsInClip} {barsInClip === 1 ? "bar" : "bars"}</small></span></button>
                 <label>Repeat<input aria-label={`Repeat ${clipPart.name}`} type="number" min={1} max={64} value={clip.repeats} onChange={(event) => updateSection(section.id, (current) => ({ ...current, clips: sectionClips(current).map((item) => item.id === clip.id ? { ...item, repeats: Math.max(1, Math.min(64, Number(event.target.value) || 1)) } : item) }))} /></label>
                 <div className="song-builder-icon-actions"><button type="button" aria-label={`Move ${clipPart.name} up`} disabled={index === 0} onClick={() => moveClip(clip.id, -1)}>↑</button><button type="button" aria-label={`Move ${clipPart.name} down`} disabled={index === clips.length - 1} onClick={() => moveClip(clip.id, 1)}>↓</button><button type="button" aria-label={`Duplicate ${clipPart.name} clip`} onClick={() => duplicateClip(clip.id)}>＋</button><button type="button" aria-label={`Remove ${clipPart.name} clip`} onClick={() => removeClip(clip.id)}>×</button></div>
               </li>;
@@ -1093,13 +1463,25 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
             <div className="song-builder-section-heading"><div><span className="eyebrow">Editable drum tab</span><h2>{part?.name ?? "Choose a pattern"}</h2></div>{part && <button className="button-secondary" type="button" onClick={duplicatePattern}>Duplicate pattern</button>}</div>
             {part ? <>
               <div className="song-builder-fields song-builder-part-fields">
-                <label>Editing pattern<select value={part.id} onChange={(event) => { setSelectedCell(null); setActivePartId(event.target.value); }}>{section.parts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>Editing pattern<select value={part.id} onChange={(event) => { setSelectedCell(null); setSelectedCells([]); setActivePartId(event.target.value); }}>{section.parts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                 <label>Pattern name<input maxLength={80} value={part.name} onChange={(event) => updatePart(part.id, (current) => ({ ...current, name: event.target.value }))} /></label>
                 <label>Pattern meter<input maxLength={40} value={part.meter ?? section.meter ?? song.meter} onChange={(event) => updatePart(part.id, (current) => ({ ...current, meter: event.target.value.slice(0, 40) }))} /></label>
                 <label>Length · quarter-note beats<input type="number" min={0.5} max={32} step={0.5} value={part.beats} onChange={(event) => { const beats = Math.max(0.5, Math.min(32, Number(event.target.value) || 4)); updatePart(part.id, (current) => ({ ...current, beats, hits: current.hits.filter((hit) => hit.step < beats * current.subdivision / 4) })); }} /></label>
                 <label>Grid<select value={part.subdivision} onChange={(event) => changeSubdivision(Number(event.target.value))}><option value={4}>Quarter notes</option><option value={8}>Eighth notes</option><option value={12}>Triplets</option><option value={16}>Sixteenth notes</option></select></label>
               </div>
               <p className="song-builder-hint">Click a cell to cycle rest → hit → accent → rest. Use arrow keys to move around the grid. This pattern has {partStepCount(part)} steps and plays at {section.bpm ?? song.bpm} BPM.</p>
+              <div className="song-builder-grid-tools">
+                <label>Pointer tool<select value={gridPaintMode} onChange={(event) => setGridPaintMode(event.target.value as typeof gridPaintMode)}><option value="cycle">Cycle hit state</option><option value="hit">Draw hits</option><option value="erase">Erase hits</option></select></label>
+                <span>Drag across cells in Draw or Erase mode. Shift-click selects a range; Ctrl/Cmd-click toggles cells.</span>
+                <div className="song-builder-selection-actions">
+                  <button type="button" onClick={() => { const all = part.hits.map((hit) => `${hit.instrument}:${hit.step}`); setSelectedCells(all); const hit = part.hits[0]; if (hit) setSelectedCell({ instrument: hit.instrument, step: hit.step }); }} disabled={!part.hits.length}>Select all hits</button>
+                  <button type="button" onClick={copySelectedHits} disabled={!selectedHitLocations.length}>Copy</button>
+                  <button type="button" onClick={pasteHits} disabled={!selectedCell || !hasCopiedHits}>Paste</button>
+                  <button type="button" onClick={() => moveSelectedHits(-1)} disabled={!selectedHitLocations.length}>Move left</button>
+                  <button type="button" onClick={() => moveSelectedHits(1)} disabled={!selectedHitLocations.length}>Move right</button>
+                  <button type="button" onClick={deleteSelectedHits} disabled={!selectedHitLocations.length}>Delete</button>
+                </div>
+              </div>
               <label className="song-builder-zoom">Grid zoom · {gridCellSize}px<input type="range" min={24} max={50} step={2} value={gridCellSize} onChange={(event) => setGridCellSize(Number(event.target.value))} /></label>
               <div className="song-builder-grid-scroll"><div className="song-builder-grid" style={{ "--steps": partStepCount(part), "--cell-width": `${gridCellSize}px` } as React.CSSProperties} role="grid" aria-label="Eight-voice drum tab grid" aria-colcount={partStepCount(part) + 1}>
                 <div className="song-builder-grid-row song-builder-grid-head" role="row"><strong role="rowheader">Voice</strong>{Array.from({ length: partStepCount(part) }, (_, step) => <span role="columnheader" aria-label={`Step ${step + 1}${beatLabels[step] ? `, beat group ${beatLabels[step]}` : ""}`} key={step}>{beatLabels[step] || "·"}</span>)}</div>
@@ -1108,10 +1490,20 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
                   const isPlayhead = position?.partId === part.id && position.step === step;
                   const articulationName = hit?.articulation && hit.articulation !== "normal" ? hit.articulation.replace("foot-splash", "foot splash") : "";
                   const glyph = hit?.articulation && hit.articulation !== "normal" ? ({ flam: "fl", drag: "dr", buzz: "z", "foot-splash": "FS" } as const)[hit.articulation] : hit?.ghost ? "g" : hit?.accent ? "◆" : hit ? "●" : "·";
-                  return <button className={`${hit ? "hit" : ""} ${hit?.accent ? "accented" : ""} ${hit?.ghost ? "ghost" : ""} ${beatLabels[step] ? "beat-start" : ""} ${step > 0 && step % stepsPerMeasure === 0 ? "measure-start" : ""} ${isPlayhead ? "playhead" : ""}`} key={step} type="button" role="gridcell" data-song-voice={voiceIndex} data-song-step={step} tabIndex={voiceIndex === 0 && step === 0 ? 0 : -1} aria-label={`${VOICE_LABEL[voice]} step ${step + 1}${beatLabels[step] ? `, beat group ${beatLabels[step]}` : ""}: ${hit ? `${hit.ghost ? "ghost note" : hit.accent ? "accent" : "hit"}${articulationName ? `, ${articulationName}` : ""}` : "rest"}`} aria-selected={selectedCell?.instrument === voice && selectedCell.step === step} onKeyDown={(event) => navigateGrid(event, voiceIndex, step)} onClick={() => cycleCell(voice, step)}>{glyph}</button>;
+                  return <button className={`${hit ? "hit" : ""} ${hit?.accent ? "accented" : ""} ${hit?.ghost ? "ghost" : ""} ${beatLabels[step] ? "beat-start" : ""} ${step > 0 && step % stepsPerMeasure === 0 ? "measure-start" : ""} ${isPlayhead ? "playhead" : ""} ${selectedCells.includes(`${voice}:${step}`) ? "selected-cell" : ""}`} key={step} type="button" role="gridcell" data-song-voice={voiceIndex} data-song-step={step} tabIndex={voiceIndex === 0 && step === 0 ? 0 : -1} aria-label={`${VOICE_LABEL[voice]} step ${step + 1}${beatLabels[step] ? `, beat group ${beatLabels[step]}` : ""}: ${hit ? `${hit.ghost ? "ghost note" : hit.accent ? "accent" : "hit"}${articulationName ? `, ${articulationName}` : ""}` : "rest"}`} aria-selected={selectedCells.includes(`${voice}:${step}`)} onKeyDown={(event) => navigateGrid(event, voiceIndex, step)} onPointerDown={(event) => { if (event.button !== 0) return; const modified = event.shiftKey || event.metaKey || event.ctrlKey; if (modified) { event.preventDefault(); selectGridCell(event, voice, step); return; } if (gridPaintMode === "cycle") { event.preventDefault(); cycleCell(voice, step); return; } event.preventDefault(); selectGridCell(event, voice, step); const mode = gridPaintMode; paintRef.current = { pointerId: event.pointerId, mode }; paintGridCell(voice, step, mode); }} onPointerEnter={(event) => { const activePaint = paintRef.current; if (activePaint?.pointerId === event.pointerId) paintGridCell(voice, step, activePaint.mode); }} onClick={(event) => handleGridCellClick(event, voice, step)}>{glyph}</button>;
                 })}</div>)}
               </div></div>
-              <div className="song-builder-hit-tools"><span>{selectedHit && selectedCell ? `${VOICE_LABEL[selectedCell.instrument]} · step ${selectedCell.step + 1}` : "Select a hit to edit its dynamics and articulation."}</span><label>Velocity<input type="range" min={1} max={127} value={selectedHit?.velocity ?? (selectedHit?.ghost ? 38 : selectedHit?.accent ? 118 : 86)} disabled={!selectedHit} onChange={(event) => changeSelectedHit((hit) => ({ ...hit, velocity: Number(event.target.value) }))} /></label><label className="song-builder-check"><input type="checkbox" checked={selectedHit?.ghost ?? false} disabled={!selectedHit} onChange={(event) => changeSelectedHit((hit) => ({ ...hit, ghost: event.target.checked }))} /> Ghost note</label><label>Articulation<select value={selectedHit?.articulation ?? "normal"} disabled={!selectedHit} onChange={(event) => setSelectedArticulation(event.target.value as SongHitArticulation)}><option value="normal">Normal</option><option value="flam">Flam</option><option value="drag">Drag</option><option value="buzz">Buzz roll</option><option value="foot-splash">Hi-hat foot splash</option></select></label></div>
+              <div className="song-builder-velocity-editor">
+                <div><strong>Velocity lane</strong><label>Voice<select value={velocityVoice} onChange={(event) => setVelocityVoice(event.target.value as SongInstrument)}>{BUILDER_VOICES.map((voice) => <option key={voice} value={voice}>{VOICE_LABEL[voice]}</option>)}</select></label><span>Adjust each hit’s strike strength.</span></div>
+                <div className="song-builder-velocity-lane" aria-label={`${VOICE_LABEL[velocityVoice]} velocity by step`}>
+                  {Array.from({ length: partStepCount(part) }, (_, step) => {
+                    const laneHit = part.hits.find((hit) => hit.instrument === velocityVoice && hit.step === step);
+                    const velocity = laneHit?.velocity ?? (laneHit?.ghost ? 38 : laneHit?.accent ? 118 : 86);
+                    return <label key={step} title={`${VOICE_LABEL[velocityVoice]} step ${step + 1}${laneHit ? ` · velocity ${velocity}` : " · rest"}`} className={laneHit ? "has-hit" : ""}><span>{step + 1}</span><i style={{ height: `${Math.max(4, velocity / 127 * 52)}px` }} /><input aria-label={`${VOICE_LABEL[velocityVoice]} step ${step + 1} velocity`} type="range" min={1} max={127} value={velocity} disabled={!laneHit} onFocus={() => laneHit && setSelectedCell({ instrument: velocityVoice, step })} onChange={(event) => changeVelocity(velocityVoice, step, Number(event.target.value))} /></label>;
+                  })}
+                </div>
+              </div>
+              <div className="song-builder-hit-tools"><span>{selectedHit && selectedCell ? `${VOICE_LABEL[selectedCell.instrument]} · step ${selectedCell.step + 1}` : "Select a hit to edit its dynamics and articulation."}</span><label>Velocity<input type="range" min={1} max={127} value={selectedHit?.velocity ?? (selectedHit?.ghost ? 38 : selectedHit?.accent ? 118 : 86)} disabled={!selectedHit} onChange={(event) => changeSelectedHit((hit) => ({ ...hit, velocity: Number(event.target.value) }))} /></label><label className="song-builder-check"><input type="checkbox" checked={selectedHit?.ghost ?? false} disabled={!selectedHit} onChange={(event) => changeSelectedHit((hit) => ({ ...hit, ghost: event.target.checked }))} /> Ghost note</label><label>Articulation<select value={selectedHit?.articulation ?? "normal"} disabled={!selectedHit} onChange={(event) => setSelectedArticulation(event.target.value as SongHitArticulation)}><option value="normal">Normal</option><option value="flam">Flam</option><option value="drag">Drag</option><option value="buzz">Buzz roll</option><option value="foot-splash">Hi-hat foot splash</option></select></label><label>Sticking<select value={selectedHit?.sticking ?? ""} disabled={!selectedHit} onChange={(event) => changeSelectedHit((hit) => ({ ...hit, sticking: event.target.value ? event.target.value as "R" | "L" : undefined }))}><option value="">None</option><option value="R">Right hand</option><option value="L">Left hand</option></select></label></div>
               <div className="song-builder-actions"><label>Variation<select value={grooveVariation} onChange={(event) => setGrooveVariation(event.target.value as GrooveVariation)}><option value="snare-shift">Shift snare backbeat</option><option value="hat-lift">Add hi-hat offbeats</option><option value="half-time">Half-time feel</option><option value="double-time">Double-time hats</option></select></label><button className="button-secondary" type="button" onClick={createPatternVariation}>Create editable variation</button><button className="button-secondary" type="button" onClick={() => updatePart(part.id, (current) => ({ ...current, hits: [] }))}>Clear pattern</button><button className="button-secondary" type="button" onClick={removePattern}>Remove pattern</button></div>
             </> : <p>Select a clip or add a pattern to edit its notes.</p>}
           </section>
@@ -1120,7 +1512,8 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
             <div><span className="eyebrow">Start from a groove</span><h2>Borrow a pocket.</h2><p>Choose a built-in or saved custom groove or fill. Inserted patterns become independent and editable.</p></div>
             <section className="song-builder-fill-assistant" aria-label="Meter matched fill suggestions">
               <div><strong>Fill assistant · {activeMeter}</strong><span>{part ? `Suggestions placed after “${part.name}” in ${section?.name ?? "this section"}.` : "Choose a pattern to get fills that match its meter."}</span></div>
-              {fillSuggestions.length ? <div className="song-builder-fill-suggestions">{fillSuggestions.map((source) => <button key={source.id} type="button" onClick={() => insertFillTransition(source)}><strong>{source.name}</strong><small>{source.beats} quarter-note beats · {source.subdivision === 12 ? "triplet" : `${source.subdivision}-step`} grid</small></button>)}</div> : <p className="song-builder-hint">{part ? `No saved or built-in fills match ${activeMeter} yet. You can still search and insert any pattern below.` : "Select or add a pattern to see matching fills here."}</p>}
+              <div className="song-builder-fill-tools"><label>Fill length<select value={transitionLength} onChange={(event) => setTransitionLength(event.target.value as typeof transitionLength)}><option value="keep">Keep pattern length</option><option value="one-bar">Trim to one bar</option></select></label><label className="song-builder-check"><input type="checkbox" checked={transitionCrash} onChange={(event) => setTransitionCrash(event.target.checked)} /> Add accented crash ending</label></div>
+              {fillSuggestions.length ? <div className="song-builder-fill-suggestions">{fillSuggestions.map((source) => <article key={source.id}><div><strong>{source.name}</strong><small>{source.beats} quarter-note beats · {source.subdivision === 12 ? "triplet" : `${source.subdivision}-step`} grid</small></div><button type="button" disabled={!part || !['idle', 'finished'].includes(playbackMode)} onClick={() => void previewFillInContext(source)}>Play in context</button><button type="button" onClick={() => insertFillTransition(source)}>Insert fill</button></article>)}</div> : <p className="song-builder-hint">{part ? `No saved or built-in fills match ${activeMeter} yet. You can still search and insert any pattern below.` : "Select or add a pattern to see matching fills here."}</p>}
             </section>
             <div className="song-builder-source-filters"><label>Search grooves<input type="search" value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} placeholder="Rock, shuffle, tom fill…" /></label><label>Show<select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as "all" | "fills")}><option value="all">All grooves and fills</option><option value="fills">Fills and transitions</option></select></label></div>
             <div className="song-builder-source-list">{visibleSources.map((source) => <article key={source.id}><div><strong>{source.name}</strong><small>{source.style} · {source.meter} · {source.defaultBpm} BPM</small><p>{source.description}</p></div><div className="song-builder-source-buttons"><button className={previewSourceId === source.id ? "previewing" : ""} type="button" aria-pressed={previewSourceId === source.id} disabled={!['idle', 'finished'].includes(playbackMode)} onClick={() => void previewSource(source)}>{previewSourceId === source.id ? "Stop preview" : "Preview"}</button><button type="button" onClick={() => insertSource(source)}>Insert</button></div></article>)}{!visibleSources.length && <p>No patterns match that search.</p>}</div>
@@ -1133,6 +1526,12 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
             <div className="song-builder-export-actions"><label>Show<select value={previewScope} onChange={(event) => { setPreviewScope(event.target.value); setPreviewPage(0); }}><option value="song">Full song</option>{song.sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" onClick={() => void exportSheet("png")} disabled={!notationBars.length}>PNG</button><button type="button" onClick={() => void exportSheet("pdf")} disabled={!notationBars.length}>PDF</button><button type="button" onClick={() => void exportSheet("midi")} disabled={!notationBars.length}>MIDI</button><button type="button" onClick={() => void exportSheet("musicxml")} disabled={!notationBars.length}>MusicXML</button><button type="button" onClick={() => void exportSheet("wav")} disabled={!notationBars.length}>WAV audio</button></div>
           </div>
           <div className="song-builder-view-switch" role="group" aria-label="Notation view"><button type="button" aria-pressed={notationView === "tab"} onClick={() => setNotationView("tab")}>Drum tab</button><button type="button" aria-pressed={notationView === "staff"} onClick={() => setNotationView("staff")}>Percussion staff</button><span>{notationView === "tab" ? "K kick · S snare · H hi-hat · T tom · C crash · ◆ accent" : "Kick low · snare center · tom middle · cymbals cross-headed"}</span></div>
+          <div className="song-builder-notation-controls" aria-label="Notation layout controls">
+            <label>Measures per page<select value={builderSettings.notation.barsPerPage} onChange={(event) => changeBuilderSettings((current) => ({ ...current, notation: { ...current.notation, barsPerPage: Number(event.target.value) as 4 | 6 | 8 } }))}><option value={4}>4 · spacious</option><option value={6}>6 · standard</option><option value={8}>8 · compact</option></select></label>
+            <label>Cymbal noteheads<select value={builderSettings.notation.cymbalNoteheads} onChange={(event) => changeBuilderSettings((current) => ({ ...current, notation: { ...current.notation, cymbalNoteheads: event.target.value as "cross" | "diamond" } }))}><option value="cross">Cross</option><option value="diamond">Diamond</option></select></label>
+            <label>Beam grouping<select value={builderSettings.notation.beamGrouping} onChange={(event) => changeBuilderSettings((current) => ({ ...current, notation: { ...current.notation, beamGrouping: event.target.value as typeof current.notation.beamGrouping } }))}><option value="auto">Automatic by grid</option><option value="2">Pairs</option><option value="3">Triplets</option><option value="4">Groups of four</option><option value="off">No beams</option></select></label>
+            <label className="song-builder-check"><input type="checkbox" checked={builderSettings.notation.showSticking} onChange={(event) => changeBuilderSettings((current) => ({ ...current, notation: { ...current.notation, showSticking: event.target.checked } }))} /> Show hand sticking</label>
+          </div>
           <div className="song-builder-sheet-wrap"><div className="song-builder-sheet-frame"><canvas ref={previewCanvasRef} width={SHEET_WIDTH} height={SHEET_HEIGHT} role="img" aria-label={`${song.title}, ${notationView === "tab" ? "drum tab" : "percussion staff"} notation, page ${currentPage + 1} of ${pageCount}`} />{cursorOnPage && <span className="song-builder-sheet-cursor" aria-hidden="true" style={{ left: `${cursorPercent}%` }} />}</div></div>
           {pageCount > 1 && <div className="song-builder-pages"><button type="button" onClick={() => setPreviewPage((current) => Math.max(0, current - 1))} disabled={currentPage === 0}>Previous page</button><span>Page {currentPage + 1} of {pageCount}</span><button type="button" onClick={() => setPreviewPage((current) => Math.min(pageCount - 1, current + 1))} disabled={currentPage === pageCount - 1}>Next page</button></div>}
           <p className="song-builder-status" role="status">{message || `${notationBars.length} measures · ${savedMessage}`}</p>

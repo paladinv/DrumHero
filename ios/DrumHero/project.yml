@@ -1,0 +1,108 @@
+name: DrumHero
+options:
+  bundleIdPrefix: com.codingmonkey
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: targeted
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 1.0
+targets:
+  DrumHero:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: ../../shared/mobile/v1/drum-content.json
+        buildPhase: resources
+      - path: ../../public/audio/drums/kick-1.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/kick-2.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/kick-3.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/kick-4.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/snare-1.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/snare-2.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/snare-3.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/hihat-1.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/hihat-2.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/hihat-3.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/hihat-4.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/tom-1.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/tom-2.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/tom-3.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/crash-1.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/crash-2.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/crash-3.wav
+        buildPhase: resources
+      - path: ../../public/audio/drums/crash-4.wav
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.codingmonkey.drumhero
+        PRODUCT_NAME: DrumHero
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Drum Hero
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    info:
+      path: Info.plist
+      properties:
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    scheme:
+      testTargets:
+        - DrumHeroTests
+        - DrumHeroUITests
+      gatherCoverageData: true
+  DrumHeroTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+      - path: ../../shared/mobile/v1/drum-content.json
+        buildPhase: resources
+      - path: Tests/Fixtures/scoring-fixtures.json
+        buildPhase: resources
+    dependencies:
+      - target: DrumHero
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.codingmonkey.drumhero.tests
+        GENERATE_INFOPLIST_FILE: YES
+  DrumHeroUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: DrumHero
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.codingmonkey.drumhero.uitests
+        GENERATE_INFOPLIST_FILE: YES

@@ -1,7 +1,7 @@
 import type { Groove, SongHitArticulation, SongInstrument } from "./types";
 import type { DrumPart, DrumSong, SongClip, SongSection } from "./song-library";
 
-export type ArrangedHit = { beat: number; fraction: number; instrument: SongInstrument; accent: boolean; velocity: number; ghost: boolean; step: number; articulation?: SongHitArticulation };
+export type ArrangedHit = { beat: number; fraction: number; instrument: SongInstrument; accent: boolean; velocity: number; ghost: boolean; step: number; articulation?: SongHitArticulation; sticking?: "R" | "L" };
 export type ArrangementBar = {
   index: number;
   number: number;
@@ -243,7 +243,7 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               const beat = hit.step * 4 / part.subdivision;
               const localBeat = beat - startBeat;
               if (localBeat < -0.00001 || localBeat >= remaining - 0.00001) return [];
-              return [{ beat: localBeat, fraction: localBeat / (pickup ? remaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, articulation: hit.articulation }];
+              return [{ beat: localBeat, fraction: localBeat / (pickup ? remaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, articulation: hit.articulation, sticking: hit.sticking }];
             });
             bars.push({
               index: bars.length,

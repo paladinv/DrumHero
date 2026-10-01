@@ -8,6 +8,7 @@ export const DEFAULT_MIDI_NOTES: Record<SongInstrument, number> = {
 };
 
 export type SongBuilderKitPreset = { id: string; name: string; mix: DrumMixSettings };
+export type SongBuilderNotationSettings = { barsPerPage: 4 | 6 | 8; cymbalNoteheads: "cross" | "diamond"; showSticking: boolean; beamGrouping: "auto" | "2" | "3" | "4" | "off" };
 export type SongBuilderSettings = {
   mix: DrumMixSettings;
   midiNotes: Record<SongInstrument, number>;
@@ -16,6 +17,7 @@ export type SongBuilderSettings = {
   practiceTempoStep: number;
   midiInputId: string;
   kitPresets: SongBuilderKitPreset[];
+  notation: SongBuilderNotationSettings;
 };
 
 export const DEFAULT_SONG_BUILDER_SETTINGS: SongBuilderSettings = {
@@ -25,7 +27,8 @@ export const DEFAULT_SONG_BUILDER_SETTINGS: SongBuilderSettings = {
   humanizeSeed: 1729,
   practiceTempoStep: 0,
   midiInputId: "",
-  kitPresets: []
+  kitPresets: [],
+  notation: { barsPerPage: 6, cymbalNoteheads: "cross", showSticking: true, beamGrouping: "auto" }
 };
 
 const boundedNumber = (value: unknown, fallback: number, min: number, max: number) =>
@@ -36,15 +39,19 @@ export function normalizeDrumMix(input: unknown): DrumMixSettings {
   const levels = value.levels && typeof value.levels === "object" ? value.levels as Partial<Record<SongInstrument, number>> : {};
   const pan = value.pan && typeof value.pan === "object" ? value.pan as Partial<Record<SongInstrument, number>> : {};
   const sampleIndex = value.sampleIndex && typeof value.sampleIndex === "object" ? value.sampleIndex as Partial<Record<SongInstrument, number>> : {};
+  const muted = value.muted && typeof value.muted === "object" ? value.muted as Partial<Record<SongInstrument, boolean>> : {};
   return {
     levels: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, boundedNumber(levels[voice], DEFAULT_DRUM_MIX.levels[voice], 0, 1)])) as DrumMixSettings["levels"],
     pan: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, boundedNumber(pan[voice], 0, -1, 1)])) as DrumMixSettings["pan"],
-    sampleIndex: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, Math.round(boundedNumber(sampleIndex[voice], 0, 0, voice === "tom" || voice === "rimshot" ? 2 : 3))])) as DrumMixSettings["sampleIndex"]
+    sampleIndex: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, Math.round(boundedNumber(sampleIndex[voice], 0, -1, voice === "tom" || voice === "rimshot" ? 2 : 3))])) as DrumMixSettings["sampleIndex"],
+    muted: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, muted[voice] === true])) as DrumMixSettings["muted"],
+    solo: SONG_INSTRUMENTS.includes(value.solo as SongInstrument) ? value.solo as SongInstrument : ""
   };
 }
 
 export function normalizeSongBuilderSettings(input: unknown): SongBuilderSettings {
   const value = input && typeof input === "object" ? input as Partial<SongBuilderSettings> : {};
+  const rawNotation = value.notation && typeof value.notation === "object" ? value.notation as Partial<SongBuilderNotationSettings> : {};
   const rawMidi = value.midiNotes && typeof value.midiNotes === "object" ? value.midiNotes as Partial<Record<SongInstrument, number>> : {};
   const kitPresets = Array.isArray(value.kitPresets) ? value.kitPresets.flatMap((preset) => {
     if (!preset || typeof preset !== "object" || typeof preset.id !== "string" || typeof preset.name !== "string") return [];
@@ -59,7 +66,13 @@ export function normalizeSongBuilderSettings(input: unknown): SongBuilderSetting
     humanizeSeed: Math.round(boundedNumber(value.humanizeSeed, 1729, 0, 2_147_483_647)),
     practiceTempoStep: Math.round(boundedNumber(value.practiceTempoStep, 0, 0, 12)),
     midiInputId: typeof value.midiInputId === "string" ? value.midiInputId.slice(0, 200) : "",
-    kitPresets
+    kitPresets,
+    notation: {
+      barsPerPage: ([4, 6, 8].includes(rawNotation.barsPerPage ?? 0) ? rawNotation.barsPerPage : 6) as SongBuilderNotationSettings["barsPerPage"],
+      cymbalNoteheads: rawNotation.cymbalNoteheads === "diamond" ? "diamond" : "cross",
+      showSticking: rawNotation.showSticking !== false,
+      beamGrouping: ["auto", "2", "3", "4", "off"].includes(rawNotation.beamGrouping ?? "") ? rawNotation.beamGrouping as SongBuilderNotationSettings["beamGrouping"] : "auto"
+    }
   };
 }
 

@@ -4,16 +4,18 @@ import type { DrumSong } from "./song-library";
 import type { ArrangementBar } from "./song-builder";
 
 export type NotationView = "tab" | "staff";
+export type NotationOptions = { barsPerPage: 4 | 6 | 8; cymbalNoteheads: "cross" | "diamond"; showSticking: boolean; beamGrouping: "auto" | "2" | "3" | "4" | "off" };
 export const BARS_PER_SHEET_PAGE = 6;
 export const SHEET_WIDTH = 1100;
 export const SHEET_HEIGHT = 850;
+export const DEFAULT_NOTATION_OPTIONS: NotationOptions = { barsPerPage: 6, cymbalNoteheads: "cross", showSticking: true, beamGrouping: "auto" };
 
 const ink = "#20211e";
 const muted = "#6e6d67";
 const coral = "#e85348";
 const voiceY: Record<SongInstrument, number> = { crash: -49, ride: -65, openhat: -33, hihat: -17, tom: 0, rimshot: 33, snare: 17, kick: 49 };
 
-export function drawNotationPage(song: DrumSong, bars: ArrangementBar[], view: NotationView, pageIndex: number, cursor?: { barIndex: number; fraction: number } | null) {
+export function drawNotationPage(song: DrumSong, bars: ArrangementBar[], view: NotationView, pageIndex: number, cursor?: { barIndex: number; fraction: number } | null, options: NotationOptions = DEFAULT_NOTATION_OPTIONS) {
   const canvas = document.createElement("canvas");
   canvas.width = SHEET_WIDTH;
   canvas.height = SHEET_HEIGHT;
@@ -36,7 +38,7 @@ export function drawNotationPage(song: DrumSong, bars: ArrangementBar[], view: N
   context.fillText(`Page ${pageIndex + 1}`, SHEET_WIDTH - 54, 132);
   context.textAlign = "left";
 
-  const pageBars = bars.slice(pageIndex * BARS_PER_SHEET_PAGE, (pageIndex + 1) * BARS_PER_SHEET_PAGE);
+  const pageBars = bars.slice(pageIndex * options.barsPerPage, (pageIndex + 1) * options.barsPerPage);
   const left = 130;
   const right = SHEET_WIDTH - 42;
   const width = (right - left) / Math.max(1, pageBars.length);
@@ -103,6 +105,11 @@ export function drawNotationPage(song: DrumSong, bars: ArrangementBar[], view: N
             context.fillStyle = coral;
             context.fillText(label, hitX - 5, y + 8);
           }
+          if (options.showSticking && hit.sticking) {
+            context.font = "700 10px Arial, sans-serif";
+            context.fillStyle = muted;
+            context.fillText(hit.sticking, hitX - 3, y + 40);
+          }
         });
       });
     } else {
@@ -128,13 +135,23 @@ export function drawNotationPage(song: DrumSong, bars: ArrangementBar[], view: N
         context.strokeStyle = ink;
         context.fillStyle = ink;
         if (hit.instrument === "hihat" || hit.instrument === "openhat" || hit.instrument === "crash" || hit.instrument === "ride") {
-          context.lineWidth = 2;
-          context.beginPath();
-          context.moveTo(hitX - 7, hitY - 7);
-          context.lineTo(hitX + 7, hitY + 7);
-          context.moveTo(hitX + 7, hitY - 7);
-          context.lineTo(hitX - 7, hitY + 7);
-          context.stroke();
+          if (options.cymbalNoteheads === "cross") {
+            context.lineWidth = 2;
+            context.beginPath();
+            context.moveTo(hitX - 7, hitY - 7);
+            context.lineTo(hitX + 7, hitY + 7);
+            context.moveTo(hitX + 7, hitY - 7);
+            context.lineTo(hitX - 7, hitY + 7);
+            context.stroke();
+          } else {
+            context.beginPath();
+            context.moveTo(hitX, hitY - 8);
+            context.lineTo(hitX + 7, hitY);
+            context.lineTo(hitX, hitY + 8);
+            context.lineTo(hitX - 7, hitY);
+            context.closePath();
+            context.fill();
+          }
         } else {
           context.beginPath();
           context.ellipse(hitX, hitY, 8, 5.5, -0.25, 0, Math.PI * 2);
@@ -155,10 +172,53 @@ export function drawNotationPage(song: DrumSong, bars: ArrangementBar[], view: N
           context.fillStyle = coral;
           context.fillText(label, hitX - 5, hitY + 19);
         }
+        if (options.showSticking && hit.sticking) {
+          context.font = "700 10px Arial, sans-serif";
+          context.fillStyle = muted;
+          context.fillText(hit.sticking, hitX - 3, hitY + 18);
+        }
       });
+      if (options.beamGrouping !== "off") {
+        const grouping = options.beamGrouping === "auto" ? Math.max(2, Math.round(bar.subdivision / 4)) : Number(options.beamGrouping);
+        const groups = new Map<number, typeof bar.hits>();
+        for (const hit of bar.hits) {
+          const localStep = Math.round(hit.beat * bar.subdivision / 4);
+          const key = Math.floor(localStep / grouping);
+          groups.set(key, [...(groups.get(key) ?? []), hit]);
+        }
+        const beamY = staffTop - 30;
+        for (const group of groups.values()) {
+          const byStep = new Map<number, typeof bar.hits[number]>();
+          group.forEach((hit) => byStep.set(Math.round(hit.beat * bar.subdivision / 4), hit));
+          const steps = [...byStep.keys()].sort((a, b) => a - b);
+          for (let index = 1; index < steps.length; index += 1) {
+            const leftStep = steps[index - 1];
+            const rightStep = steps[index];
+            if (leftStep === undefined || rightStep !== leftStep + 1) continue;
+            const leftHit = byStep.get(leftStep);
+            const rightHit = byStep.get(rightStep);
+            if (!leftHit || !rightHit) continue;
+            const xFor = (hit: typeof leftHit) => x + 14 + hit.fraction * Math.max(1, width - 28) + 7;
+            const yFor = (hit: typeof leftHit) => centerY + voiceY[hit.instrument];
+            context.strokeStyle = ink;
+            context.lineWidth = 1.2;
+            context.beginPath();
+            context.moveTo(xFor(leftHit), yFor(leftHit) - 4);
+            context.lineTo(xFor(leftHit), beamY);
+            context.moveTo(xFor(rightHit), yFor(rightHit) - 4);
+            context.lineTo(xFor(rightHit), beamY);
+            context.stroke();
+            context.lineWidth = 4;
+            context.beginPath();
+            context.moveTo(xFor(leftHit), beamY);
+            context.lineTo(xFor(rightHit), beamY);
+            context.stroke();
+          }
+        }
+      }
       context.fillStyle = muted;
       context.font = "13px Arial, sans-serif";
-        context.fillText("Percussion staff: cymbals use cross noteheads; dynamics show velocity and accents.", 56, 688, 960);
+        context.fillText(`Percussion staff: cymbals use ${options.cymbalNoteheads} noteheads; dynamics show velocity and accents.`, 56, 688, 960);
     }
   }
 
@@ -168,8 +228,8 @@ export function drawNotationPage(song: DrumSong, bars: ArrangementBar[], view: N
   context.moveTo(right, top);
   context.lineTo(right, bottom);
   context.stroke();
-  if (cursor && cursor.barIndex >= pageIndex * BARS_PER_SHEET_PAGE && cursor.barIndex < (pageIndex + 1) * BARS_PER_SHEET_PAGE) {
-    const localBar = cursor.barIndex - pageIndex * BARS_PER_SHEET_PAGE;
+  if (cursor && cursor.barIndex >= pageIndex * options.barsPerPage && cursor.barIndex < (pageIndex + 1) * options.barsPerPage) {
+    const localBar = cursor.barIndex - pageIndex * options.barsPerPage;
     const x = left + localBar * width + 14 + cursor.fraction * Math.max(1, width - 28);
     context.save();
     context.strokeStyle = coral;
@@ -372,8 +432,9 @@ export function arrangementMusicXml(bars: ArrangementBar[], title: string, artis
         const timeModification = notation?.triplet ? "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>" : "";
         const articulation = event.hit.articulation && event.hit.articulation !== "normal"
           ? `<other-notation type="single">${event.hit.articulation}</other-notation>` : "";
-        const dynamics = event.hit.ghost || event.hit.accent || articulation
-          ? `<notations>${event.hit.ghost ? "<technical><other-technical>ghost</other-technical></technical>" : ""}${event.hit.accent ? "<articulations><accent/></articulations>" : ""}${articulation}</notations>` : "";
+        const sticking = event.hit.sticking ? `<technical><fingering>${event.hit.sticking}</fingering></technical>` : "";
+        const dynamics = event.hit.ghost || event.hit.accent || articulation || sticking
+          ? `<notations>${event.hit.ghost ? "<technical><other-technical>ghost</other-technical></technical>" : ""}${sticking}${event.hit.accent ? "<articulations><accent/></articulations>" : ""}${articulation}</notations>` : "";
         body += `<note><unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched><duration>${duration}</duration><instrument id="P1-I${percussionOrder.indexOf(voice) + 1}"/><voice>${lane}</voice>${notation ? `<type>${notation.type}</type>${notation.dotted ? "<dot/>" : ""}` : ""}${timeModification}<stem>up</stem>${notehead}${dynamics}</note>`;
         cursor = event.tick + duration;
       });
@@ -394,7 +455,7 @@ const wavSamplePaths: Record<SongInstrument, string[]> = {
   ride: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`), rimshot: [1, 2, 3].map((take) => `/audio/drums/snare-${take}.wav`)
 };
 
-export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX) {
+export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob>> = {}) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
   const sampleRate = 44_100;
   const totalSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0) + 1;
@@ -405,6 +466,11 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
   const voices = [...new Set(bars.flatMap((bar) => bar.hits.map((hit) => hit.articulation === "foot-splash" ? "openhat" : hit.instrument)))];
   const buffers = new Map<SongInstrument, AudioBuffer>();
   await Promise.all(voices.map(async (voice) => {
+    if (mix.muted[voice] || (mix.solo && mix.solo !== voice)) return;
+    if (mix.sampleIndex[voice] < 0 && customSamples[voice]) {
+      buffers.set(voice, await context.decodeAudioData(await customSamples[voice]!.arrayBuffer()));
+      return;
+    }
     const samplePaths = wavSamplePaths[voice];
     const samplePath = samplePaths[Math.max(0, Math.min(samplePaths.length - 1, mix.sampleIndex[voice] ?? 0))] ?? samplePaths[0];
     const response = await fetch(samplePath);
@@ -412,10 +478,12 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
     buffers.set(voice, await context.decodeAudioData(await response.arrayBuffer()));
   }));
   let startSeconds = 0;
+  let activeOpenHat: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
   for (const bar of bars) {
     const quarterSeconds = 60 / bar.bpm;
     for (const hit of bar.hits) {
       const instrument = hit.articulation === "foot-splash" ? "openhat" : hit.instrument;
+      if (mix.muted[instrument] || (mix.solo && mix.solo !== instrument)) continue;
       const buffer = buffers.get(instrument);
       if (!buffer) continue;
       const gridPosition = hit.step % bar.subdivision;
@@ -430,12 +498,21 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
       for (const [delay, velocityScale] of strikes) {
         const source = context.createBufferSource();
         const gain = context.createGain();
+        const eventAt = Math.max(0, hitAt + delay);
+        if ((instrument === "hihat" || instrument === "openhat") && activeOpenHat) {
+          const previous = activeOpenHat;
+          previous.gain.gain.setValueAtTime(Math.max(0.0001, previous.gain.gain.value), eventAt);
+          previous.gain.gain.linearRampToValueAtTime(0.0001, eventAt + 0.045);
+          try { previous.source.stop(eventAt + 0.05); } catch { /* The sample may already have ended. */ }
+          activeOpenHat = null;
+        }
         source.buffer = buffer;
         gain.gain.value = Math.max(0, Math.min(1, hit.velocity / 127)) * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)) * velocityScale;
         const panner = context.createStereoPanner();
         panner.pan.value = Math.max(-1, Math.min(1, mix.pan[instrument] ?? 0));
         source.connect(gain).connect(panner).connect(context.destination);
-        source.start(Math.max(0, hitAt + delay));
+        source.start(eventAt);
+        if (instrument === "openhat") activeOpenHat = { source, gain };
       }
     }
     startSeconds += bar.beats * quarterSeconds;
@@ -448,7 +525,7 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
   const view = new DataView(wav);
   const writeText = (offset: number, value: string) => [...value].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
   writeText(0, "RIFF"); view.setUint32(4, 36 + dataBytes, true); writeText(8, "WAVE");
-  writeText(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  writeText(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 2, true);
   view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 4, true); view.setUint16(32, 4, true); view.setUint16(34, 16, true);
   writeText(36, "data"); view.setUint32(40, dataBytes, true);
   for (let index = 0; index < leftSamples.length; index += 1) {

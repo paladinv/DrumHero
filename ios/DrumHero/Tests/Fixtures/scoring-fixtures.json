@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    { "id": "DHM-041-great-positive-edge", "offsetMs": 50, "rating": "great" },
+    { "id": "DHM-041-great-negative-edge", "offsetMs": -50, "rating": "great" },
+    { "id": "DHM-041-good-positive-edge", "offsetMs": 100, "rating": "good" },
+    { "id": "DHM-041-good-negative-edge", "offsetMs": -100, "rating": "good" },
+    { "id": "DHM-041-outside-positive-window", "offsetMs": 100.01, "rating": "miss" },
+    { "id": "DHM-041-outside-negative-window", "offsetMs": -100.01, "rating": "miss" }
+  ]
+}

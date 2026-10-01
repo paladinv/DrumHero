@@ -9,10 +9,12 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "mobile:content:export": "node scripts/export-mobile-content.mjs",
+    "mobile:content:validate": "node scripts/validate-mobile-content.mjs",
     "test:watch": "vitest",
     "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test tests/e2e/navigation.spec.ts tests/e2e/learning.spec.ts tests/e2e/practice.spec.ts tests/e2e/trainer.spec.ts tests/e2e/song-library.spec.ts tests/e2e/accessibility.spec.ts --project=chromium --project=webkit --project=mobile-chromium",
     "test:visual": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test tests/e2e/visual.spec.ts --project=chromium",
-    "qa": "npm run lint && npm run typecheck && npm run test && npm run build && npm run test:e2e"
+    "qa": "npm run mobile:content:validate && npm run lint && npm run typecheck && npm run test && npm run build && npm run test:e2e"
   },
   "dependencies": {
     "next": "^16.3.3",

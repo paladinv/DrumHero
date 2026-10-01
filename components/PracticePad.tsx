@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDrumAudio, type DrumAudio } from "@/lib/audio";
+import { createPracticeBass, type PracticeBass } from "@/lib/practice-accompaniment";
 import { patterns } from "@/lib/curriculum";
 import { allSongs, readSongLibrary, recordSongScore, songPartPattern, writeSongLibrary } from "@/lib/song-library";
 import { classifyOffset, findClosestExpected, stepDurationMs, summarizeHits } from "@/lib/scoring";
@@ -35,6 +36,8 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const ratedRef=useRef<RatedHit[]>([]);
   const [lastHit,setLastHit]=useState<RatedHit|null>(null);
   const [audioMessage,setAudioMessage]=useState("Audio begins when you press Start.");
+  const [bassEnabled,setBassEnabled]=useState(false);
+  const [bassMessage,setBassMessage]=useState("");
   const [result,setResult]=useState<SessionResult|null>(null);
   const resultHeadingRef=useRef<HTMLHeadingElement|null>(null);
   const intervalRef=useRef<ReturnType<typeof setInterval>|null>(null);
@@ -43,6 +46,7 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const pauseAtRef=useRef(0);
   const lastStepRef=useRef(-1);
   const audioRef=useRef<DrumAudio|null>(null);
+  const bassRef=useRef<PracticeBass|null>(null);
   const startRequestRef=useRef(0);
   const kitRef=useRef<DrumKitCanvasHandle>(null);
   const {recordSession,progress,setSound}=useProgress();
@@ -64,10 +68,10 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
     if(modeRef.current==="count-in")setMode("playing");
     const stepMs=stepDurationMs(bpm,pattern.subdivision);
     const step=Math.min(totalSteps-1,Math.max(0,Math.floor((now-startAtRef.current)/stepMs)));
-    if(step!==lastStepRef.current){lastStepRef.current=step;setPlayhead(step);if(progress.settings.sound){if(step%(pattern.subdivision/4)===0)audioRef.current?.click(step===0);pattern.hits.filter((hit)=>hit.step===step).forEach((hit)=>audioRef.current?.hit(hit.instrument))}}
+    if(step!==lastStepRef.current){lastStepRef.current=step;setPlayhead(step);const stepsPerBeat=pattern.subdivision/4;const beatInBar=Math.floor(step/stepsPerBeat)%4;if(bassEnabled&&pattern.beats%4===0&&(beatInBar===0||beatInBar===2))bassRef.current?.play(beatInBar===0?"root":"fifth");if(progress.settings.sound){if(step%stepsPerBeat===0)audioRef.current?.click(step===0);pattern.hits.filter((hit)=>hit.step===step).forEach((hit)=>audioRef.current?.hit(hit.instrument))}}
     expectedRef.current.forEach((expected)=>{if(!expected.matched&&now-expected.at>100){expected.matched=true;appendRated({instrument:expected.instrument,rating:"miss",offsetMs:null})}});
     if(now>startAtRef.current+totalSteps*stepMs+125)finish();
-  },[appendRated,bpm,finish,pattern.hits,pattern.subdivision,progress.settings.sound,totalSteps]);
+  },[appendRated,bassEnabled,bpm,finish,pattern.beats,pattern.hits,pattern.subdivision,progress.settings.sound,totalSteps]);
 
   const startClock=useCallback(()=>{clearClock();intervalRef.current=setInterval(()=>tick(),20)},[clearClock,tick]);
 
@@ -76,6 +80,10 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const start=async()=>{
     reset();
     const request=startRequestRef.current;
+    if(bassEnabled){
+      try{bassRef.current??=createPracticeBass();if(!bassRef.current)throw new Error("Web Audio is unavailable.");await bassRef.current.resume();setBassMessage("Bass accompaniment: C and G notes on beats 1 and 3.")}
+      catch{setBassMessage("Bass accompaniment is unavailable in this browser.")}
+    }
     if(!audioRef.current)audioRef.current=createDrumAudio();
     const audio=audioRef.current;
     if(!audio)setAudioMessage("Web Audio is unavailable; visual timing remains active.");
@@ -109,16 +117,16 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
     const onKey=(event:KeyboardEvent)=>{if(event.repeat)return;const item=instruments.find((instrument)=>instrument.code===event.code);if(item){event.preventDefault();hit(item.id)}if(event.code==="KeyF"&&event.altKey){event.preventDefault();void(document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen())}};
     window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
   },[hit]);
-  useEffect(()=>()=>{clearClock();audioRef.current?.close()},[clearClock]);
+  useEffect(()=>()=>{clearClock();audioRef.current?.close();void bassRef.current?.close()},[clearClock]);
   useEffect(()=>{if(result)resultHeadingRef.current?.focus()},[result]);
   useEffect(()=>{window.render_game_to_text=()=>{const nextTarget=expectedRef.current.find((target)=>!target.matched);return JSON.stringify({coordinateSystem:"time flows left to right across numbered steps",mode:modeRef.current,pattern:pattern.name,bpm,playhead,countIn,expectedHits:pattern.hits.length,recordedHits:ratedRef.current.length,lastHit,nextTargetInMs:nextTarget?Math.round(nextTarget.at-performance.now()):null,controls:{kick:"Space",snare:"F",hihat:"J",tom:"K",crash:"L"}})};window.advanceTime=(ms)=>{startAtRef.current-=ms;expectedRef.current.forEach((target)=>{target.at-=ms});tick()};return()=>{delete window.render_game_to_text;delete window.advanceTime}},[bpm,countIn,lastHit,pattern.hits.length,pattern.name,playhead,tick]);
 
   const live=summarizeHits(rated,pattern.id,pattern.name,bpm,"live");
-  const changePattern=(id:string)=>{reset();const next=availablePatterns.find((item)=>item.id===id)??patterns[0];setPatternId(id);setBpm(next.defaultBpm)};
+  const changePattern=(id:string)=>{reset();const next=availablePatterns.find((item)=>item.id===id)??patterns[0];setPatternId(id);setBpm(next.defaultBpm);if(next.beats%4!==0&&bassEnabled){setBassEnabled(false);setBassMessage("Bass accompaniment turned off because this pattern is not in complete 4/4 bars.")}};
   const changeBpm=(value:number)=>{reset();setBpm(Math.min(200,Math.max(40,value)))};
   return <div className="practice-layout">
     <section className="practice-console" aria-label="Practice controls">
-      <div className="practice-controls"><label>Pattern<select value={pattern.id} onChange={(event)=>changePattern(event.target.value)}>{availablePatterns.map((item)=><option value={item.id} key={item.id}>{item.name} · {item.level}</option>)}</select></label><label>Tempo <span>{bpm} BPM</span><input aria-label="Tempo" type="range" min="40" max="200" value={bpm} onChange={(event)=>changeBpm(Number(event.target.value))}/></label><button className="sound-toggle" aria-pressed={progress.settings.sound} onClick={()=>setSound(!progress.settings.sound)}>{progress.settings.sound?"Sound on":"Sound off"}</button></div>
+      <div className="practice-controls"><label>Pattern<select value={pattern.id} onChange={(event)=>changePattern(event.target.value)}>{availablePatterns.map((item)=><option value={item.id} key={item.id}>{item.name} · {item.level}</option>)}</select></label><label>Tempo <span>{bpm} BPM</span><input aria-label="Tempo" type="range" min="40" max="200" value={bpm} onChange={(event)=>changeBpm(Number(event.target.value))}/></label><button className="sound-toggle" aria-pressed={progress.settings.sound} onClick={()=>setSound(!progress.settings.sound)}>{progress.settings.sound?"Sound on":"Sound off"}</button><label className="bass-accompaniment-toggle"><span><input type="checkbox" checked={bassEnabled} disabled={pattern.beats%4!==0} onChange={(event)=>{setBassEnabled(event.target.checked);setBassMessage("")}}/> Add a bass pulse</span><small>{pattern.beats%4===0?"C–G notes on beats 1 and 3 · 4/4 bars":"Available for complete 4/4 bars"}</small>{bassMessage&&<small role="status">{bassMessage}</small>}</label></div>
       <div className="practice-stage">
         <div className="stage-top"><div><span className="label">{pattern.level} · {pattern.subdivision}th notes</span><h2>{pattern.name}</h2></div><div className={`mode-pill mode-${mode}`}>{mode}</div></div>
         <p>{pattern.description}</p>

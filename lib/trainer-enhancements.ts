@@ -1,5 +1,39 @@
 import type { Groove, PracticePattern } from "./types";
 import { parseCustomGrooves } from "./custom-grooves";
+import type { TrainerFeel, TrainerLimbFocus } from "./trainer";
+
+export type TrainerRoutineStep = {
+  patternId: string;
+  bpm: number;
+  repetitions: 4 | 8 | 10 | 16;
+  fillPatternId: string;
+  fillAfterBars: 1 | 2 | 4;
+};
+export type TrainerRoutine = { name: string; steps: TrainerRoutineStep[]; gated: boolean; accuracyTarget: 70 | 80 | 85 | 90 | 95; timingTarget: 25 | 35 | 50 | 75 };
+
+export function parseSavedTrainerRoutine(raw: string | null): TrainerRoutine | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<TrainerRoutine>;
+    const valid = typeof value.name === "string" && value.name.trim().length > 0 && value.name.length <= 50 &&
+      Array.isArray(value.steps) && value.steps.length <= 20 && value.steps.every((step) => Boolean(step &&
+        typeof step.patternId === "string" && step.patternId.length > 0 && step.patternId.length <= 200 &&
+        Number.isInteger(step.bpm) && step.bpm >= 40 && step.bpm <= 220 && repetitions.includes(Number(step.repetitions)) &&
+        typeof step.fillPatternId === "string" && step.fillPatternId.length <= 200 && [1, 2, 4].includes(Number(step.fillAfterBars)))) &&
+      typeof value.gated === "boolean" && [70, 80, 85, 90, 95].includes(Number(value.accuracyTarget)) &&
+      [25, 35, 50, 75].includes(Number(value.timingTarget));
+    if (!valid) return null;
+    return {
+      name: value.name!.trim(),
+      steps: value.steps!.map((step) => ({ ...step })),
+      gated: value.gated!,
+      accuracyTarget: value.accuracyTarget as TrainerRoutine["accuracyTarget"],
+      timingTarget: value.timingTarget as TrainerRoutine["timingTarget"]
+    };
+  } catch {
+    return null;
+  }
+}
 
 export type TrainerSetupTransfer = {
   version: 1;
@@ -29,6 +63,10 @@ export type TrainerSetupTransfer = {
   dynamicsPractice: boolean;
   practicePathId: string;
   customPatterns?: Groove[];
+  feel: TrainerFeel;
+  clickMode: "all" | "backbeat" | "subdivisions" | "sparse-bars";
+  limbFocus: TrainerLimbFocus;
+  customRoutine?: TrainerRoutine;
 };
 
 const repetitions = [4, 8, 10, 16];
@@ -76,9 +114,16 @@ export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<stri
   const rawCustomPatterns = Array.isArray(normalized.customPatterns) ? normalized.customPatterns : [];
   const customPatterns = parseCustomGrooves(JSON.stringify(rawCustomPatterns));
   const validIds = new Set([...validPatternIds, ...customPatterns.map((pattern) => pattern.id)]);
+  const routineValue = normalized.customRoutine;
+  const routineValid = routineValue === undefined || Boolean(routineValue && typeof routineValue.name === "string" && routineValue.name.trim().length > 0 && routineValue.name.length <= 50 &&
+    Array.isArray(routineValue.steps) && routineValue.steps.length <= 20 && typeof routineValue.gated === "boolean" &&
+    [70, 80, 85, 90, 95].includes(Number(routineValue.accuracyTarget)) && [25, 35, 50, 75].includes(Number(routineValue.timingTarget)) &&
+    routineValue.steps.every((step) => Boolean(step && typeof step.patternId === "string" && validIds.has(step.patternId) &&
+      Number.isFinite(step.bpm) && step.bpm >= 40 && step.bpm <= 220 && repetitions.includes(Number(step.repetitions)) &&
+      typeof step.fillPatternId === "string" && (!step.fillPatternId || validIds.has(step.fillPatternId)) && [1, 2, 4].includes(Number(step.fillAfterBars)))));
   const definitionsValid = rawCustomPatterns.length <= 100 && customPatterns.length === rawCustomPatterns.length;
   const valid = value.application === "Drum Hero" && value.type === "trainer-setup" && value.version === 1 &&
-    definitionsValid && typeof value.patternId === "string" && validIds.has(value.patternId) &&
+    definitionsValid && routineValid && typeof value.patternId === "string" && validIds.has(value.patternId) &&
     Number.isFinite(value.bpm) && Number(value.bpm) >= 40 && Number(value.bpm) <= 220 &&
     repetitions.includes(Number(value.repetitions)) && countIns.includes(Number(value.countInBeats)) &&
     (value.trainerMode === "self" || value.trainerMode === "scored") && sources.includes(String(value.source)) && voices.includes(String(value.audioVoice)) &&
@@ -92,8 +137,11 @@ export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<stri
     ["alternating", "paradiddle", "double-strokes"].includes(String(value.handPattern)) &&
     (value.leadHand === "R" || value.leadHand === "L") && ["off", "beats", "subdivisions"].includes(String(value.spokenCount)) &&
     typeof value.dynamicsPractice === "boolean" && typeof value.practicePathId === "string" && value.practicePathId.length <= 100;
-  if (!valid) throw new Error("This Trainer setup is incomplete, unsupported, or refers to patterns that are not in your library.");
-  return { ...normalized, customPatterns } as TrainerSetupTransfer;
+  const extendedValid = valid && ["straight", "shuffle", "laid-back", "shuffle-laid-back"].includes(String(normalized.feel ?? "straight")) &&
+    ["all", "backbeat", "subdivisions", "sparse-bars"].includes(String(normalized.clickMode ?? "all")) &&
+    ["all", "hands", "feet"].includes(String(normalized.limbFocus ?? "all"));
+  if (!extendedValid) throw new Error("This Trainer setup is incomplete, unsupported, or refers to patterns that are not in your library.");
+  return { ...normalized, feel: normalized.feel ?? "straight", clickMode: normalized.clickMode ?? "all", limbFocus: normalized.limbFocus ?? "all", customPatterns } as TrainerSetupTransfer;
 }
 
 export const TRAINER_PRACTICE_PATHS = [

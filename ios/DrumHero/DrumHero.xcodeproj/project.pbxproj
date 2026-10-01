@@ -1,0 +1,741 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		012539B413458CF3CA91AA28 /* PracticeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9081AA73CEF3876A1250C34F /* PracticeController.swift */; };
+		08EF6FB571F617AA51C91AD9 /* ContentAndRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE6910310322362D474F1415 /* ContentAndRulesTests.swift */; };
+		146DB279ADAE9B472C860753 /* drum-content.json in Resources */ = {isa = PBXBuildFile; fileRef = DBD728EB85D6279843D3FC26 /* drum-content.json */; };
+		15AF08FAA0A4966D2161DF38 /* AppViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB51C26C37F04D2313C67EF /* AppViews.swift */; };
+		1612D75F4206F799F6DE7201 /* crash-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = ED9608DFA949B0247EB9807C /* crash-2.wav */; };
+		1A5095A0E0E00352E33992B2 /* snare-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = E6D6C71C393C610A2281D1AA /* snare-2.wav */; };
+		1AF169B65A0C2DED8D7F14A4 /* tom-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = 0FF50045EED5471C472C9A70 /* tom-2.wav */; };
+		1E928BBF32D09B1DE199A587 /* DrumAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 986003818D51DEA41831B39B /* DrumAudioService.swift */; };
+		215A584DAAAC62E8EC1EBDC8 /* ProgressModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD534F67307FF03AC590BBE6 /* ProgressModels.swift */; };
+		2C719A3D90A8BE5B88CCA2A1 /* hihat-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = C232EA11EFFCE0D8211227C0 /* hihat-3.wav */; };
+		32C205E0C80428373F3527AF /* DrumHeroApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B9D8F7E9F2C94FACCD10CF /* DrumHeroApp.swift */; };
+		3B73F4BA441C0954B17A07F3 /* snare-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = 56485AEE933325BF1C6E641A /* snare-3.wav */; };
+		4A85491CB2E1F857EAE34499 /* kick-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = 963146A9B064DD6C66CE9DAB /* kick-2.wav */; };
+		59B9BC75EC47F32B9ADC3259 /* tom-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2645FFC3203E30AC17E5ACFA /* tom-1.wav */; };
+		5E1B86117209D386137606F3 /* MobileContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14796533397D80A0764D83F5 /* MobileContent.swift */; };
+		60583A13731231ECC6AE63C1 /* drum-content.json in Resources */ = {isa = PBXBuildFile; fileRef = DBD728EB85D6279843D3FC26 /* drum-content.json */; };
+		63A60DF3DA71D7DEC8E8533C /* kick-4.wav in Resources */ = {isa = PBXBuildFile; fileRef = 42333159AFB756BAE129EDC6 /* kick-4.wav */; };
+		7F9BCF0761EE365914549AE5 /* kick-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = BD33984B818527B09E1AE8FF /* kick-3.wav */; };
+		841F447B7C39E0E2779881B8 /* crash-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 213E58BBC84B425801048580 /* crash-1.wav */; };
+		95C560B53D52C159DA34E60C /* DrumHeroUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65488FD0266A262D217416E4 /* DrumHeroUITests.swift */; };
+		A3EE70B39E9D3569993F7138 /* scoring-fixtures.json in Resources */ = {isa = PBXBuildFile; fileRef = 2B781A129DD39ADB5E3CBFDF /* scoring-fixtures.json */; };
+		AFF6137BC80CA90B241535B8 /* hihat-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = EB718E07C041D33CF47F674B /* hihat-2.wav */; };
+		BC225EA7E05D6087C3FD0C1A /* crash-4.wav in Resources */ = {isa = PBXBuildFile; fileRef = F98561CFA1432B632F382487 /* crash-4.wav */; };
+		CA5874693558DC1CBAD9DD81 /* kick-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 10951FB54832B2362A51ED78 /* kick-1.wav */; };
+		D23A6DB10104F7143DF09F8D /* hihat-4.wav in Resources */ = {isa = PBXBuildFile; fileRef = ADA7E7983D6DAEE9F52F1ECA /* hihat-4.wav */; };
+		E4C20B42DF10AD1D782D4FFE /* PracticeRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC09AB9F564073DF75777E1 /* PracticeRules.swift */; };
+		E7E8E4C16A4E433FFD075D0A /* snare-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2C6DA55C8C5885E6AEC7145B /* snare-1.wav */; };
+		EC151D23343A2B4B3DD771CE /* crash-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = 7837B2FF748E500D61CAC624 /* crash-3.wav */; };
+		ED462647C4DF6A09B6A1A1B1 /* tom-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = C9438C4A1E0F0C77F4DF9293 /* tom-3.wav */; };
+		F99C17938ECE0CAA2D81AE75 /* hihat-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = D41A0D0BB570C3439EE39E69 /* hihat-1.wav */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		63B34076CD230743A64DCC8B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 19E52DBA21CBA2D4E745276A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2D7C3C381BEBB8E5EB1CF3A4;
+			remoteInfo = DrumHero;
+		};
+		89EB6B9CEE63E80D28FCB40D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 19E52DBA21CBA2D4E745276A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2D7C3C381BEBB8E5EB1CF3A4;
+			remoteInfo = DrumHero;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0FF50045EED5471C472C9A70 /* tom-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "tom-2.wav"; sourceTree = "<group>"; };
+		10951FB54832B2362A51ED78 /* kick-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-1.wav"; sourceTree = "<group>"; };
+		14796533397D80A0764D83F5 /* MobileContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileContent.swift; sourceTree = "<group>"; };
+		1CB51C26C37F04D2313C67EF /* AppViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViews.swift; sourceTree = "<group>"; };
+		213E58BBC84B425801048580 /* crash-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-1.wav"; sourceTree = "<group>"; };
+		2645FFC3203E30AC17E5ACFA /* tom-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "tom-1.wav"; sourceTree = "<group>"; };
+		2B781A129DD39ADB5E3CBFDF /* scoring-fixtures.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "scoring-fixtures.json"; sourceTree = "<group>"; };
+		2C6DA55C8C5885E6AEC7145B /* snare-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "snare-1.wav"; sourceTree = "<group>"; };
+		32B9D8F7E9F2C94FACCD10CF /* DrumHeroApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumHeroApp.swift; sourceTree = "<group>"; };
+		42333159AFB756BAE129EDC6 /* kick-4.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-4.wav"; sourceTree = "<group>"; };
+		56485AEE933325BF1C6E641A /* snare-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "snare-3.wav"; sourceTree = "<group>"; };
+		65488FD0266A262D217416E4 /* DrumHeroUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumHeroUITests.swift; sourceTree = "<group>"; };
+		7837B2FF748E500D61CAC624 /* crash-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-3.wav"; sourceTree = "<group>"; };
+		7A9C0C4272CDD94C746096B1 /* DrumHero.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DrumHero.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9081AA73CEF3876A1250C34F /* PracticeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeController.swift; sourceTree = "<group>"; };
+		963146A9B064DD6C66CE9DAB /* kick-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-2.wav"; sourceTree = "<group>"; };
+		986003818D51DEA41831B39B /* DrumAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumAudioService.swift; sourceTree = "<group>"; };
+		9E311DC9729E35D37A8EA12F /* DrumHeroTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DrumHeroTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		ADA7E7983D6DAEE9F52F1ECA /* hihat-4.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-4.wav"; sourceTree = "<group>"; };
+		BD33984B818527B09E1AE8FF /* kick-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-3.wav"; sourceTree = "<group>"; };
+		C232EA11EFFCE0D8211227C0 /* hihat-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-3.wav"; sourceTree = "<group>"; };
+		C9438C4A1E0F0C77F4DF9293 /* tom-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "tom-3.wav"; sourceTree = "<group>"; };
+		CE6910310322362D474F1415 /* ContentAndRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentAndRulesTests.swift; sourceTree = "<group>"; };
+		D41A0D0BB570C3439EE39E69 /* hihat-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-1.wav"; sourceTree = "<group>"; };
+		DBD728EB85D6279843D3FC26 /* drum-content.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "drum-content.json"; sourceTree = "<group>"; };
+		E16127B2232B67C07393736E /* DrumHeroUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DrumHeroUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E6D6C71C393C610A2281D1AA /* snare-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "snare-2.wav"; sourceTree = "<group>"; };
+		EB718E07C041D33CF47F674B /* hihat-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-2.wav"; sourceTree = "<group>"; };
+		ED9608DFA949B0247EB9807C /* crash-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-2.wav"; sourceTree = "<group>"; };
+		F98561CFA1432B632F382487 /* crash-4.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-4.wav"; sourceTree = "<group>"; };
+		FBC09AB9F564073DF75777E1 /* PracticeRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeRules.swift; sourceTree = "<group>"; };
+		FD534F67307FF03AC590BBE6 /* ProgressModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressModels.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0FC305280093F8CAF48F16AF /* v1 */ = {
+			isa = PBXGroup;
+			children = (
+				DBD728EB85D6279843D3FC26 /* drum-content.json */,
+			);
+			path = v1;
+			sourceTree = "<group>";
+		};
+		21E7CF4B9F9C97C71D3130A5 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				32B9D8F7E9F2C94FACCD10CF /* DrumHeroApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		27FC21438D8054D2E1CCFF45 /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				2B781A129DD39ADB5E3CBFDF /* scoring-fixtures.json */,
+			);
+			path = Fixtures;
+			sourceTree = "<group>";
+		};
+		36F473820AB9CE52BC642FB5 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				1CB51C26C37F04D2313C67EF /* AppViews.swift */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		4479CEA65E564D9250206A54 /* Drum Hero */ = {
+			isa = PBXGroup;
+			children = (
+				D5421C9493F3E4D6488AC516 /* public */,
+				6FEB9C3267798E195F519317 /* shared */,
+			);
+			name = "Drum Hero";
+			path = ../..;
+			sourceTree = "<group>";
+		};
+		480C225A53FEF3FD5381E590 /* drums */ = {
+			isa = PBXGroup;
+			children = (
+				213E58BBC84B425801048580 /* crash-1.wav */,
+				ED9608DFA949B0247EB9807C /* crash-2.wav */,
+				7837B2FF748E500D61CAC624 /* crash-3.wav */,
+				F98561CFA1432B632F382487 /* crash-4.wav */,
+				D41A0D0BB570C3439EE39E69 /* hihat-1.wav */,
+				EB718E07C041D33CF47F674B /* hihat-2.wav */,
+				C232EA11EFFCE0D8211227C0 /* hihat-3.wav */,
+				ADA7E7983D6DAEE9F52F1ECA /* hihat-4.wav */,
+				10951FB54832B2362A51ED78 /* kick-1.wav */,
+				963146A9B064DD6C66CE9DAB /* kick-2.wav */,
+				BD33984B818527B09E1AE8FF /* kick-3.wav */,
+				42333159AFB756BAE129EDC6 /* kick-4.wav */,
+				2C6DA55C8C5885E6AEC7145B /* snare-1.wav */,
+				E6D6C71C393C610A2281D1AA /* snare-2.wav */,
+				56485AEE933325BF1C6E641A /* snare-3.wav */,
+				2645FFC3203E30AC17E5ACFA /* tom-1.wav */,
+				0FF50045EED5471C472C9A70 /* tom-2.wav */,
+				C9438C4A1E0F0C77F4DF9293 /* tom-3.wav */,
+			);
+			path = drums;
+			sourceTree = "<group>";
+		};
+		580D78CD6AAEA14DB73941D8 = {
+			isa = PBXGroup;
+			children = (
+				4479CEA65E564D9250206A54 /* Drum Hero */,
+				77BB3C023776B8EBB2C4A199 /* Sources */,
+				F8F3372B38FAE1210F7E5F43 /* Tests */,
+				9B9D538749870C08E9681F3F /* UITests */,
+				88083506ACCC789EEA95A89D /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		6A9AA52B8B86E0A449D889C0 /* mobile */ = {
+			isa = PBXGroup;
+			children = (
+				0FC305280093F8CAF48F16AF /* v1 */,
+			);
+			path = mobile;
+			sourceTree = "<group>";
+		};
+		6FEB9C3267798E195F519317 /* shared */ = {
+			isa = PBXGroup;
+			children = (
+				6A9AA52B8B86E0A449D889C0 /* mobile */,
+			);
+			path = shared;
+			sourceTree = "<group>";
+		};
+		77BB3C023776B8EBB2C4A199 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				21E7CF4B9F9C97C71D3130A5 /* App */,
+				9F13E6302C43F4F395D38AF7 /* Data */,
+				C37B37BA26D1977DDA9832A6 /* Domain */,
+				36F473820AB9CE52BC642FB5 /* Features */,
+				85781D7CE197799309D43E7B /* Services */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		85781D7CE197799309D43E7B /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				986003818D51DEA41831B39B /* DrumAudioService.swift */,
+				9081AA73CEF3876A1250C34F /* PracticeController.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		88083506ACCC789EEA95A89D /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7A9C0C4272CDD94C746096B1 /* DrumHero.app */,
+				9E311DC9729E35D37A8EA12F /* DrumHeroTests.xctest */,
+				E16127B2232B67C07393736E /* DrumHeroUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9B9D538749870C08E9681F3F /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				65488FD0266A262D217416E4 /* DrumHeroUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		9F13E6302C43F4F395D38AF7 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				FD534F67307FF03AC590BBE6 /* ProgressModels.swift */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		BBE4DC5C7809288C69D758C7 /* audio */ = {
+			isa = PBXGroup;
+			children = (
+				480C225A53FEF3FD5381E590 /* drums */,
+			);
+			path = audio;
+			sourceTree = "<group>";
+		};
+		C37B37BA26D1977DDA9832A6 /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+				14796533397D80A0764D83F5 /* MobileContent.swift */,
+				FBC09AB9F564073DF75777E1 /* PracticeRules.swift */,
+			);
+			path = Domain;
+			sourceTree = "<group>";
+		};
+		D5421C9493F3E4D6488AC516 /* public */ = {
+			isa = PBXGroup;
+			children = (
+				BBE4DC5C7809288C69D758C7 /* audio */,
+			);
+			path = public;
+			sourceTree = "<group>";
+		};
+		F8F3372B38FAE1210F7E5F43 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				CE6910310322362D474F1415 /* ContentAndRulesTests.swift */,
+				27FC21438D8054D2E1CCFF45 /* Fixtures */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2D7C3C381BEBB8E5EB1CF3A4 /* DrumHero */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A263B238531BF8E06573B966 /* Build configuration list for PBXNativeTarget "DrumHero" */;
+			buildPhases = (
+				DF3B22BD5B251669A7C7362D /* Sources */,
+				6F9E5BD1AAED038FAAB8D32F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DrumHero;
+			packageProductDependencies = (
+			);
+			productName = DrumHero;
+			productReference = 7A9C0C4272CDD94C746096B1 /* DrumHero.app */;
+			productType = "com.apple.product-type.application";
+		};
+		34135AFAFF3F6DB3309E9FA3 /* DrumHeroTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EF465C1CC481D6283FF62AE2 /* Build configuration list for PBXNativeTarget "DrumHeroTests" */;
+			buildPhases = (
+				28469C81C2DD6CB087BCD455 /* Sources */,
+				A4AB26FA83B4D0045D20060D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A8AA7DAF4C01D5C4D64B82FE /* PBXTargetDependency */,
+			);
+			name = DrumHeroTests;
+			packageProductDependencies = (
+			);
+			productName = DrumHeroTests;
+			productReference = 9E311DC9729E35D37A8EA12F /* DrumHeroTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C44F9AD5FE87B986FAC0A84F /* DrumHeroUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 50ECB79CEB49BC5004ED8CFC /* Build configuration list for PBXNativeTarget "DrumHeroUITests" */;
+			buildPhases = (
+				5636BF2F588D83C3705AE0E3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7B99D2A3C5080E5F9FC05FE1 /* PBXTargetDependency */,
+			);
+			name = DrumHeroUITests;
+			packageProductDependencies = (
+			);
+			productName = DrumHeroUITests;
+			productReference = E16127B2232B67C07393736E /* DrumHeroUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		19E52DBA21CBA2D4E745276A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					2D7C3C381BEBB8E5EB1CF3A4 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					34135AFAFF3F6DB3309E9FA3 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					C44F9AD5FE87B986FAC0A84F = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+						TestTargetID = 2D7C3C381BEBB8E5EB1CF3A4;
+					};
+				};
+			};
+			buildConfigurationList = 58E20D44003B764057A4F569 /* Build configuration list for PBXProject "DrumHero" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 580D78CD6AAEA14DB73941D8;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 88083506ACCC789EEA95A89D /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2D7C3C381BEBB8E5EB1CF3A4 /* DrumHero */,
+				34135AFAFF3F6DB3309E9FA3 /* DrumHeroTests */,
+				C44F9AD5FE87B986FAC0A84F /* DrumHeroUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		6F9E5BD1AAED038FAAB8D32F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				841F447B7C39E0E2779881B8 /* crash-1.wav in Resources */,
+				1612D75F4206F799F6DE7201 /* crash-2.wav in Resources */,
+				EC151D23343A2B4B3DD771CE /* crash-3.wav in Resources */,
+				BC225EA7E05D6087C3FD0C1A /* crash-4.wav in Resources */,
+				146DB279ADAE9B472C860753 /* drum-content.json in Resources */,
+				F99C17938ECE0CAA2D81AE75 /* hihat-1.wav in Resources */,
+				AFF6137BC80CA90B241535B8 /* hihat-2.wav in Resources */,
+				2C719A3D90A8BE5B88CCA2A1 /* hihat-3.wav in Resources */,
+				D23A6DB10104F7143DF09F8D /* hihat-4.wav in Resources */,
+				CA5874693558DC1CBAD9DD81 /* kick-1.wav in Resources */,
+				4A85491CB2E1F857EAE34499 /* kick-2.wav in Resources */,
+				7F9BCF0761EE365914549AE5 /* kick-3.wav in Resources */,
+				63A60DF3DA71D7DEC8E8533C /* kick-4.wav in Resources */,
+				E7E8E4C16A4E433FFD075D0A /* snare-1.wav in Resources */,
+				1A5095A0E0E00352E33992B2 /* snare-2.wav in Resources */,
+				3B73F4BA441C0954B17A07F3 /* snare-3.wav in Resources */,
+				59B9BC75EC47F32B9ADC3259 /* tom-1.wav in Resources */,
+				1AF169B65A0C2DED8D7F14A4 /* tom-2.wav in Resources */,
+				ED462647C4DF6A09B6A1A1B1 /* tom-3.wav in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A4AB26FA83B4D0045D20060D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				60583A13731231ECC6AE63C1 /* drum-content.json in Resources */,
+				A3EE70B39E9D3569993F7138 /* scoring-fixtures.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		28469C81C2DD6CB087BCD455 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				08EF6FB571F617AA51C91AD9 /* ContentAndRulesTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5636BF2F588D83C3705AE0E3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				95C560B53D52C159DA34E60C /* DrumHeroUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DF3B22BD5B251669A7C7362D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				15AF08FAA0A4966D2161DF38 /* AppViews.swift in Sources */,
+				1E928BBF32D09B1DE199A587 /* DrumAudioService.swift in Sources */,
+				32C205E0C80428373F3527AF /* DrumHeroApp.swift in Sources */,
+				5E1B86117209D386137606F3 /* MobileContent.swift in Sources */,
+				012539B413458CF3CA91AA28 /* PracticeController.swift in Sources */,
+				E4C20B42DF10AD1D782D4FFE /* PracticeRules.swift in Sources */,
+				215A584DAAAC62E8EC1EBDC8 /* ProgressModels.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7B99D2A3C5080E5F9FC05FE1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2D7C3C381BEBB8E5EB1CF3A4 /* DrumHero */;
+			targetProxy = 89EB6B9CEE63E80D28FCB40D /* PBXContainerItemProxy */;
+		};
+		A8AA7DAF4C01D5C4D64B82FE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2D7C3C381BEBB8E5EB1CF3A4 /* DrumHero */;
+			targetProxy = 63B34076CD230743A64DCC8B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		395E9B2636EAB0D5383A47D9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codingmonkey.drumhero.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = DrumHero;
+			};
+			name = Debug;
+		};
+		492F183EF4D0E6BCEE726D79 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = targeted;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		59DB638865051523DA80570F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = targeted;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		7CA1F887F506BFB22EC483B9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codingmonkey.drumhero.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = DrumHero;
+			};
+			name = Release;
+		};
+		A411EBC045FB88FB5A11DFBC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Drum Hero";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codingmonkey.drumhero;
+				PRODUCT_NAME = DrumHero;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B74C96EE8B6AEE4C0CC4DBDE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codingmonkey.drumhero.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DrumHero.app/DrumHero";
+			};
+			name = Debug;
+		};
+		DF5FA6CCFAB3D9A75D5D9E0F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Drum Hero";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codingmonkey.drumhero;
+				PRODUCT_NAME = DrumHero;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E78EB0E7558C154EF69775B2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codingmonkey.drumhero.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DrumHero.app/DrumHero";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		50ECB79CEB49BC5004ED8CFC /* Build configuration list for PBXNativeTarget "DrumHeroUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				395E9B2636EAB0D5383A47D9 /* Debug */,
+				7CA1F887F506BFB22EC483B9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		58E20D44003B764057A4F569 /* Build configuration list for PBXProject "DrumHero" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				492F183EF4D0E6BCEE726D79 /* Debug */,
+				59DB638865051523DA80570F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A263B238531BF8E06573B966 /* Build configuration list for PBXNativeTarget "DrumHero" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A411EBC045FB88FB5A11DFBC /* Debug */,
+				DF5FA6CCFAB3D9A75D5D9E0F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EF465C1CC481D6283FF62AE2 /* Build configuration list for PBXNativeTarget "DrumHeroTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B74C96EE8B6AEE4C0CC4DBDE /* Debug */,
+				E78EB0E7558C154EF69775B2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 19E52DBA21CBA2D4E745276A /* Project object */;
+}
