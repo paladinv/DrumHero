@@ -3,6 +3,16 @@ import type { Instrument } from "./types";
 export type AudioDetection = { instrument: Instrument | null; confidence: number; peak: number; rms: number };
 export type DrumFeatures = [number, number, number, number, number];
 export type AudioTemplates = Partial<Record<Instrument, number[]>>;
+export type AudioDynamicsLevels = { noiseRms?: number; ghostRms?: number; accentRms?: number };
+
+/** Maps a calibrated acoustic strike between ghost-note and accent references to a MIDI-like strength scale. */
+export function estimateAudioVelocity(rms: number, levels?: AudioDynamicsLevels): number | null {
+  const { noiseRms = 0, ghostRms = 0, accentRms = 0 } = levels ?? {};
+  if (![rms, noiseRms, ghostRms, accentRms].every(Number.isFinite) || noiseRms <= 0 || ghostRms <= noiseRms * 1.2 || accentRms <= ghostRms * 1.15 || rms <= noiseRms * 1.35) return null;
+  const log = (value: number) => Math.log(value / noiseRms);
+  const position = (log(rms) - log(ghostRms)) / (log(accentRms) - log(ghostRms));
+  return Math.round(Math.max(1, Math.min(127, 45 + position * 60)));
+}
 
 const bands: Array<[number, number]> = [[30, 90], [90, 250], [250, 1500], [1500, 5000], [5000, 20000]];
 

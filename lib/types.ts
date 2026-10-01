@@ -1,5 +1,8 @@
 export type Level = "Beginner" | "Intermediate" | "Advanced";
 export type Instrument = "kick" | "snare" | "hihat" | "tom" | "crash";
+export type SongInstrument = Instrument | "openhat" | "ride" | "rimshot";
+export type SongHitArticulation = "normal" | "flam" | "drag" | "buzz" | "foot-splash";
+export type SongPartHit = Omit<PatternHit, "instrument"> & { instrument: SongInstrument; velocity?: number; ghost?: boolean; articulation?: SongHitArticulation };
 
 export type PatternHit = {
   step: number;
@@ -40,6 +43,9 @@ export type RatedHit = {
   offsetMs: number | null;
   velocity?: number;
   accentTarget?: boolean;
+  /** Grid step and repetition identify a weak spot for targeted drills. */
+  step?: number;
+  repetition?: number;
 };
 
 export type SessionResult = {

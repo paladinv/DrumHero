@@ -4,7 +4,7 @@
  * the kit beside other real-world props without a conversion step).
  */
 export const MODEL_SCALE = 1 as const;
-export const DRUM_MODEL_VERSION = "professional-v31" as const;
+export const DRUM_MODEL_VERSION = "professional-v44" as const;
 
 export const DRUM_DIMENSIONS = Object.freeze({
   kick: Object.freeze({ diameter: 0.5588, depth: 0.4572 }), // 22 x 18 in
@@ -23,6 +23,8 @@ export const STICK_DIMENSIONS = Object.freeze({
   diameter: 0.0144,
   tipLength: 0.035,
   tipDiameter: 0.010, // slender teardrop wood tip, not the full shaft diameter
+  gripOffset: 0.055, // wrist pivot to shaft heel
+  contactClearance: 0.012, // tip centre beyond the calibrated surface point
 } as const);
 
 export const HAND_DIMENSIONS = Object.freeze({
@@ -32,6 +34,36 @@ export const HAND_DIMENSIONS = Object.freeze({
   palmDepth: 0.042,
   wristDiameter: 0.038,
   fingerDiameter: 0.012,
+  forearmLength: 0.24,
+  thumbLength: 0.056,
+} as const);
+
+/**
+ * Centre-contact locations for the five playable voices. The procedural kit
+ * and the bundled CC0 component kit have different authored transforms, so
+ * they deliberately keep separate calibrated targets. All units are metres.
+ */
+export const DRUM_CONTACT_POINTS = Object.freeze({
+  procedural: Object.freeze({
+    kick: Object.freeze({ x: 0, y: 0.43, z: 0.495 }),
+    snare: Object.freeze({ x: -0.58, y: 0.852, z: 0.631 }),
+    hihat: Object.freeze({ x: -0.78, y: 1.738, z: 0.622 }),
+    // K/tom maps to the central 12 in rack tom. The floor tom remains a
+    // visible secondary tom, but using it as the sole keyboard target sends
+    // the right-hand stroke to the frame edge in the compact player view.
+    tom: Object.freeze({ x: 0.2, y: 1.136, z: 0.216 }),
+    crash: Object.freeze({ x: -1.2, y: 1.9, z: 0.005 }),
+  }),
+  components: Object.freeze({
+    kick: Object.freeze({ x: 0, y: 0.439, z: 0.066 }),
+    snare: Object.freeze({ x: -0.58, y: 0.756, z: 0.55 }),
+    hihat: Object.freeze({ x: -0.78, y: 1.035, z: 0.782 }),
+    // The bundled bass/rack asset is one non-semantic root. Its central rack
+    // head is the only safe generic tom target; the distinct floor-tom root
+    // remains the bounded visual response object for a tom hit.
+    tom: Object.freeze({ x: -0.02, y: 0.84, z: 0.02 }),
+    crash: Object.freeze({ x: -1.2, y: 1.4, z: 0.447 }),
+  }),
 } as const);
 
 export const KIT_DIMENSION_CHECKS = Object.freeze({

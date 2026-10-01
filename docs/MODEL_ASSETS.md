@@ -1,6 +1,6 @@
 # Drum Hero model assets
 
-The v27 engine keeps the procedural kit as an offline/loading fallback and uses
+The v44 engine keeps the procedural kit as an offline/loading fallback and uses
 the following authored assets when the local files are available. The files are
 bundled under `public/models/drums/` for this app only; they are not exposed as
 separate downloads or redistributed independently.
@@ -16,7 +16,7 @@ separate downloads or redistributed independently.
   are permitted. The source reports 10,172 triangles, five materials, metre
   units, +Y up, and the audience/player side toward +Z.
 
-## FUZE holding hands
+## FUZE holding hands (bundled provenance; not mounted in v41)
 
 - Assets: `public/models/drums/hands/left-hold.glb` and
   `public/models/drums/hands/right-hold.glb`
@@ -35,9 +35,25 @@ separate downloads or redistributed independently.
   and prohibits redistribution outside the project/app scope. Drum Hero keeps
   the files bundled only inside this application in accordance with those terms.
 
-The engine loads these files lazily with Three.js `GLTFLoader`, disposes their
-geometry/material/texture resources on teardown, and retains the procedural
-geometry when a fetch or parse fails (including offline use).
+The assets remain in the repository with this provenance record, but v41 does
+not fetch or mount them. Each source is a single static 694-vertex holding mesh
+with neither forearm geometry nor independently poseable fingers. At the compact
+player size that mesh reads as a detached mitten and cannot maintain an
+anatomically meaningful stick grip while a hand animates to a hit target.
+
+Instead, the engine uses its cached articulated hand rig in both its fallback
+and CC0-component-kit paths: a connected 240 mm tapered forearm, overlapping
+wrist and palm, four individually drawn slim curled fingers, and an opposing
+thumb that crosses the 5A from the anatomical radial side. The stick remains on
+the unchanged animated local +Y shaft, so all calibrated contact targets and
+rebound motion are preserved. The rig reuses the five pre-existing digit draw
+lanes per hand and replaces (rather than layers over) the two static FUZE hand
+meshes; it creates no geometry or materials in the animation loop.
+
+The v33 calibration records separate centre-contact points for the procedural
+fallback and the component assembly in `lib/drum-dimensions.ts`; their authored
+shell/cymbal transforms differ, so a single shared coordinate table would make
+one of the two kits show floating stick hits.
 
 ## v29 studio component kit
 
@@ -69,6 +85,27 @@ authored root groups the kick and both rack toms into one rigid, non-semantic
 object, so moving it on a tom hit would also move the kick. The engine retains
 the exact tom stick contact/rebound and the independently authored floor-tom
 response instead of guessing at an unsafe submesh split.
+
+For v40, a successful component load keeps the existing low-contrast floor
+mesh but sizes and centres it from the measured component-kit bounds. The
+procedural rug and baked kick-contact accent are fallback-only and are hidden
+for the loaded assembly. This removes two visual draws rather than adding scene
+geometry or frame-time work, while retaining a physical ground beneath the
+component stand and floor-tom feet.
+
+For v42, the cloned CC0 crash stand is used as the right-side 20 in ride only
+after a documented 460 mm-to-508 mm scale conversion. It is moved 640 mm
+behind the floor tom, yawed and pitched so its bow does not cover the tom head,
+and its brass material uses a restrained warm emissive contribution to remain
+visible under the compact studio light. The existing cached kick pedal/beater
+and showcase throne are retained in the loaded scene and added to the one-time
+safe-fit bounds; these are not per-frame additions. The five-finger hand rig
+keeps disconnected finger paths but batches them by its two existing materials,
+which preserves gaps while recovering four calls across two hands. In v44 the
+loaded showcase restores the throne as a grounded compact stool: a 0.66 m seat,
+post joined to its underside, and one cached instanced tripod. Its root is 154
+mm behind the measured component-kit rear envelope and it participates in the
+one-time safe-fit bounds; the loaded kick pedal/beater remains visible.
 
 Direct model/source records: [bass/toms GLB](https://cdn.3dassets.dev/assets/33793/v1/model.glb)
 ([source](https://3dassets.dev/assets/music-recording-studio-and-instruments-drum-kick-with--51472592)),

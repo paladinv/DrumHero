@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { CUSTOM_GROOVES_EVENT, parseCustomGrooves, readCustomGrooves, writeCustomGrooves } from "@/lib/custom-grooves";
+import { CUSTOM_GROOVES_EVENT, createCustomGrooveId, parseCustomGrooves, readCustomGrooves, writeCustomGrooves } from "@/lib/custom-grooves";
+import { canUseFillPractice, compatibleFillPatterns, createGrooveFillTransition } from "@/lib/fill-practice";
 import type { Groove, Instrument, PatternHit, Rudiment } from "@/lib/types";
 
 const voices: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
@@ -19,6 +20,12 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
   const [subdivision, setSubdivision] = useState<8 | 16>(8);
   const [hits, setHits] = useState<PatternHit[]>([]);
   const [builderMessage, setBuilderMessage] = useState("");
+  const [transitionBuilderOpen, setTransitionBuilderOpen] = useState(false);
+  const [transitionGrooveId, setTransitionGrooveId] = useState(() => items.find(canUseFillPractice)?.id ?? "");
+  const [transitionFillId, setTransitionFillId] = useState("");
+  const [transitionBars, setTransitionBars] = useState(2);
+  const [transitionName, setTransitionName] = useState("");
+  const [transitionMessage, setTransitionMessage] = useState("");
 
   useEffect(() => {
     const load = () => setCustomGrooves(readCustomGrooves());
@@ -28,6 +35,10 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
   }, []);
 
   const libraryItems = useMemo(() => kind === "groove" ? [...items, ...customGrooves] : items, [customGrooves, items, kind]);
+  const transitionGrooves = useMemo(() => libraryItems.filter((item) => canUseFillPractice(item) && compatibleFillPatterns(item, items).length > 0), [items, libraryItems]);
+  const selectedTransitionGroove = transitionGrooves.find((item) => item.id === transitionGrooveId) ?? transitionGrooves[0];
+  const transitionFills = selectedTransitionGroove ? compatibleFillPatterns(selectedTransitionGroove, items) : [];
+  const selectedTransitionFill = transitionFills.find((item) => item.id === transitionFillId) ?? transitionFills[0];
   const styles = useMemo(() => [...new Set(libraryItems.flatMap((item) => "style" in item ? [item.style] : []))].sort(), [libraryItems]);
   const [styleFilter, setStyleFilter] = useState("All");
   const filtered = useMemo(() => libraryItems.filter((item) =>
@@ -48,7 +59,7 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
     if (!title) { setBuilderMessage("Add a name before saving your groove."); return; }
     if (!hits.length) { setBuilderMessage("Add at least one drum hit to the pattern."); return; }
     const levelForPattern = subdivision === 16 || hits.length > 18 ? "Advanced" : hits.length > 10 ? "Intermediate" : "Beginner";
-    const id = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const id = createCustomGrooveId();
     const next: Groove = {
       id,
       name: title,
@@ -75,14 +86,24 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
     if (writeCustomGrooves(updated)) setCustomGrooves(updated);
   };
 
+  const saveTransition = () => {
+    if (!selectedTransitionGroove || !selectedTransitionFill) { setTransitionMessage("Choose a groove and a compatible fill first."); return; }
+    const id = createCustomGrooveId();
+    const transition = createGrooveFillTransition(selectedTransitionGroove, selectedTransitionFill, transitionBars, id, transitionName);
+    if (!transition) { setTransitionMessage("That groove and fill cannot be combined on the same timing grid."); return; }
+    const updated = [...customGrooves, transition].slice(-100);
+    if (!writeCustomGrooves(updated)) { setTransitionMessage("Could not save this transition in browser storage."); return; }
+    setCustomGrooves(updated); setLevel("All"); setStyleFilter("All"); setQuery(""); setTransitionName(""); setTransitionMessage("Saved. The transition is now available in the Trainer and Practice Pad.");
+  };
+
   return <>
     <section className="groove-library-tools" aria-label={`${kind} library filters`}>
-      <div><span className="eyebrow">{kind === "groove" ? `${libraryItems.length} grooves · ${customGrooves.length} custom` : "Technique library"}</span><h2>{kind === "groove" ? "Choose a pocket." : "Choose a rudiment."}</h2></div>
+      <div><span className="eyebrow">{kind === "groove" ? `${libraryItems.length} patterns · ${customGrooves.length} custom` : "Technique library"}</span><h2>{kind === "groove" ? "Choose a groove or fill." : "Choose a rudiment."}</h2></div>
       <div className="groove-library-filters">
-        <label>Search<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === "groove" ? "Try funk, shuffle, odd meter…" : "Find a rudiment…"} /></label>
+        <label>Search<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === "groove" ? "Try funk, shuffle, fill, odd meter…" : "Find a rudiment…"} /></label>
         <label>Level<select value={level} onChange={(event) => setLevel(event.target.value)}><option>All</option><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label>
         {kind === "groove" && <label>Style<select value={styleFilter} onChange={(event) => setStyleFilter(event.target.value)}><option>All</option>{styles.map((item) => <option key={item}>{item}</option>)}</select></label>}
-        {kind === "groove" && <button type="button" className="button" onClick={() => setBuilderOpen((open) => !open)}>{builderOpen ? "Close builder" : "Create a groove"}</button>}
+        {kind === "groove" && <><button type="button" className="button" onClick={() => setBuilderOpen((open) => !open)}>{builderOpen ? "Close groove builder" : "Create a groove"}</button><button type="button" className="button-secondary" onClick={() => setTransitionBuilderOpen((open) => !open)}>{transitionBuilderOpen ? "Close transition builder" : "Build a groove + fill"}</button></>}
       </div>
     </section>
     {kind === "groove" && <p className="groove-key" aria-label="Pattern key"><strong>Read each step:</strong> K kick · S snare · H hi-hat guide · T tom · C crash · + simultaneous hits · A accent. In the custom builder, cycle each cell through rest, hit, and accent.</p>}
@@ -100,6 +121,20 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
       <p className="custom-groove-guidance">Difficulty is estimated from the step density and subdivision. Use accents to create a dynamics exercise.</p>
       <div className="transport"><button className="button" type="button" onClick={saveCustomGroove}>Save groove</button><button className="button-secondary" type="button" onClick={() => { setHits([]); setBuilderMessage(""); }}>Clear steps</button></div>
       {builderMessage && <p role="status">{builderMessage}</p>}
+    </section>}
+    {kind === "groove" && transitionBuilderOpen && <section className="card custom-groove-builder" aria-label="Groove and fill transition builder">
+      <div><span className="eyebrow">Phrase builder</span><h2>Practice a groove into a fill.</h2><p>Choose a compatible 4/4 groove and fill on the same timing grid. The transition repeats as one phrase and is saved with your custom patterns.</p></div>
+      {transitionGrooves.length ? <>
+        <div className="custom-groove-fields">
+          <label>Groove<select value={selectedTransitionGroove?.id ?? ""} onChange={(event) => { setTransitionGrooveId(event.target.value); const nextGroove = transitionGrooves.find((item) => item.id === event.target.value); setTransitionFillId(nextGroove ? compatibleFillPatterns(nextGroove, items)[0]?.id ?? "" : ""); setTransitionMessage(""); }}>{transitionGrooves.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>Fill<select value={selectedTransitionFill?.id ?? ""} onChange={(event) => { setTransitionFillId(event.target.value); setTransitionMessage(""); }}>{transitionFills.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.level}</option>)}</select></label>
+          <label>Play groove for<select value={transitionBars} onChange={(event) => setTransitionBars(Number(event.target.value))}><option value={1}>1 bar, then fill</option><option value={2}>2 bars, then fill</option><option value={4}>4 bars, then fill</option></select></label>
+          <label>Transition name<input maxLength={60} value={transitionName} onChange={(event) => setTransitionName(event.target.value)} placeholder={`${selectedTransitionGroove?.name ?? "Groove"} + fill`} /></label>
+        </div>
+        <p className="custom-groove-guidance">The phrase is {transitionBars + 1} bars long. Accent, subdivision, and tempo controls remain available in the Trainer.</p>
+        <button type="button" className="button" onClick={saveTransition}>Save transition</button>
+      </> : <p>No compatible 4/4 groove and fill pairs are available on the same grid.</p>}
+      {transitionMessage && <p role="status">{transitionMessage}</p>}
     </section>}
     {filtered.length ? <section className="card-grid" aria-label={`${kind} patterns`}>{filtered.map((item) => {
       const cells = Math.round(item.beats * (item.subdivision / 4));

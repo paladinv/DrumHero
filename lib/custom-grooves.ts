@@ -4,6 +4,13 @@ export const CUSTOM_GROOVES_KEY = "drum-hero:custom-grooves:v1";
 export const CUSTOM_GROOVES_EVENT = "drum-hero:custom-grooves-change";
 const voices: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
 
+export function createCustomGrooveId() {
+  const token = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  return `custom-${token}`;
+}
+
 export function parseCustomGrooves(raw: string | null): Groove[] {
   if (!raw) return [];
   try {
@@ -18,7 +25,7 @@ export function parseCustomGrooves(raw: string | null): Groove[] {
           typeof candidate.name !== "string" || !candidate.name.trim() || candidate.name.length > 60 ||
           typeof candidate.description !== "string" || typeof candidate.style !== "string" ||
           typeof candidate.focus !== "string" || ![4, 8, 12, 16].includes(candidate.subdivision ?? 0) ||
-          !Number.isFinite(candidate.beats) || candidate.beats! <= 0 || !Number.isInteger(cells) || cells > 64 ||
+          !Number.isFinite(candidate.beats) || candidate.beats! <= 0 || !Number.isInteger(cells) || cells > 80 ||
           !["Beginner", "Intermediate", "Advanced"].includes(candidate.level ?? "") ||
           !Number.isFinite(candidate.defaultBpm) || candidate.defaultBpm! < 40 || candidate.defaultBpm! > 200 ||
           !Array.isArray(candidate.hits) || candidate.hits.length > 128) return [];
