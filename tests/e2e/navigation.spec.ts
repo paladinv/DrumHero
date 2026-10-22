@@ -6,7 +6,7 @@ const routes:[string,RegExp][]=[
 ];
 
 test.describe("primary navigation",()=>{
-  for(const [route,heading] of routes)test(`${route} renders meaningful content`,async({page})=>{
+  for(const [route,heading] of routes)test(`${route} renders meaningful content`,{tag:"@smoke"},async({page})=>{
     const errors:string[]=[];page.on("console",(message)=>{if(message.type()==="error")errors.push(message.text())});page.on("pageerror",(error)=>errors.push(error.message));
     await page.goto(route);await expect(page.getByRole("heading",{level:1})).toContainText(heading);await expect(page.locator("main")).toBeVisible();expect(errors).toEqual([]);
   });

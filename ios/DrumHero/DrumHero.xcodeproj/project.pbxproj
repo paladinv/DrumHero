@@ -14,6 +14,7 @@
 		1612D75F4206F799F6DE7201 /* crash-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = ED9608DFA949B0247EB9807C /* crash-2.wav */; };
 		1A5095A0E0E00352E33992B2 /* snare-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = E6D6C71C393C610A2281D1AA /* snare-2.wav */; };
 		1AF169B65A0C2DED8D7F14A4 /* tom-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = 0FF50045EED5471C472C9A70 /* tom-2.wav */; };
+		1E3EC8B645F519CB468CA9BF /* LanguageSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 633529DA00ED2DDA14E09B38 /* LanguageSettings.swift */; };
 		1E928BBF32D09B1DE199A587 /* DrumAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 986003818D51DEA41831B39B /* DrumAudioService.swift */; };
 		215A584DAAAC62E8EC1EBDC8 /* ProgressModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD534F67307FF03AC590BBE6 /* ProgressModels.swift */; };
 		2C719A3D90A8BE5B88CCA2A1 /* hihat-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = C232EA11EFFCE0D8211227C0 /* hihat-3.wav */; };
@@ -36,6 +37,7 @@
 		E7E8E4C16A4E433FFD075D0A /* snare-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2C6DA55C8C5885E6AEC7145B /* snare-1.wav */; };
 		EC151D23343A2B4B3DD771CE /* crash-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = 7837B2FF748E500D61CAC624 /* crash-3.wav */; };
 		ED462647C4DF6A09B6A1A1B1 /* tom-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = C9438C4A1E0F0C77F4DF9293 /* tom-3.wav */; };
+		EE136FDF72DB13F49926B292 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = E51BE47FE2FFF3A7FFF7C981 /* Localizable.xcstrings */; };
 		F99C17938ECE0CAA2D81AE75 /* hihat-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = D41A0D0BB570C3439EE39E69 /* hihat-1.wav */; };
 /* End PBXBuildFile section */
 
@@ -68,6 +70,7 @@
 		32B9D8F7E9F2C94FACCD10CF /* DrumHeroApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumHeroApp.swift; sourceTree = "<group>"; };
 		42333159AFB756BAE129EDC6 /* kick-4.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-4.wav"; sourceTree = "<group>"; };
 		56485AEE933325BF1C6E641A /* snare-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "snare-3.wav"; sourceTree = "<group>"; };
+		633529DA00ED2DDA14E09B38 /* LanguageSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageSettings.swift; sourceTree = "<group>"; };
 		65488FD0266A262D217416E4 /* DrumHeroUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumHeroUITests.swift; sourceTree = "<group>"; };
 		7837B2FF748E500D61CAC624 /* crash-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-3.wav"; sourceTree = "<group>"; };
 		7A9C0C4272CDD94C746096B1 /* DrumHero.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DrumHero.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -83,6 +86,7 @@
 		D41A0D0BB570C3439EE39E69 /* hihat-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-1.wav"; sourceTree = "<group>"; };
 		DBD728EB85D6279843D3FC26 /* drum-content.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "drum-content.json"; sourceTree = "<group>"; };
 		E16127B2232B67C07393736E /* DrumHeroUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DrumHeroUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E51BE47FE2FFF3A7FFF7C981 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		E6D6C71C393C610A2281D1AA /* snare-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "snare-2.wav"; sourceTree = "<group>"; };
 		EB718E07C041D33CF47F674B /* hihat-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-2.wav"; sourceTree = "<group>"; };
 		ED9608DFA949B0247EB9807C /* crash-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-2.wav"; sourceTree = "<group>"; };
@@ -120,6 +124,7 @@
 			isa = PBXGroup;
 			children = (
 				1CB51C26C37F04D2313C67EF /* AppViews.swift */,
+				633529DA00ED2DDA14E09B38 /* LanguageSettings.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -193,6 +198,7 @@
 				9F13E6302C43F4F395D38AF7 /* Data */,
 				C37B37BA26D1977DDA9832A6 /* Domain */,
 				36F473820AB9CE52BC642FB5 /* Features */,
+				98FCFD3B8C2DD49BD424FDF9 /* Resources */,
 				85781D7CE197799309D43E7B /* Services */,
 			);
 			path = Sources;
@@ -215,6 +221,14 @@
 				E16127B2232B67C07393736E /* DrumHeroUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		98FCFD3B8C2DD49BD424FDF9 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				E51BE47FE2FFF3A7FFF7C981 /* Localizable.xcstrings */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		9B9D538749870C08E9681F3F /* UITests */ = {
@@ -354,7 +368,30 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				Base,
+				ar,
+				bn,
+				de,
 				en,
+				es,
+				fa,
+				fr,
+				he,
+				hi,
+				id,
+				it,
+				ja,
+				ko,
+				nl,
+				pl,
+				"pt-BR",
+				ru,
+				th,
+				tr,
+				uk,
+				ur,
+				vi,
+				"zh-Hans",
+				"zh-Hant",
 			);
 			mainGroup = 580D78CD6AAEA14DB73941D8;
 			minimizedProjectReferenceProxies = 1;
@@ -375,6 +412,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EE136FDF72DB13F49926B292 /* Localizable.xcstrings in Resources */,
 				841F447B7C39E0E2779881B8 /* crash-1.wav in Resources */,
 				1612D75F4206F799F6DE7201 /* crash-2.wav in Resources */,
 				EC151D23343A2B4B3DD771CE /* crash-3.wav in Resources */,
@@ -432,6 +470,7 @@
 				15AF08FAA0A4966D2161DF38 /* AppViews.swift in Sources */,
 				1E928BBF32D09B1DE199A587 /* DrumAudioService.swift in Sources */,
 				32C205E0C80428373F3527AF /* DrumHeroApp.swift in Sources */,
+				1E3EC8B645F519CB468CA9BF /* LanguageSettings.swift in Sources */,
 				5E1B86117209D386137606F3 /* MobileContent.swift in Sources */,
 				012539B413458CF3CA91AA28 /* PracticeController.swift in Sources */,
 				E4C20B42DF10AD1D782D4FFE /* PracticeRules.swift in Sources */,

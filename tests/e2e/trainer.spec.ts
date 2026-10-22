@@ -4,6 +4,7 @@ test.beforeEach(async ({ page }) => { await page.goto("/trainer?pattern=single-s
 
 test("self-rated round pauses for each rating and reaches a recap", async ({ page }) => {
   await page.getByRole("button", { name: "Start round" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(window.render_game_to_text?.() ?? "{}").mode)).toBe("count-in");
   for (let index = 0; index < 10; index++) {
     await page.evaluate(() => window.advanceTime?.(9000));
     await expect(page.getByRole("group", { name: "Rate repetition" })).toBeVisible();
@@ -15,9 +16,10 @@ test("self-rated round pauses for each rating and reaches a recap", async ({ pag
   await expect(page.getByText(/Trainer · 70 BPM · 10\/10 clean/)).toBeVisible();
 });
 
-test("scored round supports keyboard input, pause, and reset", async ({ page }) => {
+test("scored round supports keyboard input, pause, and reset", { tag: "@smoke" }, async ({ page }) => {
   await page.getByLabel("Score played hits").check();
   await page.getByRole("button", { name: "Start round" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(window.render_game_to_text?.() ?? "{}").mode)).toBe("count-in");
   await page.evaluate(() => window.advanceTime?.(3500));
   await page.keyboard.press("f");
   await expect(page.locator(".trainer-last-hit")).toContainText(/snare/i);
@@ -34,7 +36,7 @@ test("MIDI and audio input offer a safe fallback", async ({ page }) => {
   await page.getByRole("button", { name: "Connect USB MIDI" }).click();
   await expect(page.getByText(/Web MIDI is unavailable|MIDI access/)).toBeVisible();
   await page.getByLabel("Scored input").selectOption("audio-voices");
-  await expect(page.getByText(/experimental and uncertain hits are ignored/i)).toBeVisible();
+  await expect(page.getByText(/Calibrate each drum voice for reliable classification/i)).toBeVisible();
 });
 
 test("connected MIDI note scores a mapped drum voice", async ({ page }) => {
@@ -49,6 +51,7 @@ test("connected MIDI note scores a mapped drum voice", async ({ page }) => {
   await page.getByRole("button", { name: "Connect USB MIDI" }).click();
   await expect(page.getByText("Test drum kit")).toBeVisible();
   await page.getByRole("button", { name: "Start round" }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(window.render_game_to_text?.() ?? "{}").mode)).toBe("count-in");
   await page.evaluate(() => { const state = JSON.parse(window.render_game_to_text?.() ?? "{}"); window.advanceTime?.(Math.max(0, state.nextTargetInMs ?? 0) + 20); (window as Window & { testMidiHit?: (note: number) => void }).testMidiHit?.(38); });
   await expect(page.locator(".trainer-last-hit")).toContainText(/snare/i);
   await expect(page.getByText(/MIDI note 38 → snare/)).toBeVisible();

@@ -1,5 +1,6 @@
+import { mappedSeconds } from "./song-builder-tools";
 import type { Groove, SongHitArticulation, SongInstrument } from "./types";
-import type { DrumPart, DrumSong, SongClip, SongSection } from "./song-library";
+import type { DrumPart, DrumSong, SongArrangementAutomationPoint, SongClip, SongClipOverrides, SongFeel, SongSection, SongSectionAutomation } from "./song-library";
 
 export type ArrangedHit = { beat: number; fraction: number; instrument: SongInstrument; accent: boolean; velocity: number; ghost: boolean; step: number; articulation?: SongHitArticulation; sticking?: "R" | "L" };
 export type ArrangementBar = {
@@ -8,11 +9,25 @@ export type ArrangementBar = {
   sectionId: string;
   sectionName: string;
   sectionKind: SongSection["kind"];
+  feel?: SongFeel;
   sectionRepeat: number;
+  sectionBar: number;
+  sectionBars: number;
+  automation?: SongSectionAutomation;
+  voiceLabels?: Partial<Record<SongInstrument, string>>;
+  clipId?: string;
+  clipRepeat?: number;
+  clipRepeats?: number;
+  clipOverrides?: SongClipOverrides;
+  arrangementAutomation?: SongArrangementAutomationPoint[];
+  arrangementBeatStart?: number;
+  rehearsalCue?: string;
   endingPass?: 1 | 2;
   marker?: string;
   partId: string;
   partName: string;
+  annotation?: string;
+  dynamics?: string;
   meter: string;
   bpm: number;
   subdivision: DrumPart["subdivision"];
@@ -23,8 +38,41 @@ export type ArrangementBar = {
   hits: ArrangedHit[];
 };
 
-export const BUILDER_VOICES: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash"];
-export const VOICE_LABEL: Record<SongInstrument, string> = { kick: "Kick", snare: "Snare", hihat: "Hi-hat", openhat: "Open hi-hat", ride: "Ride", rimshot: "Rimshot", tom: "Tom", crash: "Crash" };
+export const BUILDER_VOICES: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4"];
+export const VOICE_LABEL: Record<SongInstrument, string> = { kick: "Kick", snare: "Snare", hihat: "Hi-hat", openhat: "Open hi-hat", ride: "Ride", rimshot: "Rimshot", tom: "Tom", crash: "Crash", cowbell: "Cowbell", shaker: "Shaker", tambourine: "Tambourine", custom1: "Custom lane 1", custom2: "Custom lane 2", custom3: "Custom lane 3", custom4: "Custom lane 4" };
+export function songVoiceLabel(song: Pick<DrumSong, "voiceLabels"> | undefined, voice: SongInstrument) { return song?.voiceLabels?.[voice]?.trim() || VOICE_LABEL[voice]; }
+
+export function automationScaleAtHit(bar: ArrangementBar, hit: ArrangedHit) {
+  const automation = bar.automation;
+  const audibleVoice = hit.articulation === "foot-splash" ? "openhat" : hit.instrument;
+  if (automation?.mutedVoices?.includes(audibleVoice) || bar.clipOverrides?.mutedVoices?.includes(audibleVoice)) return 0;
+  const clipVolume = bar.clipOverrides?.volume ?? 1;
+  if (!automation) return clipVolume * arrangementAutomationValue(bar, audibleVoice, "volume", (bar.arrangementBeatStart ?? 0) + hit.beat, 1);
+  const progress = Math.max(0, Math.min(1, (bar.sectionBar + hit.beat / Math.max(0.001, bar.measureBeats)) / Math.max(1, bar.sectionBars)));
+  const interpolate = (from: number | undefined, to: number | undefined) => {
+    const start = from ?? 1;
+    return Math.max(0, Math.min(1, start + ((to ?? start) - start) * progress));
+  };
+  const cymbal = ["hihat", "openhat", "ride", "crash"].includes(audibleVoice);
+  const voiceCurve = automation.voices?.[audibleVoice];
+  const arrangementVolume = arrangementAutomationValue(bar, audibleVoice, "volume", (bar.arrangementBeatStart ?? 0) + hit.beat, 1);
+  return clipVolume * interpolate(automation.volumeFrom, automation.volumeTo) * (cymbal ? interpolate(automation.cymbalFrom, automation.cymbalTo) : 1) * (voiceCurve ? interpolate(voiceCurve.volumeFrom, voiceCurve.volumeTo) : 1) * arrangementVolume;
+}
+
+export function arrangementAutomationValue(bar: Pick<ArrangementBar, "arrangementAutomation">, instrument: SongInstrument, property: "volume" | "pan" | "velocity", beat: number, fallback: number) {
+  const points = bar.arrangementAutomation ?? [];
+  const specific = points.filter(point => point.instrument === instrument && point[property] !== undefined).sort((a,b)=>a.beat-b.beat);
+  const global = points.filter(point => point.instrument === undefined && point[property] !== undefined).sort((a,b)=>a.beat-b.beat);
+  const lane = specific.length ? specific : global;
+  if (!lane.length) return fallback;
+  if (beat <= lane[0]!.beat) return lane[0]![property] ?? fallback;
+  if (beat >= lane.at(-1)!.beat) return lane.at(-1)![property] ?? fallback;
+  const index = lane.findIndex((point, i) => i < lane.length - 1 && beat >= point.beat && beat <= lane[i + 1]!.beat);
+  if (index < 0) return fallback;
+  const from = lane[index]!, to = lane[index + 1]!;
+  const progress = (beat - from.beat) / Math.max(0.001, to.beat - from.beat);
+  return (from[property] ?? fallback) + ((to[property] ?? from[property] ?? fallback) - (from[property] ?? fallback)) * progress;
+}
 
 export function partStepCount(part: Pick<DrumPart, "beats" | "subdivision">) {
   return Math.max(1, Math.round(part.beats * part.subdivision / 4));
@@ -85,7 +133,7 @@ export function grooveToPart(groove: Groove, bpm: number): DrumPart {
     meter: cleanMeterLabel(groove.meter ?? "4/4"),
     sourceId: groove.id,
     notes: groove.description,
-    hits: groove.hits.map((hit) => ({ ...hit }))
+    hits: (groove.songPattern?.hits ?? groove.hits).map((hit) => ({ ...hit }))
   };
 }
 
@@ -99,6 +147,7 @@ export function varyDrumPart(source: DrumPart, variation: GrooveVariation): Drum
   const part = structuredClone(source);
   part.id = crypto.randomUUID();
   part.sourceId = undefined;
+  part.linkedBaseId = undefined;part.linkOverrides=undefined;part.linkRemoved=undefined;
   part.name = `${source.name} · ${variation === "snare-shift" ? "snare shift" : variation === "hat-lift" ? "hat lift" : variation === "half-time" ? "half-time" : "double-time"}`;
   const fullLength = partStepCount(part);
   const measureSteps = Math.max(1, Math.round(meterBeats(part.meter || "4/4", part.beats) * part.subdivision / 4));
@@ -159,9 +208,10 @@ export function varyDrumPart(source: DrumPart, variation: GrooveVariation): Drum
   return part;
 }
 
-export function humanizeArrangementBars(bars: ArrangementBar[], amount: number, seed: number): ArrangementBar[] {
+export function humanizeArrangementBars(bars: ArrangementBar[], amount: number, seed: number, velocityAmount = amount): ArrangementBar[] {
   const strength = Math.max(0, Math.min(100, amount)) / 100;
-  if (!strength) return bars;
+  const velocityStrength=Math.max(0,Math.min(100,velocityAmount))/100;
+  if (!strength && !velocityStrength) return bars;
   const variation = (key: string) => {
     let hash = (seed | 0) ^ 0x811c9dc5;
     for (let index = 0; index < key.length; index += 1) hash = Math.imul(hash ^ key.charCodeAt(index), 0x01000193);
@@ -175,7 +225,7 @@ export function humanizeArrangementBars(bars: ArrangementBar[], amount: number, 
       const random = variation(`${bar.index}:${bar.partId}:${hit.step}:${hit.instrument}`);
       const timingRangeBeats = (60 / bar.bpm) * 0.18 * strength;
       const beat = Math.max(0, Math.min(Math.max(0, bar.beats - 0.001), hit.beat + random * timingRangeBeats));
-      const velocity = Math.max(1, Math.min(127, Math.round(hit.velocity + variation(`${bar.index}:${hit.step}:${hit.instrument}:velocity`) * 24 * strength)));
+      const velocity = Math.max(1, Math.min(127, Math.round(hit.velocity + variation(`${bar.index}:${hit.step}:${hit.instrument}:velocity`) * 24 * velocityStrength)));
       return { ...hit, beat, fraction: beat / Math.max(0.001, bar.measureBeats), velocity };
     })
   }));
@@ -216,20 +266,29 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
   const bars: ArrangementBar[] = [];
   for (const entry of expandedSections) {
     const section = entry.section;
-    const sectionRepeats = section.endingGroup ? 1 : Math.max(1, Math.min(32, Math.round(section.repeats ?? 1)));
+    const sectionRepeats = sectionId || section.endingGroup ? 1 : Math.max(1, Math.min(32, Math.round(section.repeats ?? 1)));
     const clips = sectionClips(section);
+    const sectionBars = clips.reduce((total, clip) => {
+      const repeats = Math.max(1, Math.min(64, Math.round(clip.repeats || 1)));
+      return total + Array.from({ length: repeats }, (_, index) => section.parts.find(item => item.id === (clip.repeatVariants?.find(variant => variant.repeat === index + 1)?.partId ?? clip.partId))).reduce((sum, part) => {
+        if (!part) return sum;
+        const measureLength = meterBeats(part.meter || section.meter || song.meter, part.beats);
+        return sum + Math.max(1, Math.min(32, Math.ceil(part.beats / measureLength - 0.00001)));
+      }, 0);
+    }, 0);
     const baseBpm = Math.max(40, Math.min(200, Math.round(section.bpm ?? song.bpm)));
     for (let repeatIndex = 0; repeatIndex < sectionRepeats; repeatIndex += 1) {
       const sectionRepeat = section.endingGroup ? entry.repeat : repeatIndex + 1;
       let repeatBarCursor = 0;
       for (const clip of clips) {
-        const part = section.parts.find((item) => item.id === clip.partId);
-        if (!part) continue;
         const repeats = Math.max(1, Math.min(64, Math.round(clip.repeats || 1)));
-        const meter = part.meter || section.meter || song.meter;
-        const measureLength = meterBeats(meter, part.beats);
-        const barCount = Math.max(1, Math.min(32, Math.ceil(part.beats / measureLength - 0.00001)));
         for (let clipRepeat = 0; clipRepeat < repeats; clipRepeat += 1) {
+          const partId = clip.repeatVariants?.find(variant=>variant.repeat===clipRepeat+1)?.partId ?? clip.partId;
+          const part = section.parts.find((item) => item.id === partId);
+          if (!part) continue;
+          const meter = part.meter || section.meter || song.meter;
+          const measureLength = meterBeats(meter, part.beats);
+          const barCount = Math.max(1, Math.min(32, Math.ceil(part.beats / measureLength - 0.00001)));
           for (let barIndex = 0; barIndex < barCount; barIndex += 1) {
             const ramp = section.tempoRamp;
             const rampProgress = ramp ? Math.min(1, (repeatBarCursor + 1) / ramp.bars) : 0;
@@ -243,7 +302,8 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               const beat = hit.step * 4 / part.subdivision;
               const localBeat = beat - startBeat;
               if (localBeat < -0.00001 || localBeat >= remaining - 0.00001) return [];
-              return [{ beat: localBeat, fraction: localBeat / (pickup ? remaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, articulation: hit.articulation, sticking: hit.sticking }];
+              const performanceBeat = Math.max(0, Math.min(remaining - 0.001, localBeat + (hit.timingOffsetMs ?? 0) * bpm / 60000));
+              return [{ beat: performanceBeat, fraction: localBeat / (pickup ? remaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, articulation: hit.articulation, sticking: hit.sticking }];
             });
             bars.push({
               index: bars.length,
@@ -251,11 +311,23 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               sectionId: section.id,
               sectionName: section.name,
               sectionKind: section.kind,
+              feel: section.feel,
               sectionRepeat,
+              sectionBar: repeatBarCursor,
+              sectionBars: Math.max(1, sectionBars),
+              automation: section.automation,
+              voiceLabels: song.voiceLabels,
               endingPass: entry.endingPass,
               marker: repeatBarCursor === 0 ? section.marker : undefined,
+              clipId: clip.id,
+              clipRepeat: clipRepeat + 1,
+              clipRepeats: repeats,
+              clipOverrides: clip.overrides,
+              rehearsalCue: section.rehearsalCues?.find(cue => cue.measure === repeatBarCursor + 1)?.text,
               partId: part.id,
               partName: part.name,
+            annotation: [section.notes,part.notes,section.rehearsalCues?.find(cue => cue.measure === repeatBarCursor + 1)?.text ? `Cue: ${section.rehearsalCues.find(cue => cue.measure === repeatBarCursor + 1)?.text}` : undefined].filter(Boolean).join(" · "),
+            dynamics: part.dynamics,
               meter,
               bpm,
               subdivision: part.subdivision,
@@ -263,6 +335,8 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               beats: remaining,
               measureBeats: measureLength,
               partBeatOffset: startBeat,
+              arrangementBeatStart: 0,
+              arrangementAutomation: song.arrangementAutomation,
               hits
             });
             repeatBarCursor += 1;
@@ -270,6 +344,17 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
         }
       }
     }
+  }
+  const fullForScope = sectionId ? buildArrangementBars({ ...song, referenceTempoMap: undefined }) : bars;
+  const firstScopedIndex = sectionId ? fullForScope.findIndex(bar=>bar.sectionId===sectionId) : 0;
+  const prefixBeats = sectionId ? fullForScope.slice(0,Math.max(0,firstScopedIndex)).reduce((sum,bar)=>sum+bar.beats,0) : 0;
+  let arrangementBeat = prefixBeats;
+  for (const bar of bars) { bar.arrangementBeatStart = arrangementBeat; arrangementBeat += bar.beats; }
+  if(song.referenceTempoMap && song.referenceTempoMap.length>=2){
+    // Use the full arrangement to locate section anchors, including repeated forms.
+    const full=fullForScope;
+    let beat=sectionId?full.slice(0,full.findIndex(bar=>bar.sectionId===sectionId)).reduce((n,bar)=>n+bar.beats,0):0;
+    return bars.map(bar=>{const seconds=mappedSeconds(beat+bar.beats,song.referenceTempoMap!,song.bpm)-mappedSeconds(beat,song.referenceTempoMap!,song.bpm);beat+=bar.beats;return {...bar,bpm:60*bar.beats/seconds};});
   }
   return bars;
 }

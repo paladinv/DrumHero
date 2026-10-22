@@ -37,3 +37,5 @@ The source credit, file mapping, and CC0 license copy are kept beside the bundle
 For any future sample additions, keep the source, license, and attribution beside the bundled files. CC0 does not require attribution, but provenance makes later maintenance easier. For the FreePats kit, include the required author credit and the CC BY 4.0 link.
 
 Avoid hotlinking sample files from these project or community sites at runtime. Bundle only the small set of approved WAVs with Drum Hero so playback doesn't depend on a third-party server and users aren't sent to a sample host each time they practice.
+
+Play-Along Studio also accepts user-provided audio in up to six local stems. The user confirms they own or have permission to use each import and may record source/rights notes. Drum Hero does not verify those claims. Export the original audio and its separate rights-note JSON before sharing; both stay local unless the user exports them.

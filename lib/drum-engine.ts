@@ -53,6 +53,7 @@ export type DrumKitEngine = {
 };
 
 type ThreeApi = typeof import("three");
+
 type DrumMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> & {
   userData: { instrument?: Instrument; baseY?: number };
 };
@@ -60,6 +61,10 @@ type HandRig = {
   group: THREE.Group;
   grip: THREE.Group;
   armAnatomy: THREE.Group;
+  authoredArmRoot: THREE.Group;
+  armDirection: THREE.Vector3;
+  armOffset: THREE.Quaternion;
+  authoredGrip: boolean;
   wrist: THREE.Object3D;
   stick: THREE.Group;
   palm: THREE.Object3D;
@@ -84,8 +89,8 @@ type HandRig = {
 };
 
 const COLORS = {
-  backdrop: 0x181b20,
-  floor: 0x151a1f,
+  backdrop: 0x22262d,
+  floor: 0x24282f,
   rug: 0x252c32,
   shell: 0x75412f,
   shellEdge: 0xa86143,
@@ -99,7 +104,7 @@ const COLORS = {
   hickoryTip: 0xf4d2a4,
   // Muted warm skin tones separate from the lacquer/copper kit without
   // turning the hands into saturated orange blobs at the compact viewport.
-  skin: 0xa87569,
+  skin: 0xb98779,
   skinLight: 0xdca092,
   skinShadow: 0x875345,
   nail: 0xf3c0a8,
@@ -109,6 +114,14 @@ const COLORS = {
 };
 const HAND_SIDES = ["left", "right"] as const;
 const INSTRUMENTS = ["kick", "snare", "hihat", "tom", "crash"] as const;
+const REST_STICK_DIRECTIONS: Record<HandSide, readonly [number, number, number]> = {
+  // Keep both 5A shafts visibly pitched down toward their rest heads from the
+  // seated camera. The prior shallow vertical component cancelled against the
+  // away-from-player depth vector and made the sticks read as horizontal bars.
+  // Hits still solve independently from calibrated targets.
+  left: [0.42, -0.72, -0.55],
+  right: [-0.42, -0.72, -0.55],
+};
 
 /** Reusable procedural drumset renderer. The Three.js import stays lazy in the client wrapper. */
 export function createDrumKitEngine(
@@ -151,7 +164,9 @@ export function createDrumKitEngine(
   // determines safe distance, while this one is what must be centred in view.
   const kitFrameBounds = kitBounds.clone();
   const fitCenter = new THREE.Vector3();
-  const fitDirection = new THREE.Vector3(0, view === "player" ? 0.34 : 0.36, view === "player" ? 0.94 : 0.93).normalize();
+  // A restrained lateral offset restores the seated three-quarter view; the
+  // previous straight-on fit flattened the imported shells into a diagram.
+  const fitDirection = new THREE.Vector3(view === "player" ? 0.25 : 0.32, view === "player" ? 0.34 : 0.37, view === "player" ? 0.91 : 0.87).normalize();
   const fitRight = new THREE.Vector3();
   const fitUp = new THREE.Vector3();
   const fitCorner = new THREE.Vector3();
@@ -170,7 +185,7 @@ export function createDrumKitEngine(
     aim.set(fitCenter.x, fitCenter.y + 0.09, fitCenter.z);
     fitRight.crossVectors(fitUpReference, fitDirection).normalize();
     fitUp.crossVectors(fitDirection, fitRight).normalize();
-    const verticalLimit = Math.tan((camera.fov * Math.PI) / 360) * 0.88;
+    const verticalLimit = Math.tan((camera.fov * Math.PI) / 360) * 0.94;
     const horizontalLimit = verticalLimit * camera.aspect;
     let distance = 0;
     for (const x of [kitBounds.min.x, kitBounds.max.x]) {
@@ -185,6 +200,11 @@ export function createDrumKitEngine(
         }
       }
     }
+    // The union AABB combines the extrema of separate stands, shell centres,
+    // and arm endpoints into eight corners that no actual mesh occupies.
+    // Tighten the fit modestly after using that conservative envelope so the
+    // kit reads at its real size without clipping its cymbal edges or arms.
+    distance *= 0.68;
     camera.position.copy(aim).addScaledVector(fitDirection, distance);
     camera.lookAt(aim);
   };
@@ -249,12 +269,15 @@ export function createDrumKitEngine(
   // Practice uses a centered 16:9 logical viewport inside the wide compact
   // canvas. This preserves projection proportions instead of stretching the
   // kit across the 2.5:1 CSS surface, while leaving showcase full-width.
+  // WebGLRenderer's viewport/scissor APIs accept CSS pixels and apply the
+  // configured pixel ratio internally. Keep these values in CSS pixels.
   let renderViewportX = 0;
   let renderViewportWidth = 1;
   let renderViewportHeight = 1;
-  let renderBufferWidth = 1;
-  let renderBufferHeight = 1;
+  let renderWidth = 1;
+  let renderHeight = 1;
   let staticObjectCount = 0;
+  let handAssetMode = "loading";
   const getMaterial = (color: number, roughness = 0.52, metalness = 0.05, side: THREE.Side = THREE.FrontSide): THREE.MeshStandardMaterial => {
     const key = `${color}:${roughness}:${metalness}:${side}`;
     let material = materials.get(key);
@@ -683,6 +706,8 @@ export function createDrumKitEngine(
   const visualGripNormal = new THREE.Vector3();
   const visualGripBasis = new THREE.Matrix4();
   const gripLocalQuaternion = new THREE.Quaternion();
+  const authoredArmAxisDirection = new THREE.Vector3();
+  const authoredArmWorldQuaternion = new THREE.Quaternion();
   const setGripQuaternion = (direction: THREE.Vector3, position: THREE.Vector3, output: THREE.Quaternion): void => {
     gripNormal.copy(camera.position).sub(position).normalize();
     gripNormal.addScaledVector(direction, -gripNormal.dot(direction)).normalize();
@@ -703,8 +728,29 @@ export function createDrumKitEngine(
     // Keep the articulated palm and digits readable without moving the 5A
     // itself: the stick remains on the animated hand root, while the hand
     // anatomy uses the matched-grip visual frame below it.
+    if (rig.authoredGrip) {
+      // The Blender hand and its short digit overlays share the exact local
+      // shaft frame. A camera-facing palm correction here would rotate those
+      // fingers off the stick, leaving a visible gap at the grip.
+      rig.grip.quaternion.identity();
+      return;
+    }
     gripLocalQuaternion.copy(rig.group.quaternion).invert();
     rig.grip.quaternion.copy(gripLocalQuaternion).multiply(rig.visualQuaternion);
+  };
+  const updateAuthoredArmRestOffset = (rig: HandRig): void => {
+    // The forearm is a static, separately authored mesh. Aim its wrist-to-
+    // elbow axis toward the player's lower outer corner while preserving the
+    // hand's exact stick frame; only this group transform changes on a hit.
+    authoredArmAxisDirection.copy(rig.armDirection).negate();
+    setGripQuaternion(authoredArmAxisDirection, rig.restPosition, authoredArmWorldQuaternion);
+    rig.armOffset.copy(rig.restQuaternion).invert().multiply(authoredArmWorldQuaternion);
+  };
+  const updateAuthoredArmPose = (rig: HandRig): void => {
+    // The authored arm root is already a child of the animated hand group.
+    // Store only its rest-relative offset here; copying the hand's world pose
+    // into the child would apply the strike/rest rotation twice.
+    rig.authoredArmRoot.quaternion.copy(rig.armOffset);
   };
   type ContactPointSet = Record<Instrument, { readonly x: number; readonly y: number; readonly z: number }>;
   const createTargetPoints = (points: ContactPointSet): Record<Instrument, THREE.Vector3> => ({
@@ -729,19 +775,19 @@ export function createDrumKitEngine(
     const stickBody = mesh(cachedGeometry("5a-body", () => new THREE.LatheGeometry([
       new THREE.Vector2(0, 0),
       new THREE.Vector2(STICK_DIMENSIONS.diameter * 0.56, 0),
-      new THREE.Vector2(STICK_DIMENSIONS.diameter * 0.53, shaftLength * 0.72),
+      new THREE.Vector2(STICK_DIMENSIONS.diameter * 0.53, shaftLength * 0.78),
       new THREE.Vector2(STICK_DIMENSIONS.diameter * 0.5, shaftLength),
-      new THREE.Vector2(STICK_DIMENSIONS.diameter * 0.46, shaftLength + 0.01),
-      new THREE.Vector2(STICK_DIMENSIONS.diameter * 0.32, shaftLength + 0.027),
-      new THREE.Vector2(STICK_DIMENSIONS.diameter * 0.26, STICK_DIMENSIONS.length),
-      new THREE.Vector2(0, STICK_DIMENSIONS.length),
+      new THREE.Vector2(0, shaftLength),
     ], 12)), getMaterial(COLORS.hickory, 0.48, 0.02));
-    const tip = mesh(cachedGeometry("5a-teardrop-tip", () => new THREE.SphereGeometry(1, 12, 8)), getMaterial(COLORS.hickoryTip, 0.42, 0.01));
-    // Use the measured tip diameter (10 mm) and length instead of a 22 mm
-    // sphere. The ellipsoid keeps a small teardrop shoulder while reading as
-    // a distinct pale wood tip at the compact camera distance.
-    tip.scale.set(STICK_DIMENSIONS.tipDiameter * 0.5, STICK_DIMENSIONS.tipLength * 0.5, STICK_DIMENSIONS.tipDiameter * 0.5);
-    tip.position.y = STICK_DIMENSIONS.length - STICK_DIMENSIONS.tipLength * 0.5;
+    const tip = mesh(cachedGeometry("5a-teardrop-tip", () => new THREE.LatheGeometry([
+      new THREE.Vector2(0, 0),
+      new THREE.Vector2(STICK_DIMENSIONS.diameter * 0.24, 0),
+      new THREE.Vector2(STICK_DIMENSIONS.tipDiameter * 0.42, STICK_DIMENSIONS.tipLength * 0.22),
+      new THREE.Vector2(STICK_DIMENSIONS.tipDiameter * 0.5, STICK_DIMENSIONS.tipLength * 0.58),
+      new THREE.Vector2(STICK_DIMENSIONS.tipDiameter * 0.37, STICK_DIMENSIONS.tipLength * 0.84),
+      new THREE.Vector2(0, STICK_DIMENSIONS.tipLength),
+    ], 12)), getMaterial(COLORS.hickoryTip, 0.42, 0.01));
+    tip.position.y = shaftLength;
     stick.add(stickBody, tip);
     return stick;
   };
@@ -750,6 +796,10 @@ export function createDrumKitEngine(
     const hand = new THREE.Group();
     const grip = new THREE.Group();
     const armAnatomy = new THREE.Group();
+    const authoredArmRoot = new THREE.Group();
+    authoredArmRoot.name = `${side}-authored-forearm-frame`;
+    const armDirection = new THREE.Vector3(sign * 0.52, -0.34, 0.78).normalize();
+    const armOffset = new THREE.Quaternion();
     // A rounded octagonal cross-section gives the palm a human trapezoid
     // silhouette rather than another rotational oval/blob.
     const palmGeometry = cachedGeometry("anatomical-palm-v14", () => {
@@ -800,11 +850,12 @@ export function createDrumKitEngine(
     wrist.position.z = -0.017;
     // A 240 mm rounded section keeps the wrist visibly connected to the
     // player's arm while its narrow taper avoids the old detached orange bar.
-    const forearm = mesh(cachedGeometry("hand-forearm-tapered-v25", () => new THREE.LatheGeometry([
-      new THREE.Vector2(0, -HAND_DIMENSIONS.forearmLength * 0.5), new THREE.Vector2(0.022, -HAND_DIMENSIONS.forearmLength * 0.5), new THREE.Vector2(0.031, -0.095),
-      new THREE.Vector2(0.032, -0.035), new THREE.Vector2(0.025, 0.035), new THREE.Vector2(0.02, 0.095), new THREE.Vector2(0.017, HAND_DIMENSIONS.forearmLength * 0.5),
-      new THREE.Vector2(0, HAND_DIMENSIONS.forearmLength * 0.5),
-    ], 10)), getMaterial(COLORS.skin, 0.68, 0));
+    const forearm = mesh(cachedGeometry("hand-forearm-sculpted-v45", () => new THREE.LatheGeometry([
+      new THREE.Vector2(0, -HAND_DIMENSIONS.forearmLength * 0.5), new THREE.Vector2(0.026, -HAND_DIMENSIONS.forearmLength * 0.5),
+      new THREE.Vector2(0.032, -0.102), new THREE.Vector2(0.038, -0.072), new THREE.Vector2(0.041, -0.034),
+      new THREE.Vector2(0.037, 0.002), new THREE.Vector2(0.031, 0.044), new THREE.Vector2(0.024, 0.085),
+      new THREE.Vector2(0.019, HAND_DIMENSIONS.forearmLength * 0.5), new THREE.Vector2(0, HAND_DIMENSIONS.forearmLength * 0.5),
+    ], 20)), getMaterial(COLORS.skin, 0.68, 0));
     forearm.position.y = -0.155;
     // Offset the forearm's local origin under the splayed arm pivot so its
     // tapered wrist lands beneath the camera-facing wrist volume instead of
@@ -814,11 +865,11 @@ export function createDrumKitEngine(
     const elbow = mesh(cachedGeometry("hand-elbow-v26", () => new THREE.SphereGeometry(1, 8, 6)), getMaterial(COLORS.skinShadow, 0.72, 0));
     elbow.position.set(0, -0.235, -0.018);
     elbow.scale.set(0.032, 0.05, 0.028);
-    const sleeve = mesh(cachedGeometry("tailored-sleeve-v28", () => new THREE.LatheGeometry([
-      new THREE.Vector2(0, -0.22), new THREE.Vector2(0.026, -0.22), new THREE.Vector2(0.031, -0.17),
-      new THREE.Vector2(0.032, -0.08), new THREE.Vector2(0.027, 0.015), new THREE.Vector2(0.022, 0.07),
-      new THREE.Vector2(0, 0.07),
-    ], 10)), getMaterial(COLORS.sleeve, 0.72, 0.04));
+    const sleeve = mesh(cachedGeometry("tailored-sleeve-v45", () => new THREE.LatheGeometry([
+      new THREE.Vector2(0, -0.24), new THREE.Vector2(0.028, -0.24), new THREE.Vector2(0.034, -0.205),
+      new THREE.Vector2(0.037, -0.15), new THREE.Vector2(0.036, -0.09), new THREE.Vector2(0.032, -0.035),
+      new THREE.Vector2(0.027, 0.025), new THREE.Vector2(0.022, 0.075), new THREE.Vector2(0, 0.075),
+    ], 20)), getMaterial(COLORS.sleeve, 0.72, 0.04));
     sleeve.position.set(0, -0.155, -0.018);
     sleeve.rotation.z = sign * 0.08;
     const cuff = mesh(cachedGeometry("tailored-cuff-v28", () => new THREE.CylinderGeometry(0.024, 0.027, 0.028, 10)), getMaterial(COLORS.sleeveCuff, 0.58, 0.08));
@@ -848,6 +899,7 @@ export function createDrumKitEngine(
     // child grip group so their matched-grip roll cannot hide the stick.
     grip.add(palm, wrist, armAnatomy);
     hand.add(grip);
+    hand.add(authoredArmRoot);
     // A real swept tube keeps each digit round in the light. The old flat
     // ribbons followed the shaft axis and collapsed into one slash in the
     // compact practice projection; these arcs remain separated at the
@@ -855,7 +907,7 @@ export function createDrumKitEngine(
     const digitMaterial = getMaterial(COLORS.skinLight, 0.68, 0, THREE.DoubleSide);
     const digitAccentMaterial = getMaterial(COLORS.skinShadow, 0.7, 0, THREE.DoubleSide);
     const sweptDigitGeometry = (key: string, paths: THREE.Vector3[][], radiusSets: number[][]): THREE.BufferGeometry => cachedGeometry(key, () => {
-      const radialSegments = 7;
+      const radialSegments = 6;
       const positions: number[] = [];
       const indices: number[] = [];
       const appendProng = (path: THREE.Vector3[], radii: number[]): void => {
@@ -912,7 +964,7 @@ export function createDrumKitEngine(
     // true gaps), but batch the two light and two shadow lanes into their
     // existing materials. This avoids spending four extra calls for opaque
     // geometry whose depth behaviour is identical within each material.
-    const digitRadius = HAND_DIMENSIONS.fingerDiameter * 0.44;
+    const digitRadius = HAND_DIMENSIONS.fingerDiameter * 0.4;
     const fingerXs = [-0.041, -0.014, 0.014, 0.041];
     const fingerLengths = [0.065, 0.073, 0.071, 0.063];
     // Four separate, slim phalange paths leave distinct palm lanes and curl
@@ -923,16 +975,19 @@ export function createDrumKitEngine(
       const baseX = sign * x;
       const towardShaft = baseX > 0 ? -1 : 1;
       const reach = Math.abs(baseX) - STICK_DIMENSIONS.diameter * 0.5;
-      const y = 0.022 + index * 0.011;
+      // The wrist is local y=0 and the fingertips reach y≈0.19 m. Start each
+      // overlay at the distal palm (about 0.10 m), not the wrist crease; the
+      // previous paths ended halfway down the palm and disappeared in the
+      // baked hand at compact Trainer size.
+      const y = 0.095 + index * 0.016;
       const length = fingerLengths[index];
       const contactX = sign * [-0.011, -0.004, 0.004, 0.011][index];
       return [
-        new THREE.Vector3(baseX, y, 0.01),
-        new THREE.Vector3(baseX + towardShaft * reach * 0.2, y + length * 0.16, 0.021),
-        new THREE.Vector3(baseX + towardShaft * reach * 0.56, y + length * 0.34, 0.026),
-        new THREE.Vector3(baseX + towardShaft * reach * 0.88, y + length * 0.52, 0.017),
-        new THREE.Vector3(contactX, y + length * 0.68, 0.006),
-        new THREE.Vector3(contactX * 0.65, y + length * 0.8, -0.004),
+        new THREE.Vector3(baseX, y, 0.006),
+        new THREE.Vector3(baseX + towardShaft * reach * 0.22, y + length * 0.2, 0.014),
+        new THREE.Vector3(baseX + towardShaft * reach * 0.58, y + length * 0.43, 0.021),
+        new THREE.Vector3(contactX, y + length * 0.68, 0.023),
+        new THREE.Vector3(contactX * 0.65, y + length * 0.82, 0.018),
       ];
     });
     const fingerRadii = fingerLengths.map(() => [digitRadius * 0.7, digitRadius * 0.92, digitRadius, digitRadius * 0.94, digitRadius * 0.82, digitRadius * 0.5]);
@@ -941,11 +996,11 @@ export function createDrumKitEngine(
     // and crosses the shaft from below. It therefore opposes the four curled
     // fingers rather than reading as a fifth parallel lane.
     const thumbPath = [
-      new THREE.Vector3(sign * 0.05, -0.02, 0.01),
-      new THREE.Vector3(sign * 0.044, -0.006, 0.024),
-      new THREE.Vector3(sign * 0.029, 0.012, 0.031),
-      new THREE.Vector3(sign * 0.011, 0.031, 0.019),
-      new THREE.Vector3(-sign * 0.006, HAND_DIMENSIONS.thumbLength - 0.004, 0.003),
+      new THREE.Vector3(sign * 0.05, 0.058, 0.006),
+      new THREE.Vector3(sign * 0.044, 0.074, 0.018),
+      new THREE.Vector3(sign * 0.029, 0.092, 0.026),
+      new THREE.Vector3(sign * 0.011, 0.111, 0.023),
+      new THREE.Vector3(-sign * 0.006, 0.132, 0.018),
     ];
     const thumbRadii = [thumbRadius * 0.76, thumbRadius, thumbRadius * 1.04, thumbRadius * 0.88, thumbRadius * 0.5];
     const digitMeshes = [
@@ -1016,9 +1071,7 @@ export function createDrumKitEngine(
     const restTarget = side === "left"
       ? proceduralTargetPoints.snare.clone().add(new THREE.Vector3(0, 0.12, 0))
       : proceduralTargetPoints.tom.clone().add(new THREE.Vector3(0, 0.12, 0));
-    const restDirection = side === "left"
-      ? new THREE.Vector3(-0.72, -0.36, -0.60).normalize()
-      : new THREE.Vector3(0.72, -0.32, -0.61).normalize();
+    const restDirection = new THREE.Vector3(...REST_STICK_DIRECTIONS[side]).normalize();
     const restPosition = restTarget.clone().addScaledVector(restDirection, -(STICK_DIMENSIONS.length + STICK_DIMENSIONS.gripOffset));
     hand.position.copy(restPosition);
     const restQuaternion = new THREE.Quaternion();
@@ -1028,11 +1081,14 @@ export function createDrumKitEngine(
     setVisualGripQuaternion(restDirection, restPosition, visualQuaternion);
     gripLocalQuaternion.copy(restQuaternion).invert();
     grip.quaternion.copy(gripLocalQuaternion).multiply(visualQuaternion);
-    group.add(hand);
-    return {
+    const rig: HandRig = {
       group: hand,
       grip,
       armAnatomy,
+      authoredArmRoot,
+      armDirection,
+      armOffset,
+      authoredGrip: false,
       wrist,
       stick,
       palm,
@@ -1052,23 +1108,27 @@ export function createDrumKitEngine(
       pose: { down: 0, rebound: 0, rotation: 0 },
       state: createHitAnimationState(side),
     };
+    updateAuthoredArmRestOffset(rig);
+    updateAuthoredArmPose(rig);
+    group.add(hand);
+    return rig;
   };
   const hands: Record<HandSide, HandRig> = { left: createHand("left"), right: createHand("right") };
 
   const resetRestPose = (side: HandSide, targets: Record<Instrument, THREE.Vector3>): void => {
     const rig = hands[side];
     const target = side === "left" ? targets.snare : targets.tom;
-    const restDirection = side === "left"
-      ? new THREE.Vector3(-0.72, -0.36, -0.60).normalize()
-      : new THREE.Vector3(0.72, -0.32, -0.61).normalize();
+    const restDirection = new THREE.Vector3(...REST_STICK_DIRECTIONS[side]).normalize();
     rig.restPosition.copy(target).add(new THREE.Vector3(0, 0.12, 0)).addScaledVector(restDirection, -(STICK_DIMENSIONS.length + STICK_DIMENSIONS.gripOffset));
     setGripQuaternion(restDirection, rig.restPosition, rig.restQuaternion);
+    updateAuthoredArmRestOffset(rig);
     setVisualGripQuaternion(restDirection, rig.restPosition, rig.restVisualQuaternion);
     rig.visualQuaternion.copy(rig.restVisualQuaternion);
     if (!rig.state.active) {
       rig.group.position.copy(rig.restPosition);
       rig.group.quaternion.copy(rig.restQuaternion);
       updateGripPlane(rig);
+      updateAuthoredArmPose(rig);
     }
   };
   // Include actual mesh bounds for both loaded hands, arms, and 5A sticks at
@@ -1087,6 +1147,7 @@ export function createDrumKitEngine(
       savedVisualQuaternion.copy(rig.visualQuaternion);
       const addCurrentPose = (): void => {
         updateGripPlane(rig);
+        updateAuthoredArmPose(rig);
         rig.group.updateWorldMatrix(true, true);
         handPoseBounds.setFromObject(rig.group);
         kitBounds.union(handPoseBounds);
@@ -1099,6 +1160,7 @@ export function createDrumKitEngine(
       rig.group.quaternion.copy(savedHandQuaternion);
       rig.visualQuaternion.copy(savedVisualQuaternion);
       updateGripPlane(rig);
+      updateAuthoredArmPose(rig);
     }
   };
   const strikeDirections: Record<Instrument, THREE.Vector3> = {
@@ -1151,12 +1213,12 @@ export function createDrumKitEngine(
         const material = importedMaterial as THREE.MeshStandardMaterial;
         switch (material.name) {
           case "accent":
-            material.color.set(0x48151d);
+            material.color.set(0x732a34);
             material.roughness = 0.3;
             material.metalness = 0.08;
             break;
           case "shell":
-            material.color.set(0x46151c);
+            material.color.set(0x6d2832);
             material.roughness = 0.3;
             material.metalness = 0.08;
             break;
@@ -1245,13 +1307,23 @@ export function createDrumKitEngine(
       tintImportedMaterials(hihatRoot);
       tintImportedMaterials(crashRoot);
       const kitAssembly = new THREE.Group();
-      const placeComponent = (root: THREE.Object3D, instrument: Instrument, x: number, y: number, z: number, tilt = 0): void => {
+      const placeComponent = (root: THREE.Object3D, instrument: Instrument, x: number, y: number, z: number): void => {
         root.position.set(x, y, z);
-        root.rotation.x = tilt;
+        // Keep stands plumb. The earlier tilt was applied to each complete
+        // imported root, so every leg and vertical tube leaned with the head.
+        // Drum shells remain level here; cymbal-only pivots are pitched below.
         root.userData.baseY = y;
         root.userData.baseRotationZ = root.rotation.z;
         kitAssembly.add(root);
         loadedComponentRoots[instrument].push(root);
+      };
+      const pitchInstrumentSurface = (root: THREE.Object3D, surfaceName: string, radians: number): void => {
+        const targetName = surfaceName.toLowerCase();
+        root.traverse((object) => {
+          if (object.name.toLowerCase() === targetName && object.children.length > 0) {
+            object.rotation.x = radians;
+          }
+        });
       };
       // Keep the kick/rack-tom asset registered only with kick: its GLB has
       // one non-semantic rigid root, so no child can safely react to a tom
@@ -1260,10 +1332,14 @@ export function createDrumKitEngine(
       // Put the bass/rack-tom shell slightly behind independent heads so the
       // normal player-side (+Z) layout leaves snare/tom surfaces readable.
       placeComponent(bassRoot, "kick", 0, 0, -0.16);
-      placeComponent(snareRoot, "snare", -0.58, 0, 0.52, 0.04);
-      placeComponent(floorRoot, "tom", 0.82, 0, 0.62, 0.02);
-      placeComponent(hihatRoot, "hihat", -0.78, 0, 0.7, 0.08);
-      placeComponent(crashRoot, "crash", -1.2, 0, 0.28, 0.12);
+      // Angle the playing surfaces toward the seated player instead of leaving
+      // every membrane and cymbal perfectly horizontal in the source pose.
+      placeComponent(snareRoot, "snare", -0.58, 0, 0.52);
+      placeComponent(floorRoot, "tom", 0.82, 0, 0.62);
+      placeComponent(hihatRoot, "hihat", -0.78, 0, 0.7);
+      pitchInstrumentSurface(hihatRoot, "hi-hat", 0.1);
+      placeComponent(crashRoot, "crash", -1.2, 0, 0.28);
+      pitchInstrumentSurface(crashRoot, "cymbal", 0.14);
       const rightCrashRoot = crashRoot.clone(true);
       // The CC0 crash has a 460 mm cymbal. Scale it once to the documented
       // 20 in ride diameter and place its stand 640 mm behind the floor tom,
@@ -1271,7 +1347,10 @@ export function createDrumKitEngine(
       // edge across the tom head.
       rightCrashRoot.position.set(1.34, 0.04, -0.02);
       rightCrashRoot.scale.setScalar(DRUM_DIMENSIONS.ride20.diameter / 0.46);
-      rightCrashRoot.rotation.set(0.18, -0.22, 0);
+      // Yaw the stand as a whole without canting its mast; pitch only the
+      // cymbal/bell assembly around its own hub.
+      rightCrashRoot.rotation.set(0, -0.22, 0);
+      pitchInstrumentSurface(rightCrashRoot, "cymbal", 0.18);
       rightCrashRoot.userData.baseY = rightCrashRoot.position.y;
       rightCrashRoot.userData.baseRotationZ = rightCrashRoot.rotation.z;
       kitAssembly.add(rightCrashRoot);
@@ -1314,23 +1393,109 @@ export function createDrumKitEngine(
       raycastTargets = [kitAssembly];
       for (const object of proceduralKitObjects) object.visible = false;
 
+      let posedHandGeometry: THREE.BufferGeometry | null = null;
+      let posedForearmGeometry: THREE.BufferGeometry | null = null;
+      try {
+        const handRoot = await loadGlb("/models/drums/hands/blender-cc0-matched-grip-arm-v7.glb", "/models/drums/hands/");
+        if (disposed) {
+          disposeImportedRoot(handRoot);
+          return;
+        }
+        try {
+          let authoredHand: THREE.Mesh | null = null;
+          let authoredForearm: THREE.Mesh | null = null;
+          const staticMeshes: THREE.Mesh[] = [];
+          handRoot.traverse((object) => {
+            const candidate = object as THREE.Mesh;
+            if (!candidate.isMesh) return;
+            staticMeshes.push(candidate);
+            // GLTFLoader names each mesh from the Blender node, while the
+            // shared scene/parent name contains both “Hand and Forearm”.
+            // Match the specific mesh/node first so a broad parent label
+            // cannot make both meshes resolve to the forearm.
+            const meshName = candidate.name.toLowerCase();
+            const parentName = candidate.parent?.name.toLowerCase() ?? "";
+            if (meshName.includes("static forearm mesh") || meshName.endsWith("| forearm") || parentName.endsWith("| forearm")) {
+              authoredForearm = candidate;
+            } else if (meshName.includes("static hand mesh") || meshName.endsWith("| hand") || parentName.endsWith("| hand")) {
+              authoredHand = candidate;
+            }
+          });
+          if (!authoredHand || !authoredForearm) {
+            // Some GLTFLoader node trees keep the authored object name on a
+            // non-mesh parent. The baked forearm is unambiguously longer than
+            // the palm, so its local bounds provide a stable one-time fallback.
+            const meshSize = new THREE.Vector3();
+            for (const candidate of staticMeshes) {
+              candidate.geometry.computeBoundingBox();
+              candidate.geometry.boundingBox?.getSize(meshSize);
+              if (meshSize.y > 0.28) authoredForearm = candidate;
+              else authoredHand = candidate;
+            }
+          }
+          const staticHand = authoredHand as THREE.Mesh | null;
+          const staticForearm = authoredForearm as THREE.Mesh | null;
+          if (!staticHand || !staticForearm) throw new Error("Blender-authored CC0 hand asset must contain separate static hand and forearm meshes");
+          posedHandGeometry = staticHand.geometry.clone();
+          posedForearmGeometry = staticForearm.geometry.clone();
+        } finally {
+          // Keep the prepared static geometry but reclaim the imported GLB's
+          // temporary buffers and material as soon as the clone is cached.
+          disposeImportedRoot(handRoot);
+        }
+      } catch (error) {
+        if (!disposed && !(error instanceof DOMException && error.name === "AbortError")) {
+          console.warn("[DrumKit] CC0 hand load failed; keeping procedural hands", error);
+        }
+      }
+      if (disposed) return;
+
+      handAssetMode = posedHandGeometry && posedForearmGeometry ? "blender-static" : "procedural-fallback";
+      if (posedHandGeometry && posedForearmGeometry) {
+        geometryCache.set("cc0-blender-grip-hand-v59", posedHandGeometry);
+        geometryCache.set("cc0-blender-forearm-v59", posedForearmGeometry);
+      }
       for (const side of HAND_SIDES) {
         const rig = hands[side];
-        // The bundled holding meshes are single static palms and cannot keep
-        // individually articulated fingers or a wrist-to-forearm connection
-        // during a stroke. Keep the CC0 kit assembly, but present the engine's
-        // connected articulated rig for both loaded and fallback scenes.
-        // This has the same five digit draw lanes that the old readability
-        // overlay used, and replaces each static hand mesh with its existing
-        // procedural palm rather than adding a new render-cost class.
-        for (const visual of rig.proceduralHandVisuals) visual.visible = false;
-        for (const digit of rig.proceduralGripDigits) digit.visible = true;
-        rig.palm.visible = true;
-        rig.wrist.visible = true;
-        rig.forearm.visible = true;
-        rig.elbow.visible = true;
-        rig.sleeve.visible = false;
-        rig.cuff.visible = false;
+        if (posedHandGeometry && posedForearmGeometry) {
+          for (const visual of rig.proceduralHandVisuals) visual.visible = false;
+          rig.authoredGrip = true;
+          // Retain the single static Blender mesh for palm/skin volume, then
+          // expose four lightweight, separated digit paths and the opposing
+          // thumb in the same stick frame. They are built once from cached
+          // geometry; no bones or per-frame geometry updates are introduced.
+          for (const digit of rig.proceduralGripDigits) digit.visible = true;
+          rig.palm.visible = false;
+          rig.wrist.visible = false;
+          rig.armAnatomy.visible = false;
+          rig.forearm.visible = false;
+          rig.elbow.visible = false;
+          rig.sleeve.visible = false;
+          rig.cuff.visible = false;
+          const authoredHand = mesh(posedHandGeometry, getMaterial(COLORS.skin, 0.68, 0));
+          authoredHand.name = `${side}-cc0-blender-grip-arm`;
+          authoredHand.scale.x = side === "left" ? -1 : 1;
+          // The offline-prepared thumb/fingertips land around the 5A shaft;
+          // this small wrist-depth shift aligns the palm with its grip plane.
+          authoredHand.position.z = -0.009;
+          // This baked hand was authored around the real +Y stick axis and
+          // remains on the exact calibrated strike frame.
+          rig.group.add(authoredHand);
+          const authoredForearm = mesh(posedForearmGeometry, getMaterial(COLORS.skin, 0.68, 0));
+          authoredForearm.name = `${side}-cc0-blender-forearm`;
+          rig.authoredArmRoot.add(authoredForearm);
+          updateAuthoredArmPose(rig);
+        } else {
+          for (const visual of rig.proceduralHandVisuals) visual.visible = true;
+          for (const digit of rig.proceduralGripDigits) digit.visible = true;
+          rig.armAnatomy.visible = true;
+          rig.palm.visible = true;
+          rig.wrist.visible = true;
+          rig.forearm.visible = true;
+          rig.elbow.visible = true;
+          rig.sleeve.visible = false;
+          rig.cuff.visible = false;
+        }
       }
       resetRestPose("left", componentTargetPoints);
       resetRestPose("right", componentTargetPoints);
@@ -1365,9 +1530,8 @@ export function createDrumKitEngine(
   const pointer = new THREE.Vector2();
   const onPointerDown = (event: PointerEvent): void => {
     const rect = renderer.domElement.getBoundingClientRect();
-    const pixelRatio = renderer.getPixelRatio();
-    const viewportLeft = rect.left + renderViewportX / pixelRatio;
-    const viewportWidth = renderViewportWidth / pixelRatio;
+    const viewportLeft = rect.left + renderViewportX;
+    const viewportWidth = renderViewportWidth;
     if (event.clientX < viewportLeft || event.clientX > viewportLeft + viewportWidth) return;
     pointer.set(((event.clientX - viewportLeft) / viewportWidth) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
     raycaster.setFromCamera(pointer, camera);
@@ -1412,6 +1576,7 @@ export function createDrumKitEngine(
       drawCalls: renderer.info.render.calls,
       triangles: renderer.info.render.triangles,
       staticObjectCount,
+      handAsset: handAssetMode,
     };
     for (const [key, value] of Object.entries(metadata)) {
       host.dataset[key] = String(value);
@@ -1421,7 +1586,7 @@ export function createDrumKitEngine(
   const render = (): void => {
     if (disposed) return;
     renderer.setScissorTest(false);
-    renderer.setViewport(0, 0, renderBufferWidth, renderBufferHeight);
+    renderer.setViewport(0, 0, renderWidth, renderHeight);
     renderer.clear();
     renderer.setScissorTest(true);
     renderer.setViewport(renderViewportX, 0, renderViewportWidth, renderViewportHeight);
@@ -1476,6 +1641,7 @@ export function createDrumKitEngine(
         rig.group.quaternion.slerpQuaternions(rig.restQuaternion, rig.strikeQuaternion, rig.pose.down);
       } else { rig.group.position.copy(rig.restPosition); rig.group.quaternion.copy(rig.restQuaternion); rig.visualQuaternion.copy(rig.restVisualQuaternion); }
       updateGripPlane(rig);
+      updateAuthoredArmPose(rig);
     }
     for (const instrument of INSTRUMENTS) {
       let response = 0;
@@ -1514,12 +1680,11 @@ export function createDrumKitEngine(
     const width = Math.max(1, host.clientWidth);
     const height = Math.max(1, host.clientHeight);
     const viewportCssWidth = view === "player" ? Math.min(width, height * (16 / 9)) : width;
-    const pixelRatio = renderer.getPixelRatio();
-    renderBufferWidth = Math.max(1, Math.round(width * pixelRatio));
-    renderBufferHeight = Math.max(1, Math.round(height * pixelRatio));
-    renderViewportX = Math.max(0, Math.round((width - viewportCssWidth) * 0.5 * pixelRatio));
-    renderViewportWidth = Math.max(1, Math.round(viewportCssWidth * pixelRatio));
-    renderViewportHeight = renderBufferHeight;
+    renderWidth = width;
+    renderHeight = height;
+    renderViewportX = Math.max(0, (width - viewportCssWidth) * 0.5);
+    renderViewportWidth = Math.max(1, viewportCssWidth);
+    renderViewportHeight = height;
     camera.aspect = viewportCssWidth / height;
     // Portrait/mobile canvases need a little more horizontal breathing room;
     // desktop stays at the tighter base framing so the kit remains prominent.

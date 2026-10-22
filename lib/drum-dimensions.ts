@@ -4,7 +4,7 @@
  * the kit beside other real-world props without a conversion step).
  */
 export const MODEL_SCALE = 1 as const;
-export const DRUM_MODEL_VERSION = "professional-v44" as const;
+export const DRUM_MODEL_VERSION = "professional-v62" as const;
 
 export const DRUM_DIMENSIONS = Object.freeze({
   kick: Object.freeze({ diameter: 0.5588, depth: 0.4572 }), // 22 x 18 in

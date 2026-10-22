@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useLocalization } from "./LocalizationProvider";
 import {
   advanceTempoRamp,
   DRUM_REHEARSAL_RUBRICS,
   DRUM_RUBRIC_SCORE_LABELS,
   readiness,
   reviewSection,
+  type ArrangementSnapshot,
   type DrumSong,
   type RehearsalRubricAssessment,
   type RubricScore,
@@ -22,8 +24,9 @@ export function SongRehearsal({ state, song, section, save, restore }: {
   song: DrumSong;
   section?: SongSection;
   save: (state: SongLibraryState) => void;
-  restore: (sections: SongSection[]) => void;
+  restore: (snapshot: ArrangementSnapshot) => void;
 }) {
+  const { formatDate } = useLocalization();
   const [name, setName] = useState("");
   const [item, setItem] = useState("");
   const [target, setTarget] = useState(song.bpm + 20);
@@ -39,6 +42,7 @@ export function SongRehearsal({ state, song, section, save, restore }: {
     .filter((assessment) => assessment.songId === song.id && assessment.sectionId === section?.id)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
     .slice(0, 8);
+  const songParts = song.sections.flatMap((section) => section.parts.map((part) => ({ section, part })));
   const canSaveAssessment = Boolean(section && rubric.criteria.every((criterion) => rubricScores[criterion.id] !== undefined));
 
   const saveAssessment = () => {
@@ -65,17 +69,17 @@ export function SongRehearsal({ state, song, section, save, restore }: {
     <details>
       <summary>Reviews and rehearsal</summary>
       <p>
-        <strong>Readiness:</strong> {status.mastery}% average section mastery · {status.ready ? "Ready" : "Needs practice"}
+        <strong>Readiness:</strong> {status.mastery}% target-tempo part mastery · {status.ready ? "Ready" : "Needs practice"}
         {status.due ? " · review due" : ""}
       </p>
       <p>
-        Ready means every section has at least {status.targetMastery}% mastery and no review is overdue.
+        Ready means every playable part averages at least {status.targetMastery}% across its last three scored attempts near target tempo (98–105%), with no overdue review. Self ratings and older unscoped scores remain in history.
         {status.reasons.length ? ` Next: ${status.reasons[0]}.` : " All sections meet the target."}
       </p>
 
       {section && <>
         <h4>{section.name} review</h4>
-        <p>{review ? `Next review ${new Date(review.dueAt).toLocaleString()}` : "No review scheduled."}</p>
+        <p>{review ? `Next review ${formatDate(new Date(review.dueAt), true)}` : "No review scheduled."}</p>
         <div className="song-actions">
           {(["again", "hard", "good", "easy"] as const).map((result) => (
             <button type="button" key={result} onClick={() => save(reviewSection(state, song.id, section.id, result))}>
@@ -130,7 +134,7 @@ export function SongRehearsal({ state, song, section, save, restore }: {
               const average = assessment.criteria.reduce((sum, criterion) => sum + criterion.score, 0) / assessment.criteria.length;
               return (
                 <details key={assessment.id}>
-                  <summary>{assessment.templateLabel} · {average.toFixed(1)}/4 · {new Date(assessment.createdAt).toLocaleDateString()}</summary>
+                  <summary>{assessment.templateLabel} · {average.toFixed(1)}/4 · {formatDate(new Date(assessment.createdAt))}</summary>
                   <ul>
                     {assessment.criteria.map((criterion) => (
                       <li key={criterion.id}>{criterion.label}: {criterion.score} · {DRUM_RUBRIC_SCORE_LABELS[criterion.score]}</li>
@@ -158,19 +162,21 @@ export function SongRehearsal({ state, song, section, save, restore }: {
         ))}
       </>}
 
-      <h4>Arrangement snapshots</h4>
+      <h4>Arrangement history and snapshots</h4>
+      <p>Automatic revisions are saved after arrangement edits settle. Named snapshots are useful checkpoints you can restore directly.</p>
       <label>Snapshot label<input value={name} onChange={(event) => setName(event.target.value)} /></label>
       <button type="button" onClick={() => {
         if (!name.trim()) return;
-        save({ ...state, snapshots: [...state.snapshots, { id: uid(), songId: song.id, label: name.trim().slice(0, 80), sections: structuredClone(song.sections), createdAt: new Date().toISOString() }] });
+        save({ ...state, snapshots: [...state.snapshots, { id: uid(), songId: song.id, label: name.trim().slice(0, 80), bpm: song.bpm, meter: song.meter, referenceTempoMap: structuredClone(song.referenceTempoMap), arrangementAutomation: structuredClone(song.arrangementAutomation), voiceLabels: structuredClone(song.voiceLabels), sections: structuredClone(song.sections), createdAt: new Date().toISOString() }] });
         setName("");
       }}>Save snapshot</button>
       {state.snapshots.filter((snapshot) => snapshot.songId === song.id).map((snapshot) => (
         <p key={snapshot.id}>
-          {snapshot.label} · {new Date(snapshot.createdAt).toLocaleDateString()}
+          {snapshot.automatic ? "Automatic revision" : snapshot.label} · {formatDate(new Date(snapshot.createdAt))}
           <button type="button" onClick={() => {
-            if (window.confirm(`Restore ${snapshot.label}? Current sections will be replaced.`)) restore(structuredClone(snapshot.sections));
+            if (window.confirm(`Restore ${snapshot.label}? Current tempo, meter, tempo map, and sections will be replaced.`)) restore(structuredClone(snapshot));
           }}>Restore</button>
+          <button type="button" onClick={() => save({ ...state, snapshots: state.snapshots.filter((entry) => entry.id !== snapshot.id) })}>Delete</button>
         </p>
       ))}
 
@@ -202,14 +208,31 @@ export function SongRehearsal({ state, song, section, save, restore }: {
         setRoleName("");
       }}>Add role</button>
       <label>Your name<input value={claimedBy} onChange={(event) => setClaimedBy(event.target.value)} /></label>
-      {state.roles.map((role) => (
-        <p key={role.id}>
-          {role.responsibility} · {role.claimedBy || "Unclaimed"}
+      {state.roles.map((role) => {
+        const assignment = role.assignments?.[song.id];
+        const assignedIndex = songParts.findIndex(({ section: assignedSection, part: assignedPart }) => assignedSection.id === assignment?.sectionId && assignedPart.id === assignment?.partId);
+        return <div className="song-role-assignment" key={role.id}>
+          <p>{role.name} · {role.responsibility} · {role.claimedBy || "Unclaimed"}</p>
+          <label>Drum part for this role
+            <select value={assignedIndex < 0 ? "" : String(assignedIndex)} onChange={(event) => {
+              const selected = event.target.value === "" ? undefined : songParts[Number(event.target.value)];
+              save({ ...state, roles: state.roles.map((entry) => {
+                if (entry.id !== role.id) return entry;
+                const assignments = { ...entry.assignments };
+                if (selected) assignments[song.id] = { sectionId: selected.section.id, partId: selected.part.id };
+                else delete assignments[song.id];
+                return { ...entry, assignments };
+              }) });
+            }}>
+              <option value="">No assigned part</option>
+              {songParts.map(({ section: assignedSection, part: assignedPart }, index) => <option key={`${assignedSection.id}:${assignedPart.id}`} value={index}>{assignedSection.name} / {assignedPart.name}</option>)}
+            </select>
+          </label>
           <button type="button" onClick={() => save({ ...state, roles: state.roles.map((entry) => entry.id === role.id ? { ...entry, claimedBy: entry.claimedBy ? undefined : claimedBy.trim().slice(0, 80) || "Local player" } : entry) })}>
             {role.claimedBy ? "Release" : "Claim"}
           </button>
-        </p>
-      ))}
+        </div>;
+      })}
     </details>
   );
 }

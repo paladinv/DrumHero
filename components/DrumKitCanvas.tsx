@@ -27,6 +27,15 @@ export const DrumKitCanvas = forwardRef<DrumKitCanvasHandle, DrumKitCanvasProps>
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<DrumKitEngine | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "fallback">("loading");
+  const [motionPreference, setMotionPreference] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setMotionPreference(media.matches || document.documentElement.dataset.reduceMotion === 'true');
+    const timer = window.setTimeout(update, 0);
+    media.addEventListener('change', update);
+    window.addEventListener('drum-hero:accessibility-change', update);
+    return () => { window.clearTimeout(timer); media.removeEventListener('change', update); window.removeEventListener('drum-hero:accessibility-change', update); };
+  }, []);
   useImperativeHandle(ref, () => ({
     hit: (instrument, hand, velocity) => engineRef.current?.hit(instrument, hand, velocity),
     advance: (ms) => engineRef.current?.advance(ms),
@@ -37,7 +46,7 @@ export const DrumKitCanvas = forwardRef<DrumKitCanvasHandle, DrumKitCanvasProps>
     let cancelled = false;
     const host = hostRef.current;
     if (!host) return;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reducedMotion = motionPreference || window.matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.reduceMotion === "true";
     void Promise.all([import("three"), import("@/lib/drum-engine")]).then(([three, module]) => {
       if (cancelled || !hostRef.current) return;
       try {
@@ -56,7 +65,7 @@ export const DrumKitCanvas = forwardRef<DrumKitCanvasHandle, DrumKitCanvasProps>
       engineRef.current?.dispose();
       engineRef.current = null;
     };
-  }, [compact, interactive, label, view]);
+  }, [compact, interactive, label, view, motionPreference]);
 
   return <div className={`drum-kit-canvas ${compact ? "drum-kit-canvas-compact-sized" : ""} ${className}`} ref={hostRef} data-engine-status={status} aria-label={label}>
     {status !== "ready" ? <div className="drum-kit-fallback" role="img" aria-label={`${label}. ${status === "loading" ? "Loading visual kit." : "3D visuals unavailable; use the five voice controls."}`}>

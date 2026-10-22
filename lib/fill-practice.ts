@@ -54,6 +54,7 @@ export function createGrooveFillTransition(
     focus: `Keep ${groove.name} steady, shape the fill, and land back on beat one.`,
     meter: `${totalBars} bars · 4/4`,
     feel: groove.feel,
+    trainerFillStepRanges: [[grooveBars * cellsPerBar, cells]],
     hits
   };
 }

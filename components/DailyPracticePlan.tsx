@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 import { patterns } from "@/lib/curriculum";
 import { readCustomGrooves } from "@/lib/custom-grooves";
 import { allSongs, readSongLibrary, songPartPattern, type DrumSong } from "@/lib/song-library";
-import { TRAINER_KEY, parseTrainerState, type TrainerRound } from "@/lib/trainer";
+import { trainerStorageKey, parseTrainerState, type TrainerRound } from "@/lib/trainer";
 import type { PracticePattern } from "@/lib/types";
 import { recommendNext } from "@/lib/progress";
+import { localizedPattern } from "@/lib/teaching-pattern-display";
 import { useProgress } from "./ProgressProvider";
+import { useLocalization } from "./LocalizationProvider";
 
 type PlanKind = "warmup" | "focus" | "music";
 type PlanItem = { kind: PlanKind; title: string; reason: string; pattern: PracticePattern };
@@ -30,7 +32,7 @@ function dueSongPattern(songs: DrumSong[], reviews: ReturnType<typeof readSongLi
 }
 
 function weakestPattern(rounds: TrainerRound[], choices: PracticePattern[]): PracticePattern | undefined {
-  const recent = rounds.filter((round) => round.mode === "scored" && round.result).sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, 50);
+  const recent = rounds.filter((round) => round.mode === "scored" && round.result && (!round.adaptation || round.adaptation === "standard")).sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, 50);
   const grouped = new Map<string, TrainerRound[]>();
   for (const round of recent) grouped.set(round.patternId, [...(grouped.get(round.patternId) ?? []), round]);
   const ranked = [...grouped.entries()].map(([id, roundsForPattern]) => {
@@ -41,7 +43,8 @@ function weakestPattern(rounds: TrainerRound[], choices: PracticePattern[]): Pra
 }
 
 export function DailyPracticePlan() {
-  const { progress } = useProgress();
+  const { progress, profileId } = useProgress();
+  const { locale } = useLocalization();
   const [choices, setChoices] = useState<PracticePattern[]>(bundledOptions);
   const [items, setItems] = useState<PlanItem[]>([]);
 
@@ -54,7 +57,7 @@ export function DailyPracticePlan() {
       ];
       const library = readSongLibrary();
       const dueSong = dueSongPattern(allSongs(library), library.reviews, library.progress);
-      const weakest = weakestPattern(parseTrainerState(window.localStorage.getItem(TRAINER_KEY)).rounds, localChoices);
+      const weakest = weakestPattern(parseTrainerState(window.localStorage.getItem(trainerStorageKey(profileId))).rounds, localChoices);
       const nextLesson = recommendNext(progress.completedLessons);
       const warmup = localChoices.find((item) => item.id === "quarter-pulse") ?? bundledOptions[0];
       const musical = dueSong ?? localChoices.find((item) => item.id === "motown-pocket") ?? bundledOptions[0];
@@ -70,7 +73,7 @@ export function DailyPracticePlan() {
       ]);
     }, 0);
     return () => window.clearTimeout(task);
-  }, [progress.completedLessons]);
+  }, [profileId, progress.completedLessons]);
 
   const selectPattern = (kind: PlanKind, patternId: string) => {
     const pattern = choices.find((item) => item.id === patternId);
@@ -88,7 +91,7 @@ export function DailyPracticePlan() {
         return <li key={item.kind}>
           <span className="daily-plan-number">{index + 1}</span>
           <div className="daily-plan-copy"><strong>{item.title} · {index === 0 ? "3 min" : index === 1 ? "5 min" : "4 min"}</strong><span>{item.reason}</span></div>
-          <label><span className="visually-hidden">Choose {item.title.toLowerCase()} pattern</span><select value={item.pattern.id} onChange={(event) => selectPattern(item.kind, event.target.value)}>{choices.map((pattern) => <option key={`${item.kind}-${pattern.id}`} value={pattern.id}>{pattern.name}</option>)}</select></label>
+          <label><span className="visually-hidden">Choose {item.title.toLowerCase()} pattern</span><select value={item.pattern.id} onChange={(event) => selectPattern(item.kind, event.target.value)}>{choices.map((pattern) => <option key={`${item.kind}-${pattern.id}`} value={pattern.id}>{localizedPattern(pattern, locale).name}</option>)}</select></label>
           <Link className="button-secondary" href={href}>Start</Link>
         </li>;
       })}

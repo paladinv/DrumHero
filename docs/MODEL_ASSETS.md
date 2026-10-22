@@ -1,9 +1,85 @@
 # Drum Hero model assets
 
-The v44 engine keeps the procedural kit as an offline/loading fallback and uses
+The v62 engine keeps the procedural kit as an offline/loading fallback and uses
 the following authored assets when the local files are available. The files are
 bundled under `public/models/drums/` for this app only; they are not exposed as
 separate downloads or redistributed independently.
+
+## v60 loaded-kit playing-surface alignment
+
+The imported snare, floor-tom, and cymbal stands remain vertical. Only the
+hi-hat and cymbal/bell subassemblies receive a small player-facing pitch around
+their hubs; the previous whole-root tilt leaned each stand mast and tripod with
+the playing surface. No model geometry, material count, draw count, or animated
+frame work was added. Existing calibrated contacts, sticks, and hit/rebound
+poses remain unchanged.
+
+The v62 hand presentation keeps the Blender-baked palm mesh and adds the
+existing four slim finger paths plus opposing thumb as a static grip overlay.
+Those paths are now placed over the distal palm and share the stick's exact
+local frame; the previous camera-facing correction could rotate them away from
+the shaft, while their old placement ended at mid-palm. Finger tips are spaced
+along the shaft axis and held just over its camera-facing tangent so the
+five-finger grip remains legible at compact size. The geometry is cached and
+never deformed per frame. The overlay is 300 triangles per hand and remains
+inside the established Player/Showcase limits.
+
+## Blender-authored anatomical player hands (v59)
+
+- Runtime asset: `public/models/drums/hands/blender-cc0-matched-grip-arm-v7.glb`
+- Preparation source: `scripts/author-drum-hand-assets.py`
+- Original licensed source: `assets/Hands Rigged/Hands + armature.blend`
+- Source license record: `assets/Hands Rigged/92895 - LICENSE.html`
+- Provenance: the bundled “Hands + armature” rigged anatomical hand source.
+  The source license page and accompanying provenance identify it as CC0 1.0;
+  the original Blender file is kept intact and is never overwritten by export.
+- The offline Blender script derives the stick axis from the posed middle-finger
+  chain, flexes all four finger chains around their local palmward axis, and
+  rebases the baked mesh at the proximal wrist heel. This keeps the shaft
+  through the finger/thumb grip rather than at the fingertips. It fits the
+  source hand to 86 × 190 × 42 mm references and extends it into a
+  continuous rounded bare forearm that widens toward the elbow and splays
+  outward from the stick into the player's lower corners. Blender exports the
+  hand and forearm as separate static meshes so the engine can keep the
+  wrist/stick grip calibrated while aiming the forearm toward the player's
+  lower outer corner. The arm is only transformed as a rigid mesh during hits;
+  there is no skeleton or per-frame deformation. The combined asset contains
+  2,176 triangles per hand/arm pair. Three.js mirrors the authored hand for the
+  other side.
+- The runtime meshes contain no skeleton, textures, or animation. They replace
+  the previous static grip plus procedural forearm/sleeve pieces, leaving the
+  existing hand-root hit/rebound motion, calibrated contact points, fallback,
+  and public engine API intact. All posing and reduction happen offline; no
+  geometry is built or deformed per frame.
+
+## Legacy anatomical hand (v49)
+
+- Runtime asset: `public/models/drums/hands/posable-right-cc0-grip.glb`
+- Original licensed source: `assets/posable-right-cc0-source.glb`
+- Preparation script: `scripts/prepare-drum-hand-asset.mjs`
+- Source page: https://www.innerscene.com/tools/library/3d-parts/posable-anatomical-right-hand-f6098b4f
+- Provenance: Innerscene, “Posable anatomical right hand,” built from the
+  MakeHuman/MPFB anatomical base and rig.
+- License: CC0 1.0 Universal. The source page identifies public-domain use,
+  modification, redistribution, and commercial use; the library terms are at
+  https://www.innerscene.com/tools/library/terms.
+- The source has a 16-bone hand rig, one skin material, and no texture maps. Its
+  listed overall dimensions are 136.8 × 185.6 × 73.9 mm; the source mesh is
+  12,728 triangles. The authored grip is baked and reduced offline to 1,418
+  triangles and 711 vertices per hand.
+
+The legacy preparation script poses the finger joints around the existing 5A,
+normalizes the wrist to the grip origin, maps the authored finger axis to the
+engine's stick axis, and bakes skin deformation before reduction. The runtime
+loads one small static mesh, mirrors it for the left hand, and keeps the existing
+hand-root hit/rebound transforms and calibrated contact points. The attached
+forearm and sleeve remained cached static geometry; there was no runtime rig,
+simplification, or per-frame hand-mesh work. If the hand asset is unavailable,
+the existing procedural grip stays as the fallback.
+
+The legacy idle wrists remained on opposite sides of their snare/tom surfaces. The
+sticks cross inward toward their targets rather than pulling both hands together
+above the center of the kit or pointing directly along the camera axis.
 
 ## Drum Kit Shell Set
 
@@ -35,20 +111,16 @@ separate downloads or redistributed independently.
   and prohibits redistribution outside the project/app scope. Drum Hero keeps
   the files bundled only inside this application in accordance with those terms.
 
-The assets remain in the repository with this provenance record, but v41 does
+The assets remain in the repository with this provenance record, but v41 did
 not fetch or mount them. Each source is a single static 694-vertex holding mesh
 with neither forearm geometry nor independently poseable fingers. At the compact
 player size that mesh reads as a detached mitten and cannot maintain an
 anatomically meaningful stick grip while a hand animates to a hit target.
 
-Instead, the engine uses its cached articulated hand rig in both its fallback
-and CC0-component-kit paths: a connected 240 mm tapered forearm, overlapping
-wrist and palm, four individually drawn slim curled fingers, and an opposing
-thumb that crosses the 5A from the anatomical radial side. The stick remains on
-the unchanged animated local +Y shaft, so all calibrated contact targets and
-rebound motion are preserved. The rig reuses the five pre-existing digit draw
-lanes per hand and replaces (rather than layers over) the two static FUZE hand
-meshes; it creates no geometry or materials in the animation loop.
+The v59 CC0 Blender-authored meshes supersede the temporary procedural hand in
+the loaded component-kit path. The procedural hand remains available as the
+asset-loading fallback; the FUZE meshes are retained only as bundled source
+assets with the terms above.
 
 The v33 calibration records separate centre-contact points for the procedural
 fallback and the component assembly in `lib/drum-dimensions.ts`; their authored

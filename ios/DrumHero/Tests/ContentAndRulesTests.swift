@@ -19,6 +19,31 @@ final class ContentAndRulesTests: XCTestCase {
         let patternIDs = Set(content.patterns.map(\.id))
         XCTAssertTrue(content.lessons.compactMap(\.practicePatternId).allSatisfy(patternIDs.contains))
         XCTAssertTrue(content.patterns.allSatisfy { $0.defaultBpm >= 40 && $0.defaultBpm <= 200 })
+        XCTAssertEqual(content.translations.count, 24)
+        XCTAssertEqual(content.translations["es"]?["Home"], "Inicio")
+        XCTAssertEqual(content.translations["es"]?["lesson.meet-the-kit.title"], "Conoce la batería")
+        XCTAssertEqual(content.translations["es"]?["dashboard.tool.practice.title"], "Panel de práctica")
+        XCTAssertTrue(content.translations["ja"]?["dashboard.tool.trainer.description"]?.contains("適応") == true)
+        XCTAssertEqual(content.translations["ja"]?["lesson.count-the-grid.summary"], "4分音符と8分音符を時間上の位置として読みます。")
+    }
+
+    func testTeachingContentTranslationsAreIndexedWithoutChangingPatterns() throws {
+        let content = try MobileContentDocument.load(from: Bundle(for: Self.self))
+        let spanish = Locale(identifier: "es")
+        let source = try XCTUnwrap(content.patterns.first { $0.id == "single-stroke" })
+        XCTAssertNotEqual(content.localized("pattern.\(source.id).name", fallback: source.name, locale: spanish), source.name)
+        XCTAssertNotEqual(content.localized("pattern.\(source.id).description", fallback: source.description, locale: spanish), source.description)
+        XCTAssertEqual(source.id, "single-stroke")
+        XCTAssertEqual(source.hits.count, 8)
+        XCTAssertTrue(content.localized("lesson.meet-the-kit.step.1", fallback: "", locale: spanish).contains("tempo"))
+    }
+
+    @MainActor func testAutomaticLanguageMatchingHandlesRegionsAndChineseScripts() {
+        XCTAssertEqual(LanguageSettings.matchLanguage(["xx-ZZ", "fr-CA", "en-US"]), "fr")
+        XCTAssertEqual(LanguageSettings.matchLanguage(["zh-TW"]), "zh-Hant")
+        XCTAssertEqual(LanguageSettings.matchLanguage(["zh-Hans-CN"]), "zh-Hans")
+        XCTAssertEqual(LanguageSettings.matchLanguage(["pt-PT"]), "pt-BR")
+        XCTAssertEqual(LanguageSettings.matchLanguage(["xx-ZZ"]), "en")
     }
 
     // DHM-041: both native implementations consume the same scoring boundary fixture.

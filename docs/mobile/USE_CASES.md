@@ -67,7 +67,7 @@ This is the native mobile product contract. The iOS core release targets iOS/iPa
 | DHM-100 | Create, accent, edit, save, select, and delete custom eighth/sixteenth-note grooves. |
 | DHM-101 | Focus a loop on a selected beat or bar range. |
 | DHM-102 | Practice groove-to-fill transitions with selected sticking and lead hand. |
-| DHM-103 | Choose straight/swung/laid-back feel, sparse click, and hands/feet focus. |
+| DHM-103 | Choose seated/no-kick or one-voice practice while preserving the target rhythm; adapted results stay separate from standard personal bests. Feel, sparse-click, and limb-focus parity remain planned. |
 | DHM-104 | Build routines with per-pattern tempo/repetitions and accuracy/timing gates; exchange setups. |
 | DHM-105 | Use progressive tempo ladders and adaptive review from local weaknesses. |
 | DHM-106 | View per-voice accuracy/timing, accent velocity, waveform overlays, and weak-spot drills. |

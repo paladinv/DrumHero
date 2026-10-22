@@ -1,6 +1,11 @@
 import type { DrumPart } from "./song-library";
+import type { SongInstrument } from "./types";
+export type ReviewedRecordingHit={onsetIndex:number;expectedIndex:number|null;instrument?:SongInstrument};
 export type SongRecording = {
+  name?: string;
   id: string;
+  clockAligned?: boolean;
+  trimmedFrom?: string;
   songId: string;
   sectionId?: string;
   createdAt: string;
@@ -13,7 +18,10 @@ export type SongRecording = {
   extraHits?: number;
   meanOffsetMs?: number | null;
   onsetTimes?: number[];
-  confidence?: "low" | "medium" | "high";
+  expectedTimes?: number[];
+  reviewedMatches?: ReviewedRecordingHit[];
+  alignmentOffsetMs?: number;
+  confidence?: "low" | "medium" | "high" | "reviewed";
   targetBpm?: number;
   patternFingerprint?: string;
 };
@@ -118,10 +126,20 @@ export function compareDrumRecordings(student: SongRecording, reference: SongRec
 const DB_NAME = "drum-hero-song-recordings";
 const STORE = "takes";
 function db(): Promise<IDBDatabase> { return new Promise((resolve, reject) => { const request = indexedDB.open(DB_NAME, 1); request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(STORE)) request.result.createObjectStore(STORE); }; request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
-export async function saveTake(id: string, blob: Blob) { const database = await db(); try { await new Promise<void>((resolve, reject) => { const transaction = database.transaction(STORE, "readwrite"); transaction.objectStore(STORE).put(blob, id); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); } finally { database.close(); } }
-export async function loadTake(id: string): Promise<Blob | null> { const database = await db(); try { return await new Promise((resolve, reject) => { const request = database.transaction(STORE).objectStore(STORE).get(id); request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : null); request.onerror = () => reject(request.error); }); } finally { database.close(); } }
+export function storedRecordingBlob(value: unknown): Blob | null {
+  if (value instanceof Blob) return value;
+  if (!value || typeof value !== "object") return null;
+  const record = value as { data?: unknown; mimeType?: unknown };
+  return record.data instanceof ArrayBuffer && typeof record.mimeType === "string" && record.mimeType.startsWith("audio/") ? new Blob([record.data], { type: record.mimeType }) : null;
+}
+export async function saveTake(id: string, blob: Blob) {
+  const data = await blob.arrayBuffer(), database = await db();
+  try { await new Promise<void>((resolve, reject) => { const transaction = database.transaction(STORE, "readwrite"); transaction.objectStore(STORE).put({ data, mimeType: blob.type || "audio/webm" }, id); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error ?? new Error("Could not save this take.")); transaction.onabort = () => reject(transaction.error ?? new Error("Saving this take was interrupted.")); }); } finally { database.close(); }
+}
+export async function loadTake(id: string): Promise<Blob | null> { const database = await db(); try { return await new Promise((resolve, reject) => { const request = database.transaction(STORE).objectStore(STORE).get(id); request.onsuccess = () => resolve(storedRecordingBlob(request.result)); request.onerror = () => reject(request.error); }); } finally { database.close(); } }
+
 export async function deleteTake(id: string) { const database = await db(); try { await new Promise<void>((resolve, reject) => { const transaction = database.transaction(STORE, "readwrite"); transaction.objectStore(STORE).delete(id); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); }); } finally { database.close(); } }
-export async function analyzeTake(blob: Blob, targetBpm: number, part?: Pick<DrumPart, "beats" | "subdivision" | "hits">): Promise<Pick<SongRecording, "hitCount" | "timingConsistency" | "matchedHits" | "missedTargets" | "extraHits" | "meanOffsetMs" | "onsetTimes" | "confidence">> {
+export async function analyzeTake(blob: Blob, targetBpm: number, part?: Pick<DrumPart, "beats" | "subdivision" | "hits">, options: { phaseSeconds?: number } = {}): Promise<Pick<SongRecording, "hitCount" | "timingConsistency" | "matchedHits" | "missedTargets" | "extraHits" | "meanOffsetMs" | "onsetTimes" | "expectedTimes" | "confidence">> {
   const context = new AudioContext();
   try {
     const buffer = await context.decodeAudioData(await blob.arrayBuffer());
@@ -134,12 +152,12 @@ export async function analyzeTake(blob: Blob, targetBpm: number, part?: Pick<Dru
     for (let i = 2; i < energies.length - 2; i++) if (energies[i] > threshold && energies[i] > energies[i - 1] * 1.5 && energies[i] > energies[i + 1] && (!onsets.length || i * windowSize / sampleRate - onsets[onsets.length - 1] > 0.09)) onsets.push(Math.round(i * windowSize / sampleRate * 1000) / 1000);
     if (!part || !part.hits.length || onsets.length < 2) return { hitCount: onsets.length, timingConsistency: null, matchedHits: 0, missedTargets: part?.hits.length ?? 0, extraHits: onsets.length, meanOffsetMs: null, onsetTimes: onsets.slice(0, 100), confidence: onsets.length < 3 ? "low" : "medium" };
     const stepSec = 60 / targetBpm * (4 / part.subdivision), loopSec = part.beats * 60 / targetBpm;
-    const expectedOffsets = part.hits.map((hit) => hit.step * stepSec).sort((a, b) => a - b);
+    const expectedOffsets = [...new Set(part.hits.map((hit) => hit.step * stepSec))].sort((a, b) => a - b);
     const clipDuration = buffer.duration;
     const tolerance = 0.11;
     let best = { phase: 0, matched: -1, extras: onsets.length, absError: Number.POSITIVE_INFINITY, misses: 0 };
     const scan = Math.max(0.005, stepSec / 40);
-    for (let phase = 0; phase < loopSec && phase < clipDuration + loopSec; phase += scan) {
+    for (let phase = options.phaseSeconds ?? 0; phase < (options.phaseSeconds === undefined ? loopSec : options.phaseSeconds + scan / 2) && phase < clipDuration + loopSec; phase += scan) {
       const used = new Set<number>(); let matched = 0, absError = 0, expectedCount = 0;
       for (let bar = 0; phase + bar * loopSec <= clipDuration; bar++) for (const offset of expectedOffsets) {
         const target = phase + bar * loopSec + offset;
@@ -155,6 +173,8 @@ export async function analyzeTake(blob: Blob, targetBpm: number, part?: Pick<Dru
     const expectedTotal = best.matched + best.misses;
     const consistency = expectedTotal ? Math.round(100 * best.matched / expectedTotal) : null;
     const meanOffsetMs = best.matched ? Math.round(best.absError / best.matched * 1000) : null;
-    return { hitCount: onsets.length, timingConsistency: consistency, matchedHits: best.matched, missedTargets: best.misses, extraHits: best.extras, meanOffsetMs, onsetTimes: onsets.slice(0, 100), confidence: best.matched >= 8 && onsets.length >= 8 ? "medium" : "low" };
+    const expectedTimes: number[] = [];
+    for (let bar = 0; best.phase + bar * loopSec <= clipDuration && expectedTimes.length < 500; bar++) for (const offset of expectedOffsets) { const time = best.phase + bar * loopSec + offset; if (time <= clipDuration) expectedTimes.push(Math.round(time * 1000) / 1000); }
+    return { hitCount: onsets.length, expectedTimes, timingConsistency: consistency, matchedHits: best.matched, missedTargets: best.misses, extraHits: best.extras, meanOffsetMs, onsetTimes: onsets.slice(0, 100), confidence: best.matched >= 8 && onsets.length >= 8 ? "medium" : "low" };
   } finally { await context.close(); }
 }

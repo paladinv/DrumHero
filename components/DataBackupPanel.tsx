@@ -1,5 +1,6 @@
 "use client";
 
+import { AudioStorageManager } from "./AudioStorageManager";
 import { useRef, useState } from "react";
 import { createLocalBackup, parseLocalBackup, restoreLocalBackup } from "@/lib/local-backup";
 
@@ -44,7 +45,7 @@ export function DataBackupPanel() {
       const parsed = parseLocalBackup(await file.text());
       setBackup(parsed);
       setFileName(file.name);
-      setMessage(`Ready to restore ${Object.keys(parsed.localStorage).length} local data groups, including ${parsed.songRecordings.length} song recordings and ${parsed.customSamples.length} custom audio samples.`);
+      setMessage(`Ready to restore ${Object.keys(parsed.localStorage).length} local data groups, including ${parsed.trainerRecordings?.length ?? 0} Trainer recordings, ${parsed.songRecordings.length} song recordings and ${parsed.customSamples.length} custom audio samples.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not read this backup.");
     } finally { if (fileInput.current) fileInput.current.value = ""; }
@@ -64,7 +65,7 @@ export function DataBackupPanel() {
   };
 
   return <section className="data-backup card" aria-labelledby="data-backup-heading">
-    <div><span className="eyebrow">Your data</span><h2 id="data-backup-heading">Back up or move your work</h2><p>Save lessons, practice history, Trainer settings, custom grooves, songs, local samples, and saved song takes in one file. The downloaded file is not password-protected, so store and share it carefully.</p></div>
+    <div><span className="eyebrow">Your data</span><h2 id="data-backup-heading">Back up or move your work</h2><p>Save lessons, practice history, Trainer settings, custom grooves, songs, local samples, and saved song takes and reference audio in one file. The downloaded file is not password-protected, so store and share it carefully.</p></div>
     <div className="data-backup-actions">
       <button type="button" className="button" onClick={() => void exportBackup()} disabled={busy}>{busy ? "Working…" : "Download full backup"}</button>
       <div className="data-backup-restore">
@@ -73,6 +74,7 @@ export function DataBackupPanel() {
         {backup && <button type="button" className="button" onClick={() => void restore()} disabled={busy}>Restore {fileName}</button>}
       </div>
     </div>
+    <AudioStorageManager />
     <p className="data-backup-message" role="status">{message || "Restore replaces the Drum Hero data in this browser. Export a backup first if you want to keep both copies."}</p>
   </section>;
 }

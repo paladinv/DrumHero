@@ -98,7 +98,7 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 - **UC-77 — Versioned storage:** Persisted progress includes an explicit schema version.
 - **UC-78 — Corruption recovery:** Invalid JSON or incompatible data falls back to safe defaults without preventing launch.
 - **UC-79 — Settings bounds:** Restored preferred tempo is clamped to 40–200 BPM and sound defaults on unless explicitly disabled.
-- **UC-80 — Local privacy:** No account, backend, upload, or analytics is used. Microphone/line-in permission is requested only when the learner connects Trainer audio input; recordings are not stored.
+- **UC-80 — Local privacy:** Local use requires no account. Optional account sync uploads the selected library only after opt-in; recording audio, reference audio, their metadata, and Song practice microphone voice templates remain local and are not synced or shared. Microphone/line-in permission is requested only when the learner connects input or explicitly records a take.
 
 ## Accessibility, compatibility, and failure handling
 
@@ -116,8 +116,8 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 
 ## Song Library (initial web release)
 
-- **UC-S01 — Local repertoire:** Browse two original examples and add personal songs with title, artist, difficulty, tempo, meter, tags, notes, source attribution, and authorization metadata.
-- **UC-S02 — Drum arrangement:** Add sections and editable five-voice grid parts, with bounded beat count, subdivision, and tempo.
+- **UC-S01 — Local repertoire:** Browse eight original examples and add personal songs with title, artist, difficulty, tempo, meter, tags, notes, source attribution, and authorization metadata.
+- **UC-S02 — Drum arrangement:** Add sections and editable eight-voice grid parts, with bounded beat count, subdivision, and tempo.
 - **UC-S03 — Practice handoff:** Open a part in Practice Pad or Trainer and save completed section scores to the local library.
 - **UC-S04 — Organize:** Search songs, mark favorites, archive, create collections, practice queues, and setlists.
 - **UC-S05 — Import/export:** Review a Drum Hero song JSON before import; export songs and library backups.
@@ -126,6 +126,55 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 - **UC-S08 — Find and order:** Filter by meter, tag, collection, favorite, or due review; sort by title, artist, recent practice, or review date. Reorder arrangement sections/parts and queue/setlist songs.
 - **UC-S09 — Practice plan:** Assign a section to each queue/setlist entry, launch that section in Practice Pad, and edit scheduled practice dates.
 - **UC-S10 — Arrange efficiently:** Copy a part into another section, place accents, record sticking and dynamics notes, and move section/part order.
-- **UC-S11 — Understand readiness:** See the section mastery threshold, outstanding review, and the specific section to practice next; review recent section scores.
+- **UC-S11 — Understand readiness:** See the section mastery threshold, outstanding review, and the specific section to practice next; review recent section scores. Guided paths sequence original songs and credit complete, arrangement-matched scored passes.
 
-Section reviews, tempo ramps, readiness estimates, arrangement snapshots, checklists, local rehearsal roles, encrypted backup, and backup conflict review are available. Optional account sync and sharing permissions remain future work.
+Section reviews, tempo ramps, readiness estimates, arrangement snapshots, checklists, local rehearsal roles, encrypted backup, and backup conflict review are available. Standard JSON backup import supports validation preview and per-song add, replace, skip, or separate-copy decisions. Optional Supabase accounts and revision-based whole-library sync are available when configured. Owners can also create viewer-only selected-song snapshots with an optional collection; snapshots omit private notes, journals, progress, plans, and audio, remain separate from automatic sync, and can be copied by a recipient into a local library. See SONG_LIBRARY_SYNC.md.
+
+- **UC-S12 — Song session:** Practice the complete arrangement with repeats, tempo changes, section-entry feedback, and keyboard/touch scores or self ratings.
+- **UC-S13 — Guided queue:** Set tempo and repetitions per item; start, skip, advance, stop, and resume a locally saved queue.
+- **UC-S14 — Practice today:** Prioritize scheduled songs, overdue sections, weak results, and songs not played recently.
+- **UC-S15 — Recover edits:** Undo/redo changes and export in-memory data when browser storage cannot save.
+- **UC-S16 — Recording playback:** Load a take and inspect its waveform, expected-hit markers and detected onsets; seek to an unmatched onset.
+- **UC-S17 — Performance:** Display large section cues, upcoming sections, count-ins and setlist position, with fullscreen support.
+- **UC-S18 — Rehearse with reference audio:** Attach audio the learner owns or has permission to use, set the audio time for a section downbeat, and play or export it locally. Audio is excluded from sync and sharing.
+- **UC-S19 — Follow practice with reference audio:** Start a selected song section; local reference audio begins after the same count-in and follows pause, resume, and reset without affecting the score.
+- **UC-S20 — Score acoustic Song practice:** Calibrate up to eight kit voices from five strikes each. The scorer displays match confidence and leaves uncertain strikes unscored; calibration stays local.
+- **UC-S21 — Compare attempts:** Select two complete scored attempts of the same arrangement part and compare misses and timing by bar and voice.
+- **UC-S22 — Edit learning targets:** Update a custom path step’s song, section, part, label, tempo, score threshold, and required passes after adding it.
+- **UC-S23 — Search arrangement detail:** Search section and part names, coaching notes, sticking, dynamics, and hit articulations alongside song metadata.
+- **UC-S19 — Find a playable groove:** Filter by BPM range, drum voice, subdivision, feel, and fill presence; retain these values in saved searches.
+- **UC-S20 — Resolve concurrent edits:** Review changed song fields and sections, plus changed collections, queues, setlists, and learning paths. Choose device, cloud, or keep both for each conflicting record.
+- **UC-S21 — Build a learning path:** Create a custom ordered path from song sections, set target tempos and pass requirements, and unlock steps in sequence.
+- **UC-S22 — Practice the full kit:** Open a Song Library part from Practice Pad or Trainer and score kick, snare, closed/open hi-hat, ride, rimshot, tom, and crash.
+- **UC-S23 — Inspect bar evidence:** Review the latest scored pass by bar and drum voice, with target misses and average timing offset.
+- **UC-S24 — Protect audio backups:** Export and restore the library, song recordings, and local reference audio together in an AES-GCM encrypted backup.
+
+## Song Library practice and repertoire tools
+
+- Select a range of arrangement bars, repeat it, and use the tempo ladder after two scored rounds of 90% or better. Partial loops do not count as complete-part readiness evidence.
+- Read staff notation or drum tab beside the grid and during playback; a text beat list describes hits, accents, ghosts, and sticking.
+- Recommendations use recent evidence for the current part, including missed voices and early/late timing when available. They offer a slower section focus and a specific exercise.
+- Compare current or saved arrangements, inspect changed bars, and restore a single section without replacing the rest of the song.
+- Apply tags, archives, collection membership, schedules, and exports to multiple search results.
+- Download the Song Library interface and built-in sounds explicitly for offline refresh. Storage and download status are shown; other pages and cloud sync require a connection.
+- Save manual recording alignment offsets and inspect two takes on the same expected-hit timeline. Alignment does not rewrite original audio or scores.
+- Estimate setlist duration with repeats, tempo targets, breaks and count-ins. The runner shows transition notes and waits for break completion before the configured count-in.
+- Check eight-voice parts before launching five-voice Practice Pad or Trainer; create a compatible variation with explicit substitutions while preserving the original arrangement. Unused practice variations do not add requirements to stage readiness.
+- Navigate the grid with arrow keys, Home/End and Space/Enter. Undo/redo uses Ctrl/Cmd+Z and Shift. Optional live beat announcements and supported-device vibration complement the click.
+- Review cloud revision history and device labels, with explicit review before recovery. Resolve concurrent song edits by changed fields and sections. History needs the second Supabase migration and retains the previous 20 saved versions.
+- Follow the first-session guide through song selection, notation, practice and results.
+
+## Song Library saved workflows (2026-10-20)
+
+- The shorter library header and sticky song actions keep the selected song and Practice action visible. Sound/accessibility controls, daily recommendations, saved presets, and plan editors use disclosures.
+- Compact staff/tab notation highlights the live beat. Click a measure, or use its keyboard-accessible Practice measure button, to open that part and bar in practice.
+- Save per-song practice presets with section/part, bar range, repetitions, tempo ladder, input mode, metronome, guide and notation settings. Presets are included in library backups and optional account sync.
+- Setlists now use stable entry IDs. Repeated songs can have independent sections, parts, tempos, repetitions, count-ins, breaks and notes. Legacy setlists remain readable.
+- Recording can start after a four-count on a monotonic practice clock, with an optional section guide. Silence suggestions and manual trim ranges create a separate WAV copy; originals remain intact. Trimmed copies keep shifted onset/reference timelines and do not inherit an unedited timing score.
+- Performance history includes accuracy/tempo trends with part and input filters, plus a clearly defined comfortable-tempo estimate.
+- Tap at least three beats to estimate tempo, then explicitly apply it to the song or practice session.
+- Save searches with multiple required tags, favorites, archive/review and collection filters. Collection songs support drag-and-drop ordering and keyboard move buttons; Collection order is a browse sort.
+- Rehearse imports before saving and inspect paginated exact replacement changes, including notes, hit expression, repeats and arrangement metadata.
+- Export landscape rehearsal PDFs with staff notation and paginated notes, sticking, dynamics and stage cues. Export runs locally and works from a complete offline download.
+- Offline downloads include byte sizes and SHA-256 checks. Verify readiness without a network connection, detect missing/corrupt cached resources, and update to repair them. Browser storage eviction can still remove data; keep backups.
+- Interrupted practice rounds save local bar position and settings. Restore settings, then explicitly resume from the beginning of that bar. Changed arrangements invalidate recovery. Only the resumed portion is scored and is marked partial, so recovery cannot create a complete readiness pass. Audio, recording takes and round recovery stay local.

@@ -1,0 +1,45 @@
+import { test,expect } from '@playwright/test';
+import { createServer } from 'node:http';
+const fixture={id:'kit-beat',title:'Kit Beat',artist:'Composer',difficulty:'Beginner',bpm:200,meter:'4/4',tags:[],notes:'',createdAt:'2026-10-19T00:00:00Z',updatedAt:'2026-10-19T00:00:00Z',sections:[{id:'verse',name:'Verse',kind:'verse',notes:'',parts:[{id:'main',name:'Main',bpm:200,beats:8,subdivision:8,hits:[{step:0,instrument:'kick'},{step:8,instrument:'ride',accent:true}]}]}]};
+test.beforeEach(async({page})=>{await page.addInitScript(song=>{if(!localStorage.getItem('drum-hero:song-library:v1'))localStorage.setItem('drum-hero:song-library:v1',JSON.stringify({version:1,songs:[song],snapshots:[{id:'original',songId:song.id,label:'Original',createdAt:'2026-10-19T00:00:00Z',sections:song.sections}]}));},fixture);});
+async function openSong(page:import('@playwright/test').Page){await page.goto('/song-library');await page.getByRole('button',{name:/^Kit Beat Composer/}).click();}
+test('shows notation, navigates the grid by keyboard and creates a compatible variation',async({page})=>{
+ await openSong(page);await page.getByRole('tab',{name:'Arrangement',exact:true}).click();
+ await expect(page.getByRole('img',{name:/Kit Beat drum staff notation/})).toBeVisible();
+ const first=page.getByRole('button',{name:'kick step 1',exact:true});await first.focus();await page.keyboard.press('ArrowRight');await expect(page.getByRole('button',{name:'kick step 2',exact:true})).toBeFocused();await page.keyboard.press('Space');await expect(page.getByRole('button',{name:'kick step 2',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('link',{name:'Practice section',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Create compatible variation',exact:true}).click();
+ await expect(page.getByRole('link',{name:'Practice section',exact:true})).toBeVisible();
+ const parts=await page.evaluate(()=>JSON.parse(localStorage.getItem('drum-hero:song-library:v1')!).songs.find((song:{id:string})=>song.id==='kit-beat').sections[0].parts);
+ expect(parts).toHaveLength(2);expect(parts[0].hits.some((hit:{instrument:string})=>hit.instrument==='ride')).toBe(true);expect(parts[1].hits.some((hit:{instrument:string})=>hit.instrument==='ride')).toBe(false);
+});
+test('loops one selected bar and keeps partial performance out of readiness evidence',async({page})=>{
+ await openSong(page);await page.getByRole('tab',{name:'Practice',exact:true}).click();
+ await page.getByRole('checkbox',{name:'Practice a bar range',exact:true}).check();await page.getByRole('spinbutton',{name:'First bar',exact:true}).fill('2');await page.getByRole('spinbutton',{name:'Last bar',exact:true}).fill('2');await page.getByRole('spinbutton',{name:'Repetitions',exact:true}).fill('2');
+ await expect(page.getByText('Bar 1 / 2 · 200 BPM · 4/4',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Start four-count',exact:true}).click();await expect(page.getByText(/average part score/)).toBeVisible({timeout:12000});
+ const attempt=await page.evaluate(()=>JSON.parse(localStorage.getItem('drum-hero:song-library:v1')!).progress[0].attempts[0]);expect(attempt.completePart).toBe(false);expect(attempt.timing.missed).toBe(2);
+});
+test('bulk tags songs, exports selections and restores a section from a snapshot',async({page})=>{
+ await openSong(page);await page.getByText('Bulk library actions',{exact:true}).click();await page.getByRole('button',{name:'Select results',exact:true}).click();await page.getByRole('textbox',{name:'Bulk tag',exact:true}).fill('Show');await page.getByRole('button',{name:'Tag selected',exact:true}).click();
+ const download=page.waitForEvent('download');await page.getByRole('button',{name:'Export selected',exact:true}).click();expect((await download).suggestedFilename()).toBe('drum-hero-selected-library.json');
+ await page.getByRole('tab',{name:'Arrangement',exact:true}).click();await page.getByRole('button',{name:'kick step 1',exact:true}).click();await page.getByText('Compare arrangements and restore sections',{exact:true}).click();await expect(page.getByText('Changed bars: 1',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Restore Verse from snapshot',exact:true}).click();await expect(page.getByRole('button',{name:'kick step 1',exact:true})).toHaveAttribute('aria-pressed','true');
+});
+test('walks through a first session and configures setlist breaks and count-ins',async({page})=>{
+ await openSong(page);await page.getByRole('button',{name:'Guide my first session',exact:true}).click();await expect(page.getByRole('heading',{name:'Choose a playable song',exact:true})).toBeVisible();await page.getByRole('button',{name:'Next guide step',exact:true}).click();await expect(page.getByRole('tab',{name:'Arrangement',exact:true})).toHaveAttribute('aria-selected','true');await page.getByRole('button',{name:'Close guide',exact:true}).click();
+ await page.getByRole('tab',{name:'Overview',exact:true}).click();await page.getByText('Collections and planning',{exact:true}).click();await page.getByRole('button',{name:'Add setlist',exact:true}).click();await page.getByRole('tab',{name:'Performance',exact:true}).click();await page.getByRole('spinbutton',{name:'Break before song (seconds)',exact:true}).fill('30');await page.getByRole('spinbutton',{name:'Count-in beats',exact:true}).fill('8');await page.getByRole('textbox',{name:'Transition note',exact:true}).fill('Switch sticks');await page.getByRole('button',{name:'Start queue',exact:true}).click();await expect(page.getByText(/Switch sticks · 30 second break · 8 count-in beats/)).toBeVisible();await page.getByRole('button',{name:'Break complete · ready for count-in',exact:true}).click();await expect(page.getByRole('button',{name:'Start 8-beat count-in',exact:true})).toBeVisible();
+});
+test('downloads the interface and creates a song after an offline refresh',async({page,baseURL})=>{
+ test.setTimeout(90000);
+ // A stopped origin tests real cache fallback and avoids Playwright's WebKit
+ // offline-emulation bug: microsoft/playwright#42775.
+ const proxy=createServer(async(request,response)=>{try{const upstream=await fetch(new URL(request.url??'/',baseURL),{headers:{accept:request.headers.accept??'*/*'}});const headers=Object.fromEntries([...upstream.headers].filter(([key])=>!['content-encoding','content-length','transfer-encoding','connection'].includes(key)));response.writeHead(upstream.status,headers);response.end(Buffer.from(await upstream.arrayBuffer()));}catch{response.destroy();}});
+ await new Promise<void>(resolve=>proxy.listen(0,'127.0.0.1',resolve));const address=proxy.address();if(!address||typeof address==='string')throw Error('Temporary origin unavailable');
+ try{await page.goto(`http://127.0.0.1:${address.port}/song-library`);await expect(page.getByRole('heading',{name:'Find a song',exact:true})).toBeVisible();await page.getByText('Offline download and storage',{exact:true}).click();await page.getByRole('button',{name:'Download for offline use',exact:true}).click();await expect(page.getByText(/Ready for offline use/)).toBeVisible({timeout:60000});
+ await page.getByRole('button',{name:'Verify offline readiness',exact:true}).click();await expect(page.getByText(/Offline integrity verified/)).toBeVisible();
+ await page.evaluate(async()=>{const meta=await caches.open('drum-hero-song-offline-meta'),response=await meta.match('/song-offline-status'),status=await response!.json(),cache=await caches.open(status.name);await cache.delete('/drum-hero-logo.svg');});
+ await page.getByRole('button',{name:'Verify offline readiness',exact:true}).click();await expect(page.getByText(/Offline download needs repair/)).toBeVisible();
+ await page.getByRole('button',{name:'Update offline download',exact:true}).click();await expect(page.getByText(/Ready for offline use/)).toBeVisible({timeout:60000});
+ proxy.closeAllConnections();await new Promise<void>((resolve,reject)=>proxy.close(error=>error?reject(error):resolve()));
+ await page.reload({waitUntil:'domcontentloaded'});await expect(page.getByRole('heading',{name:'Find a song',exact:true})).toBeVisible();await page.getByText('Offline download and storage',{exact:true}).click();await page.getByRole('button',{name:'Verify offline readiness',exact:true}).click();await expect(page.getByText(/Offline integrity verified/)).toBeVisible();await page.getByRole('textbox',{name:'Title',exact:true}).fill('Offline Groove');await page.getByRole('textbox',{name:'Artist',exact:true}).fill('Drummer');await page.getByRole('button',{name:'Add song',exact:true}).click();await page.reload({waitUntil:'domcontentloaded'});await expect(page.getByRole('button',{name:/^Offline Groove Drummer/})).toBeVisible();
+ }finally{if(proxy.listening){proxy.closeAllConnections();await new Promise<void>(resolve=>proxy.close(()=>resolve()));}}
+});

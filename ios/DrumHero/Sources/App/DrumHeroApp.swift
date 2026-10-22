@@ -38,7 +38,9 @@ enum DrumHeroTab: String, CaseIterable, Identifiable {
 }
 
 struct DrumHeroRootView: View {
+    private static var didResetForUITests = false
     @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var language = LanguageSettings()
     @AppStorage("drumHero.selectedTab") private var savedTab = DrumHeroTab.home.rawValue
     @State private var content: MobileContentDocument?
     @State private var loadError: String?
@@ -54,8 +56,9 @@ struct DrumHeroRootView: View {
     }
 
     init() {
-        if ProcessInfo.processInfo.arguments.contains("--uitesting-reset") {
-            ["drumHero.selectedTab", "drumHero.practicePatternID", "drumHero.practiceBpm"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        if ProcessInfo.processInfo.arguments.contains("--uitesting-reset"), !Self.didResetForUITests {
+            Self.didResetForUITests = true
+            ["drumHero.selectedTab", "drumHero.practicePatternID", "drumHero.practiceBpm", "drumHero.language"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
         }
         do { _content = State(initialValue: try MobileContentDocument.load()) }
         catch { _loadError = State(initialValue: error.localizedDescription) }
@@ -78,7 +81,7 @@ struct DrumHeroRootView: View {
                 }
                 .tint(Color(red: 0.20, green: 0.73, blue: 0.63))
                 .onAppear {
-                    if !content.patterns.contains(where: { $0.id == practicePatternID }),
+                    if !content.practicePatterns.contains(where: { $0.id == practicePatternID }),
                        let firstPattern = content.patterns.first {
                         practicePatternID = firstPattern.id
                         practiceBpm = firstPattern.defaultBpm
@@ -89,8 +92,12 @@ struct DrumHeroRootView: View {
                 ContentUnavailableView("Drum Hero content is unavailable", systemImage: "exclamationmark.triangle", description: Text(loadError ?? "The bundled content could not be opened."))
             }
         }
+        .environmentObject(language)
+        .environment(\.locale, language.locale)
+        .environment(\.layoutDirection, language.layoutDirection)
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { practice.stopForInterruption() }
+            if phase == .active { language.refreshDeviceLanguage() }
+            else { practice.stopForInterruption() }
         }
     }
 }

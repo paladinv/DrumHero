@@ -1,0 +1,4 @@
+"use client";
+import { useRef,useState } from 'react';
+import { tapTempo } from '@/lib/song-library-next';
+export function SongTapTempo({onApply,label='Apply tapped tempo'}:{onApply:(bpm:number)=>void;label?:string}){const taps=useRef<number[]>([]),[bpm,setBpm]=useState<number|null>(null);return <div className="song-tap-tempo"><button type="button" onClick={()=>{const now=performance.now();if(now-(taps.current.at(-1)??0)>2500)taps.current=[];taps.current=[...taps.current,now].slice(-9);setBpm(tapTempo(taps.current));}}>Tap tempo</button><span role="status">{bpm?`${bpm} BPM`:'Tap at least three steady beats.'}</span><button type="button" disabled={!bpm} onClick={()=>bpm&&onApply(bpm)}>{label}</button><button type="button" onClick={()=>{taps.current=[];setBpm(null);}}>Reset taps</button></div>;}

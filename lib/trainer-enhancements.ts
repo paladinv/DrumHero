@@ -1,6 +1,8 @@
 import type { Groove, PracticePattern } from "./types";
 import { parseCustomGrooves } from "./custom-grooves";
 import type { TrainerFeel, TrainerLimbFocus } from "./trainer";
+import type { TrainerClickSound } from "./audio";
+import type { TrainerCueDensity, TrainerCueLead, TrainerCueMode } from "./trainer-cues";
 
 export type TrainerRoutineStep = {
   patternId: string;
@@ -64,9 +66,19 @@ export type TrainerSetupTransfer = {
   practicePathId: string;
   customPatterns?: Groove[];
   feel: TrainerFeel;
-  clickMode: "all" | "backbeat" | "subdivisions" | "sparse-bars";
+  clickMode: "all" | "backbeat" | "subdivisions" | "sparse-bars" | "progressive-silence";
   limbFocus: TrainerLimbFocus;
   customRoutine?: TrainerRoutine;
+  swingRatio?: number; pocketMs?: number; learningMode?: 'normal' | 'listen-copy-solo' | 'build-limbs'; phraseBars?: 0 | 4 | 8 | 16; variationId?: string;
+  dynamicsExercise?: "contrast" | "crescendo" | "evenness";
+  cueMode: TrainerCueMode;
+  cueBeat: number;
+  cueEveryBars?: TrainerCueDensity;
+  cueLeadBeats?: TrainerCueLead;
+  cueAdaptive?: boolean;
+  trainerDrumLevel: number;
+  trainerClickLevel: number;
+  clickSound: TrainerClickSound;
 };
 
 const repetitions = [4, 8, 10, 16];
@@ -91,6 +103,10 @@ export function createTrainerLoopPattern(pattern: PracticePattern, startBeat: nu
   const loopMeter = Number.isInteger(selectedBarCount) && selectedBarCount > 0
     ? `${selectedBarCount} ${selectedBarCount === 1 ? "bar" : "bars"}${meterSuffix ? ` · ${meterSuffix}` : ""}`
     : `${rangeLabel} beat loop`;
+  const trainerFillStepRanges = (pattern.trainerFillStepRanges ?? []).flatMap(([start, end]) => {
+    const clippedStart = Math.max(startStep, start), clippedEnd = Math.min(endStep, end);
+    return clippedEnd > clippedStart ? [[clippedStart - startStep, clippedEnd - startStep] as [number, number]] : [];
+  });
   return {
     ...pattern,
     ...(originalMeter ? { meter: loopMeter } : {}),
@@ -100,7 +116,8 @@ export function createTrainerLoopPattern(pattern: PracticePattern, startBeat: nu
     beats,
     hits: pattern.hits
       .filter((hit) => hit.step >= startStep && hit.step < endStep)
-      .map((hit) => ({ ...hit, step: hit.step - startStep }))
+      .map((hit) => ({ ...hit, step: hit.step - startStep })),
+    trainerFillStepRanges
   };
 }
 
@@ -110,7 +127,21 @@ export function createTrainerSetupTransfer(settings: TrainerSetupTransfer): stri
 
 export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<string>): TrainerSetupTransfer {
   const value = JSON.parse(raw) as Partial<TrainerSetupTransfer> & { application?: unknown; type?: unknown };
-  const normalized = { ...value, tempoTarget: value.tempoTarget ?? 90, tempoFailure: value.tempoFailure ?? "repeat", pathAccuracyTarget: value.pathAccuracyTarget ?? 85, pathTimingTarget: value.pathTimingTarget ?? 35 };
+  const normalized = {
+    ...value,
+    tempoTarget: value.tempoTarget ?? 90,
+    tempoFailure: value.tempoFailure ?? "repeat",
+    pathAccuracyTarget: value.pathAccuracyTarget ?? 85,
+    pathTimingTarget: value.pathTimingTarget ?? 35,
+    cueMode: value.cueMode ?? "off",
+    cueBeat: value.cueBeat ?? 1,
+    cueEveryBars: value.cueEveryBars ?? 1,
+    cueLeadBeats: value.cueLeadBeats ?? 1,
+    cueAdaptive: value.cueAdaptive ?? false,
+    trainerDrumLevel: value.trainerDrumLevel ?? 100,
+    trainerClickLevel: value.trainerClickLevel ?? 100,
+    clickSound: value.clickSound ?? "hat",
+  };
   const rawCustomPatterns = Array.isArray(normalized.customPatterns) ? normalized.customPatterns : [];
   const customPatterns = parseCustomGrooves(JSON.stringify(rawCustomPatterns));
   const validIds = new Set([...validPatternIds, ...customPatterns.map((pattern) => pattern.id)]);
@@ -138,10 +169,17 @@ export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<stri
     (value.leadHand === "R" || value.leadHand === "L") && ["off", "beats", "subdivisions"].includes(String(value.spokenCount)) &&
     typeof value.dynamicsPractice === "boolean" && typeof value.practicePathId === "string" && value.practicePathId.length <= 100;
   const extendedValid = valid && ["straight", "shuffle", "laid-back", "shuffle-laid-back"].includes(String(normalized.feel ?? "straight")) &&
-    ["all", "backbeat", "subdivisions", "sparse-bars"].includes(String(normalized.clickMode ?? "all")) &&
-    ["all", "hands", "feet"].includes(String(normalized.limbFocus ?? "all"));
-  if (!extendedValid) throw new Error("This Trainer setup is incomplete, unsupported, or refers to patterns that are not in your library.");
-  return { ...normalized, feel: normalized.feel ?? "straight", clickMode: normalized.clickMode ?? "all", limbFocus: normalized.limbFocus ?? "all", customPatterns } as TrainerSetupTransfer;
+    ["all", "backbeat", "subdivisions", "sparse-bars", "progressive-silence"].includes(String(normalized.clickMode ?? "all")) &&
+    ["all", "hands", "feet"].includes(String(normalized.limbFocus ?? "all")) &&
+    ["off", "fill", "crash", "loud", "soft", "random"].includes(String(normalized.cueMode)) &&
+    Number.isInteger(normalized.cueBeat) && Number(normalized.cueBeat) >= 1 && Number(normalized.cueBeat) <= 16 &&
+    [1, 2, 4].includes(Number(normalized.cueEveryBars)) && [1, 2].includes(Number(normalized.cueLeadBeats)) && typeof normalized.cueAdaptive === "boolean" &&
+    Number.isFinite(normalized.trainerDrumLevel) && Number(normalized.trainerDrumLevel) >= 0 && Number(normalized.trainerDrumLevel) <= 100 &&
+    Number.isFinite(normalized.trainerClickLevel) && Number(normalized.trainerClickLevel) >= 0 && Number(normalized.trainerClickLevel) <= 100 &&
+    ["hat", "woodblock", "beep"].includes(String(normalized.clickSound));
+  const coachingValid = (value.swingRatio === undefined || (Number.isFinite(value.swingRatio) && value.swingRatio >= 0.5 && value.swingRatio <= 0.75)) && (value.pocketMs === undefined || (Number.isFinite(value.pocketMs) && value.pocketMs >= 0 && value.pocketMs <= 80)) && (value.learningMode === undefined || ['normal', 'listen-copy-solo', 'build-limbs'].includes(value.learningMode)) && (value.phraseBars === undefined || [0, 4, 8, 16].includes(value.phraseBars)) && (value.variationId === undefined || (typeof value.variationId === "string" && ["base", "kick-pickups", "displaced-backbeat", "hat-space"].includes(value.variationId))) && (value.dynamicsExercise === undefined || ["contrast", "crescendo", "evenness"].includes(value.dynamicsExercise));
+  if (!extendedValid || !coachingValid) throw new Error("This Trainer setup is incomplete, unsupported, or refers to patterns that are not in your library.");
+  return { ...normalized, feel: normalized.feel ?? "straight", clickMode: normalized.clickMode ?? "all", limbFocus: normalized.limbFocus ?? "all", cueEveryBars: normalized.cueEveryBars as TrainerCueDensity, cueLeadBeats: normalized.cueLeadBeats as TrainerCueLead, customPatterns } as TrainerSetupTransfer;
 }
 
 export const TRAINER_PRACTICE_PATHS = [

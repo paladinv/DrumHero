@@ -220,3 +220,109 @@ Original prompt: Build the complete Drum Hero functional MVP, QA suite, branding
 - The stool root is at X 0.48 m, Z −0.54 m: 154 mm behind the previously measured component rear envelope (Z −0.386 m) and below the rack-tom plane, rather than in the foreground over the bass/rack assembly. Its actual object bounds are included only in the existing load/resize safe-fit calculation. The loaded pedal remains visible; no camera, hand, hit endpoint, 5A geometry, asset, or per-frame behaviour changed.
 - The hand/arm visual gate remains failed and blocked on a rights-safe usable articulated hand/forearm asset. v44 has not made another speculative finger-curve change. Fresh screenshot and renderer-metric QA are required before accepting the stool placement or claiming a complete professional kit.
 - Independent v44 QA: full Vitest passed 34/34 across seven files; TypeScript and source-scoped ESLint passed; `git diff --check` passed. Browser QA could not run: the existing preview ports were unavailable and the sandbox denied opening a loopback port. Therefore v44 has no screenshot, hit-frame, GLB/network, console, or live renderer-metric verification; the v43 measured baseline is 47 calls / 16,816 triangles / 47 static objects, but must not be presented as a v44 measurement. Source inspection shows the stool adds three meshes plus one instanced tripod only in showcase, with no render-loop changes. Full `npm run lint` was contaminated by generated `.next` files in the isolated QA folder, while source-scoped ESLint passed. All generated `.qa-runtime/v44`, `.qa-runtime/v43`, `.next`, and `tsconfig.tsbuildinfo` QA artifacts were removed; unrelated dirty work and other QA folders were preserved.
+
+## Professional model continuation (2026-10-07, v49 static CC0 grip + viewport repair)
+
+- The previous visual was not a valid camera-fit result at non-1 DPR: the engine multiplied CSS viewport/scissor dimensions by device pixel ratio before calling `WebGLRenderer`, which applies the ratio itself. That cropped and shifted the scene and also offset pointer hit coordinates. Viewport/scissor state and pointer normalization now consistently use CSS pixels; this leaves the render loop allocation-free and makes the full kit visible/centered.
+- The CC0 Innerscene hand is now posed/reduced in the offline `scripts/prepare-drum-hand-asset.mjs` step and shipped as `public/models/drums/hands/posable-right-cc0-grip.glb` (1,418 triangles, 711 vertices per hand). The runtime clones one static geometry for each side; it does not load/pose a skeleton or simplify meshes during a session. The source and license are retained under `assets/` and documented in `docs/MODEL_ASSETS.md`.
+- Rest sticks now approach their separate snare/tom targets from opposite sides, rather than bringing both wrists together along the camera axis. Calibrated contact points and the hit/rebound animation API are unchanged. The Kit guide's canvas is taller on desktop (460 px) to give the physical model enough screen area, retaining its 300 px mobile height.
+- Live `/kit` QA against the Drum Hero workspace showed the full centered kit and separated wrists after the renderer fix. A keyboard F event reached the focused canvas without browser errors; hit/rebound math remains covered by the animation unit tests. Live showcase metadata: 45 draw calls / 19,656 triangles, below the established 107 / 20,140 cap (v42 was 49 / 16,952); geometry remains near the cap and adds no per-frame work. Full Vitest passed 43/43, TypeScript, source-scoped ESLint, and `git diff --check` passed. The standalone Playwright Chromium helper still fails before navigation with the host MachPort restriction, so no claim is made about the entire E2E suite.
+- Do not mark the art gate fully passed: this free hand source has no texture maps or forearm, so the app retains a simple cached forearm/sleeve; review the attached hand silhouette at trainer/player size before calling it professional/photorealistic. No paid asset was used. The viewport correction should be kept even if the model asset is changed later.
+- Current-turn QA cleanup complete: stopped the isolated 4320 preview; removed `.qa-runtime/.next-v45`, `.qa-runtime/.next-v49`, the temporary Playwright loader, duplicate asset-probe GLB, and redundant public source GLB; restored the Next distDir override and generated type paths. The licensed source remains in `assets/` and the prepared runtime GLB remains in `public/`. Pre-existing `.qa-runtime/tmp` and the unrelated Chord Hero preview servers were preserved.
+
+## Professional model continuation (2026-10-07, v59 Blender hand-load repair)
+
+- Live inspection found that the v7 Blender-authored GLB was not actually rendering: GLTFLoader's broader parent name (“Hand and Forearm”) caused both nodes to be classified as forearms, so the engine silently showed its fallback hand. The loader now resolves the specific node/mesh labels first, then retains its measured-bounds fallback. The live canvas reports `handAsset=blender-static` in Kit, Practice, and Trainer.
+- Corrected the forearm group's local child quaternion. It previously copied the animated hand's world quaternion into a child of that hand, double-applying the wrist rotation; it now stores only the rest-relative offset. The hand mesh stays on the unchanged 5A/grip frame and the forearm aligns at rest and follows hits without rigging or per-frame geometry work.
+- At the inspected live sizes, Player renders 37 draw calls / 19,260 triangles and Showcase renders 41 / 19,492, under the documented 105 / 20,004 and 107 / 20,140 ceilings. Separate Space/F/J/K/L captures showed the kick beater, left stick on snare/hi-hat/crash, and right stick on tom; each animated stroke returned to its rest pose before the next. A canvas pointer click was also exercised, with no new console errors. Screenshot review still does not pass the artistic gate: the hand/finger silhouette is too small and insufficiently distinct at compact size, and the kit reads stylized rather than professional. Keep this as an open visual task; do not claim realism acceptance.
+- Full Vitest passed 44/44, typecheck passed, scoped ESLint passed, and `git diff --check` passed. The standalone Playwright runner remains unavailable under the host MachPort sandbox; live in-app-browser interaction checks were used instead. No production build or full E2E run is claimed for this pass.
+- Cleanup removed this pass's Blender temporary profiles/crash data, Playwright profiles/helpers, Node test caches, and superseded v2–v6/unversioned Blender exports. The CC0 `.blend` and license, final v7 runtime GLB, legacy licensed source assets, and earlier preserved QA captures remain. The active `.next` preview output and pre-existing `test-results` folder were left intact.
+## Professional model continuation (2026-10-09, v60 stand and surface angles)
+
+- Live Kit Guide inspection at the actual showcase size showed that the prior
+  `rotation.x` was applied to each complete imported drum/stand root. This made
+  cymbal masts and tripod legs lean with their heads, a clear physical-angle
+  error. The loaded snare/floor-tom/hi-hat/crash roots now remain plumb; only
+  the hi-hat and cymbal/bell subassemblies pitch toward the seated player.
+- This is a transform-only change: no additional geometry, materials,
+  textures, render calls, or animation-loop work. It does not change calibrated
+  hit targets or API behavior. The authored hands remain a visual acceptance
+  concern; the live screenshot still shows finger separation is weak at compact
+  size, so v60 is not a claim that the requested professional art bar is met.
+- Focused verification is limited to the drum dimensions, hand asset, and
+  hit/rebound unit tests as requested; the full suite is intentionally not run.
+
+## Professional model continuation (2026-10-09, v61 visible matched grip)
+
+- The live model still read as two featureless hand blobs. Source inspection
+  showed the bundled authored hand already uses the exact shaft frame, but the
+  overlay digits were both hidden after load and generated only over the
+  proximal palm. v61 keeps the baked anatomical hand, reveals the cached slim
+  four-finger/thumb paths, moves them over the distal palm, and holds them in
+  the same frame as the stick instead of applying the camera-facing wrist
+  correction.
+- This adds 300 static triangles per hand and three small batched draws per
+  hand, with no bone rig, per-frame mesh deformation, or new materials. The
+  expected showcase total is 47 calls / 20,092 triangles and player total is
+  43 / 19,860, below the established caps of 107 / 20,140 and 105 / 20,004.
+  A fresh screenshot and live hit check are still required before acceptance;
+  do not call the art gate passed based only on this geometry correction.
+- The earlier v60 stand/pivot correction remains: standards/tripods stay
+  vertical, with small player-facing pitch reserved for cymbal assemblies.
+- Only focused drum-related unit tests are planned; no full suite run.
+
+## Professional model continuation (2026-10-09, v62 finger-lane readability)
+
+- The first v61 live screenshot still showed little separation because the
+  outer finger paths converged onto nearly the same shaft-axis position and
+  ended partly behind the stick. v62 spreads their tips along the stick, keeps
+  the opposing thumb crossing the front tangent, and places the digit tubes on
+  the hand's exact frame. The five paths remain slim (about 10 mm diameter).
+- The per-hand overlay stays at 300 triangles, with the same six additional
+  calls for both hands and no dynamic geometry. Live visual review and focused
+  unit tests remain necessary before calling the art gate accepted.
+- Final focused run: 9/9 tests passed in `drum-animation`, `drum-dimensions`,
+  and `drum-hand-asset`; scoped ESLint and `git diff --check` passed. No other
+  suite was run. The temporary in-project QA directory (18 MB of Node test
+  cache) was removed afterward, and the preview server was stopped.
+- The updated screenshot confirms upright standards, but the hands/kit still
+  read stylized and do not meet the professional-realism request. Blender could
+  not be opened because the host reported that the Mac is locked; no new
+  Blender-authored export was produced in this pass. Keep the visual gate open.
+
+## Song Library improvements (2026-10-19)
+
+- Added focused workspaces, complete arrangement playback/scoring, part/tempo/input evidence, guided queues with resume, Practice today, reviewed Builder imports, undo/redo/save recovery, recording playback/waveforms, and stage cues.
+- Added opt-in Supabase accounts and library sync, owner/editor/viewer access, atomic revision conflicts with review, and setup/migration documentation. Audio and recording metadata remain local; device backups exclude account sessions. Live Auth/email/RLS checks still require a configured hosted project.
+- Recording storage now uses portable ArrayBuffer records, reads older Blob records, and includes both formats in local audio backups.
+- Verification: lint, typecheck, production build, and all 54 unit tests passed. The library/practice/Trainer/accessibility browser run passed 57 checks across Chromium, WebKit and mobile Chromium, with 3 viewport-specific skips. A separate simulated account run passed all 3 browser conflict/offline-edit checks. Desktop and 390px layout review found no horizontal overflow; new controls have 44px touch targets.
+- Browser timing tests now wait for the async audio-ready count-in before advancing the practice clock. The mock-account build is temporary and is rebuilt with the installation's normal environment after verification.
+
+## Song Library tools and offline continuation (2026-10-19)
+
+- Implemented the next twelve requested improvements: bar loops and a gated tempo ladder; staff/tab/text notation; recent-evidence recommendations; snapshot section comparison/recovery; bulk repertoire actions; opt-in offline interface/sound downloads; persisted recording alignment and shared-timeline comparison; setlist timing/breaks/count-ins/transitions; explicit kit substitutions; grid shortcuts and optional accessible/haptic beat cues; device-labelled cloud revision history/recovery; and a first-session guide.
+- Kit-compatible parts are independent variations and preserve original arrangement clips. Partial bar loops remain distinct from complete-part readiness evidence. Recommendations ignore evidence from older part contents.
+- Added a second Supabase migration for the last 20 recoverable revisions. The simulated account test covers conflict review and recovering an older snapshot as a new revision; hosted Auth/RLS/migration execution remains dependent on installation configuration.
+- Added a production offline asset manifest and service worker. A stopped temporary origin verifies actual offline refresh, local edits and a second refresh in Chromium, WebKit and mobile Chromium. WebKit offline emulation has upstream issue #42775, so the test uses a real unavailable origin instead. Corrected the mobile Chromium profile, which previously inherited WebKit from the iPhone descriptor.
+- Validation: all 78 unit tests passed, typecheck/lint/build passed; the focused library/accessibility browser suite passed 45 tests with 3 viewport-specific skips, and the account/history suite passed 3 tests. Desktop/mobile notation review showed no document overflow and no console errors. The normal production configuration is restored after the mock-account run.
+
+
+- 2026-10-19: Adapted Chord Hero practice tools: named/pinned Trainer recordings in a separate atomic IndexedDB library (12 takes / 4 references), local skill indicators and warmup setup, recovery after two difficult rounds, opt-in F8–F10 keyboard/pedal transport, and persistent header accessibility preferences including 3D reduced motion. Kept setup and recording references local. Typecheck and focused ESLint passed; four coaching unit tests passed. Chromium exercised recovery, targeted warmup setup, F8 transport, F9 restart, F10 ratings, MediaRecorder with generated audio through save/reload/pin/rename/A-B/delete, and display persistence/reset without page errors. Browser evidence in output/playwright/chord-adaptations. Physical keyboard pedals and real kit/microphone timing remain hardware-dependent.
+
+## Song Library saved workflows (2026-10-20)
+
+- Implemented the next twelve requested additions: shorter/sticky workspace controls; compact interactive notation with a moving beat cursor; per-song section/part/range/player presets; independent repeated setlist entries; count-in recording and non-destructive WAV trimming; part/input progress charts; tap tempo; saved multi-tag searches and collection ordering; import rehearsal and exact paginated diffs; local rehearsal PDF export; offline byte/integrity checks and repair; and safe interrupted-round recovery.
+- Existing version-one libraries migrate optional preset/search/entry metadata. Setlist entry IDs preserve independent settings for repeated songs. Presets/searches are included in backups and optional sync; recordings and interrupted-round checkpoints remain local.
+- Recovery restarts the saved bar, checks the arrangement/scope signature and scores only the resumed portion. Trimmed copies preserve the original take and its audio, and discard the original timing score. Native recording uses a four-count and a shared monotonic clock; guide playback is optional.
+- The rehearsal PDF was exported through the browser, rendered with Poppler and visually inspected: notation, notes, sticking, dynamics and stage cues were readable without clipping. Desktop/mobile compact notation had no document overflow or console errors; primary-action contrast was corrected during review.
+- Validation: lint/typecheck/build and all 91 unit tests passed. The focused browser cases pass across Chromium, WebKit and mobile Chromium, including preset/tap workflows, repeated setlists, exact import review, recovery, trimmed recordings and offline integrity repair. Native synthetic MediaRecorder is checked on desktop/mobile Chromium; WebKit uses saved-WAV decode/trim coverage. Hosted account/RLS verification remains dependent on installation configuration, unchanged in this pass.
+
+- Final coverage totals for saved workflows: 91 unit tests passed; 65 distinct browser checks passed across the focused runs, with 4 intentional viewport/native-fixture skips. Large legacy setlists retain up to their existing 500 entries during conversion.
+
+- 2026-10-21: Adapted five more Chord Hero workflows. Added song/Trainer audio storage inspection, original exports and confirmed bulk deletion; full backup/restore now includes Trainer blobs, names, pins and timing markers, with validation and older-backup compatibility. Added scored 30/60/120-second routine rehearsals with rests, next-pattern previews and cancellation; timed round history survives parsing. Added allowlisted peer challenge export, import preview, fresh custom-pattern acceptance and timed challenge runs. Approved arrangement locks persist through normalization and guard library/Builder saves, imports and undo; dedicated unlock is required. Added native-dialog performance reading with notation, stage cues, scrolling, Escape/focus restoration and optional wake lock. Typecheck and focused ESLint passed; 33 focused unit tests passed. Chromium verified routine/rest/next/pause, challenge exchange/run, lock/reload/unlock, reader scrolling/Escape, and full backup → audio deletion → restore with exact Blob size and marker checks. Mobile reader and unsupported wake-lock fallback were inspected. Evidence: output/playwright/chord-adaptations-2. Physical audio hardware and actual device wake-lock policies were not tested.
+
+## Song Library workspace and feedback (2026-10-21)
+
+Implemented device workspace and practice-setting restoration; overview/history/review/readiness summary with part practice shortcuts; inline result actions; comparable round feedback; focused practice; cross-song recording names/search/storage checks; notation zoom/fullscreen/follow toggle; setlist ending-to-opening previews with breaks/count-ins; per-part goals with validated migration and sync merge; expanded backup inventory/conflict review; actionable empty/import error states. Goals count retained complete scored attempts after creation and preserve arrangement identity. Existing unrelated checkout changes retained.
+
+Verification: lint and typecheck passed; production build passed (99 verified offline assets, about 6 MB); 121 unit tests passed; final Song Library and accessibility browser run passed 86 checks across desktop Chromium, WebKit, and mobile Chromium, with 4 intentional platform-specific skips. Reviewed desktop and mobile focus screenshots. Offline refresh, existing recording playback/count-in, rehearsal PDF export, import/backup review, presets, and interrupted-round recovery passed. Axe checks covered serious/critical violations with the existing color-contrast exclusion. Hosted account sync was not exercised against a live backend; goal credit merge behavior is unit-tested.

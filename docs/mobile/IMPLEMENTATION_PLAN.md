@@ -27,13 +27,13 @@ Exit when applicable DHM-001–073 cases pass and physical audio/accessibility a
 
 ## Milestone 3: advanced iOS practice
 
-Add custom grooves, focused loops, groove-to-fill, feel/click/limb modes, personal routines, tempo ladders, adaptive plans, external keyboard/Core MIDI, calibration, microphone classification, and recording review. Add permission, disconnect, and classifier-confidence behavior as those inputs ship.
+Add custom grooves, focused loops, groove-to-fill, feel/click/limb modes, personal routines, tempo ladders, adaptive plans, external keyboard/Core MIDI, input calibration, microphone classification, and recording review. The native Trainer now includes seated/no-kick and one-voice practice; adapted results remain separate from standard personal bests. Add permission, disconnect, and classifier-confidence behavior as those inputs ship. Physical MIDI/audio validation remains a manual release gate.
 
 Exit when shared fixtures pass, real MIDI/audio devices pass calibration/interruption cases, and uncertain audio remains unscored.
 
 ## Milestone 4: full feature parity
 
-Add Song Library/rehearsal, arrangements, Song Builder, custom samples/mixes, recordings, validated import/export, backup conversion, and RealityKit kit view with an accessible fallback. Retain eight-voice song data while the scorer supports five voices; explain when a song voice cannot be scored.
+The native Song Library now includes the eight bundled original song examples, with section parts that open in Practice. Add personal songs, rehearsal/arrangement editing, Song Builder, custom samples/mixes, recordings, validated import/export, and a shared web/iOS backup format. Account sync and a RealityKit kit view with an accessible fallback remain future work. iOS has a versioned local JSON backup for lesson checkpoints, practice sessions, Trainer rounds, and best scores, with an import review and explicit replace action. Retain eight-voice song data while the scorer supports five voices; explain when a song voice cannot be scored.
 
 Exit when shipped future cases pass, file conversions do not silently lose fields, and recording/export lifecycle is inspected.
 

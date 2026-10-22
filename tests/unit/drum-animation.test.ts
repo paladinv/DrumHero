@@ -6,7 +6,30 @@ describe("drum hit animation", () => {
     expect(resolveHitHand("hihat")).toBe("right");
     expect(resolveHitHand("snare")).toBe("left");
     expect(resolveHitHand("kick")).toBe("right");
+    expect(resolveHitHand("tom")).toBe("right");
+    expect(resolveHitHand("crash")).toBe("left");
     expect(resolveHitHand("snare", "left")).toBe("left");
+  });
+
+  it("animates each hand-played voice through contact and rebound", () => {
+    const voices = [
+      ["snare", "left"],
+      ["hihat", "right"],
+      ["tom", "right"],
+      ["crash", "left"],
+    ] as const;
+
+    for (const [instrument, hand] of voices) {
+      const state = createHitAnimationState(hand);
+      restartHit(state, instrument);
+      advanceHit(state, 95);
+      expect(state.instrument).toBe(instrument);
+      expect(state.hand).toBe(hand);
+      expect(sampleHit(state).down).toBeCloseTo(1, 4);
+      advanceHit(state, 95);
+      expect(state.active).toBe(false);
+      expect(sampleHit(state).down).toBe(0);
+    }
   });
 
   it("restarts bounded animations without accumulating state", () => {

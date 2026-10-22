@@ -5,11 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import { CUSTOM_GROOVES_EVENT, createCustomGrooveId, parseCustomGrooves, readCustomGrooves, writeCustomGrooves } from "@/lib/custom-grooves";
 import { canUseFillPractice, compatibleFillPatterns, createGrooveFillTransition } from "@/lib/fill-practice";
 import type { Groove, Instrument, PatternHit, Rudiment } from "@/lib/types";
+import { localizedPattern } from "@/lib/teaching-pattern-display";
+import { useLocalization } from "./LocalizationProvider";
 
 const voices: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
 const voiceLabel: Record<Instrument, string> = { kick: "K", snare: "S", hihat: "H", tom: "T", crash: "C" };
 
 export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment>; kind: "groove" | "rudiment" }) {
+  const { locale, t } = useLocalization();
   const [level, setLevel] = useState("All");
   const [query, setQuery] = useState("");
   const [customGrooves, setCustomGrooves] = useState<Groove[]>([]);
@@ -44,8 +47,8 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
   const filtered = useMemo(() => libraryItems.filter((item) =>
     (level === "All" || item.level === level) &&
     (styleFilter === "All" || ("style" in item && item.style === styleFilter)) &&
-    (!query.trim() || `${item.name} ${item.description} ${"style" in item ? item.style + " " + item.focus : ""}`.toLowerCase().includes(query.trim().toLowerCase()))
-  ), [libraryItems, level, query, styleFilter]);
+    (!query.trim() || `${item.name} ${item.description} ${"style" in item ? item.style + " " + item.focus : ""} ${localizedPattern(item, locale).name} ${localizedPattern(item, locale).description}`.toLowerCase().includes(query.trim().toLowerCase()))
+  ), [libraryItems, level, locale, query, styleFilter]);
 
   const toggleCell = (step: number, instrument: Instrument) => setHits((current) => {
     const old = current.find((hit) => hit.step === step && hit.instrument === instrument);
@@ -126,8 +129,8 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
       <div><span className="eyebrow">Phrase builder</span><h2>Practice a groove into a fill.</h2><p>Choose a compatible 4/4 groove and fill on the same timing grid. The transition repeats as one phrase and is saved with your custom patterns.</p></div>
       {transitionGrooves.length ? <>
         <div className="custom-groove-fields">
-          <label>Groove<select value={selectedTransitionGroove?.id ?? ""} onChange={(event) => { setTransitionGrooveId(event.target.value); const nextGroove = transitionGrooves.find((item) => item.id === event.target.value); setTransitionFillId(nextGroove ? compatibleFillPatterns(nextGroove, items)[0]?.id ?? "" : ""); setTransitionMessage(""); }}>{transitionGrooves.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <label>Fill<select value={selectedTransitionFill?.id ?? ""} onChange={(event) => { setTransitionFillId(event.target.value); setTransitionMessage(""); }}>{transitionFills.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.level}</option>)}</select></label>
+          <label>Groove<select value={selectedTransitionGroove?.id ?? ""} onChange={(event) => { setTransitionGrooveId(event.target.value); const nextGroove = transitionGrooves.find((item) => item.id === event.target.value); setTransitionFillId(nextGroove ? compatibleFillPatterns(nextGroove, items)[0]?.id ?? "" : ""); setTransitionMessage(""); }}>{transitionGrooves.map((item) => <option key={item.id} value={item.id}>{localizedPattern(item, locale).name}</option>)}</select></label>
+          <label>Fill<select value={selectedTransitionFill?.id ?? ""} onChange={(event) => { setTransitionFillId(event.target.value); setTransitionMessage(""); }}>{transitionFills.map((item) => <option key={item.id} value={item.id}>{localizedPattern(item, locale).name} · {t(item.level)}</option>)}</select></label>
           <label>Play groove for<select value={transitionBars} onChange={(event) => setTransitionBars(Number(event.target.value))}><option value={1}>1 bar, then fill</option><option value={2}>2 bars, then fill</option><option value={4}>4 bars, then fill</option></select></label>
           <label>Transition name<input maxLength={60} value={transitionName} onChange={(event) => setTransitionName(event.target.value)} placeholder={`${selectedTransitionGroove?.name ?? "Groove"} + fill`} /></label>
         </div>
@@ -144,12 +147,13 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
         return { step, label };
       });
       const isCustom = item.id.startsWith("custom-");
+      const display = localizedPattern(item, locale);
       return <article className={`card level-${item.level}`} key={item.id}>
-        <span className="level-mark">{item.level} · {item.defaultBpm} BPM{isCustom ? " · Custom" : ""}</span><h3>{item.name}</h3><p>{item.description}</p>
-        {"sticking" in item ? <><div className="sticking" aria-label={`Sticking ${item.sticking}`}>{item.sticking}</div><p><strong>Coach:</strong> {item.coaching}</p></> : <>
-          <div className="chips"><span className="chip">{item.style}</span><span className="chip">{item.meter ?? `${item.beats}/4`}</span><span className="chip">{item.feel === "triplet" ? "Triplet feel" : `${item.subdivision} step grid`}</span></div>
-          <p><strong>Focus:</strong> {item.focus}</p>
-          <div className="groove-step-preview" role="img" aria-label={`${item.name} pattern, steps left to right: ${cellLabels.map(({ step, label }) => `${step + 1} ${label || "rest"}`).join(", ")}`} style={{ gridTemplateColumns: `repeat(${cells}, minmax(26px,1fr))` }}>{cellLabels.map(({ step, label }) => <span className={label.includes("A") ? "accented" : ""} key={step}><small>{step + 1}</small><b>{label || "·"}</b></span>)}</div>
+        <span className="level-mark">{t(item.level)} · {item.defaultBpm} BPM{isCustom ? ` · ${t("Custom")}` : ""}</span><h3>{display.name}</h3><p>{display.description}</p>
+        {"sticking" in item ? <><div className="sticking" aria-label={`Sticking ${item.sticking}`}>{item.sticking}</div><p><strong>Coach:</strong> {"coaching" in display ? display.coaching : item.coaching}</p></> : <>
+          <div className="chips"><span className="chip">{"style" in display ? display.style : item.style}</span><span className="chip">{item.meter ?? `${item.beats}/4`}</span><span className="chip">{item.feel === "triplet" ? t("Triplet feel") : `${item.subdivision} ${t("step grid")}`}</span></div>
+          <p><strong>{t("Focus:")}</strong> {"focus" in display ? display.focus : item.focus}</p>
+          <div className="groove-step-preview" role="img" aria-label={`${display.name} pattern, steps left to right: ${cellLabels.map(({ step, label }) => `${step + 1} ${label || "rest"}`).join(", ")}`} style={{ gridTemplateColumns: `repeat(${cells}, minmax(26px,1fr))` }}>{cellLabels.map(({ step, label }) => <span className={label.includes("A") ? "accented" : ""} key={step}><small>{step + 1}</small><b>{label || "·"}</b></span>)}</div>
         </>}
         <div className="transport"><Link className="button" href={`/trainer?pattern=${item.id}`}>Train {kind}</Link><Link className="button-secondary" href={`/practice?pattern=${item.id}`}>Practice Pad</Link>{isCustom && <button className="button-secondary" type="button" onClick={() => deleteCustomGroove(item.id)} aria-label={`Delete custom groove ${item.name}`}>Delete</button>}</div>
       </article>;

@@ -1,0 +1,84 @@
+"use client";
+import { useState } from "react";
+import { songPartEvidenceFingerprint, type AttemptEventTiming, type DrumSong, type SongLibraryState } from "@/lib/song-library";
+import type { SongInstrument } from "@/lib/types";
+import { trendAttempts } from "@/lib/song-library-next";
+import { SongRecordingPlayback } from "./SongRecordingPlayback";
+
+const voices: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4"];
+const scoredSources = ["keyboard", "touch", "midi", "audio"];
+function sourceNote(input: string) {
+  if (input === "midi") return "MIDI: the input reports a drum voice; timing depends on this device’s calibration.";
+  if (input === "audio") return "Microphone: onsets and voice labels are estimates. Room sound and kit setup can affect them.";
+  if (input === "keyboard" || input === "touch") return "Pad input: the selected virtual drum voice is known; this does not measure acoustic playing.";
+  return "Self rating or unknown input is reflection data, not a measured timing score.";
+}
+function stickingEvidence(event: AttemptEventTiming) {
+  if (!event.sticking) return "—";
+  return event.playedSticking ? `${event.sticking} · played ${event.playedSticking}` : `${event.sticking} · not recorded`;
+}
+export function SongProgressHistory({ song, state, onPractice }: { song: DrumSong; state: SongLibraryState; onPractice?: (sectionId: string, partId: string, bar: number, bpm: number) => void }) {
+  const [partId, setPartId] = useState("");
+  const [input, setInput] = useState("all");
+  const [voice, setVoice] = useState<SongInstrument | "all">("all");
+  const [comparisonA, setComparisonA] = useState("");
+  const [comparisonB, setComparisonB] = useState("");
+  const [evidenceId, setEvidenceId] = useState("");
+  const sameArrangement = (attempt: ReturnType<typeof trendAttempts>[number]) => {
+    const currentPart = song.sections.find(section => section.id === attempt.sectionId)?.parts.find(candidate => candidate.id === attempt.partId);
+    return !!currentPart && attempt.patternFingerprint === songPartEvidenceFingerprint(currentPart);
+  };
+  const scopedAttempts = trendAttempts(state, song, partId, input).filter(attempt => attempt.completePart !== false && scoredSources.includes(attempt.inputMode) && (voice === "all" || !!song.sections.find(section => section.id === attempt.sectionId)?.parts.find(candidate => candidate.id === attempt.partId)?.hits.some(hit => hit.instrument === voice)));
+  const arrangementChangedCount = scopedAttempts.filter(attempt => !sameArrangement(attempt)).length;
+  const attempts = scopedAttempts.filter(sameArrangement);
+  const points = attempts.map((attempt, index) => ({ attempt, x: 40 + index / Math.max(1, attempts.length - 1) * 720, accuracyY: 180 - attempt.score * 1.5, tempoY: 180 - (attempt.bpm - 40) / 160 * 150 }));
+  const comfortable = attempts.filter(attempt => scoredSources.includes(attempt.inputMode) && attempt.score >= 80).slice(-10);
+  const bpm = Math.max(0, ...comfortable.map(attempt => attempt.bpm));
+  const latest = attempts.at(-1);
+  const evidenceAttempt = attempts.find(attempt => attempt.id === evidenceId) ?? latest;
+  const nearbyRecording = evidenceAttempt ? state.recordings.filter(take => take.songId === song.id && (!take.sectionId || take.sectionId === evidenceAttempt.sectionId) && Math.abs(Date.parse(take.createdAt) - Date.parse(evidenceAttempt.playedAt)) <= 5 * 60 * 1000).sort((a,b)=>Math.abs(Date.parse(a.createdAt)-Date.parse(evidenceAttempt.playedAt))-Math.abs(Date.parse(b.createdAt)-Date.parse(evidenceAttempt.playedAt)))[0] : undefined;
+  const comparisonCandidates = attempts.slice(-20);
+  const selectedA = comparisonCandidates.find(attempt => attempt.id === comparisonA) ?? comparisonCandidates.at(-2);
+  const selectedB = comparisonCandidates.find(attempt => attempt.id === comparisonB) ?? comparisonCandidates.at(-1);
+  const comparisonsSharePart = !!selectedA && !!selectedB && selectedA.sectionId === selectedB.sectionId && selectedA.partId === selectedB.partId;
+  const comparisonBars = comparisonsSharePart ? [...new Set([...(selectedA?.timing?.bars ?? []).map(item => item.bar), ...(selectedB?.timing?.bars ?? []).map(item => item.bar)])].sort((a,b)=>a-b) : [];
+  const comparisonVoices = comparisonsSharePart ? voices.filter(item => [...(selectedA?.timing?.bars ?? []), ...(selectedB?.timing?.bars ?? [])].some(cell => cell.instrument === item)) : [];
+  const heatmapBars = [...new Set(latest?.timing?.bars?.map(item => item.bar) ?? [])].sort((a, b) => a - b);
+  const heatmapVoices = voice === "all" ? voices.filter(item => latest?.timing?.bars?.some(cell => cell.instrument === item)) : [voice];
+  const weakBarCounts = (latest?.timing?.bars ?? []).reduce((counts, cell) => {
+    const current = counts.get(cell.bar) ?? { bar: cell.bar, targets: 0, missed: 0 };
+    current.targets += cell.targets; current.missed += cell.missed; counts.set(cell.bar, current); return counts;
+  }, new Map<number, { bar: number; targets: number; missed: number }>());
+  const weakestBars = [...weakBarCounts.values()].filter(item => item.targets > 0).sort((a, b) => b.missed / b.targets - a.missed / a.targets || b.missed - a.missed).slice(0, 3);
+  const tempoBuckets = new Map<number, typeof attempts>();
+  for (const attempt of attempts) { const bucket = Math.round(attempt.bpm / 5) * 5; tempoBuckets.set(bucket, [...(tempoBuckets.get(bucket) ?? []), attempt]); }
+  const tempoSummaries = [...tempoBuckets.entries()].sort((a, b) => a[0] - b[0]).map(([tempo, samples]) => {
+    const offsets = samples.flatMap(item => item.timing && Number.isFinite(item.timing.meanOffsetMs) ? [item.timing.meanOffsetMs] : []);
+    const meanOffset = offsets.length ? offsets.reduce((sum, item) => sum + item, 0) / offsets.length : undefined;
+    const offsetSpread = offsets.length > 1 && meanOffset !== undefined ? Math.sqrt(offsets.reduce((sum, item) => sum + (item - meanOffset) ** 2, 0) / offsets.length) : undefined;
+    return { tempo, count: samples.length, score: Math.round(samples.reduce((sum, item) => sum + item.score, 0) / samples.length), meanOffset: meanOffset === undefined ? undefined : Math.round(meanOffset), offsetSpread: offsetSpread === undefined ? undefined : Math.round(offsetSpread) };
+  });
+  return <details className="song-progress-history"><summary>Performance history by part, voice, and tempo</summary>
+    <div className="song-form-row">
+      <label>Part<select value={partId} onChange={event => setPartId(event.target.value)}><option value="">All parts</option>{song.sections.flatMap(section => section.parts.map(candidate => <option key={`${section.id}:${candidate.id}`} value={candidate.id}>{section.name} / {candidate.name}</option>))}</select></label>
+      <label>Input<select value={input} onChange={event => setInput(event.target.value)}>{["all", "keyboard", "touch", "midi", "audio"].map(mode => <option key={mode} value={mode}>{mode === "all" ? "Scored input" : mode}</option>)}</select></label>
+      <label>Part contains voice<select value={voice} onChange={event => setVoice(event.target.value as SongInstrument | "all")}><option value="all">All voices</option>{voices.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+    </div>
+    <p>Only complete scored attempts that match each part’s current arrangement appear here. Keyboard and touch know the selected virtual voice; MIDI uses the connected kit; microphone voice and timing are estimates and uncertain hits are left unscored.</p>
+    {arrangementChangedCount > 0 && <p role="status">{arrangementChangedCount} earlier scored attempt{arrangementChangedCount === 1 ? " is" : "s are"} excluded because the arrangement changed or predates a saved arrangement fingerprint. Current trends compare like-for-like parts.</p>}
+    {onPractice && latest?.sectionId && latest.partId && weakestBars.length > 0 && <section className="song-weak-bar-drills"><h3>Turn the latest weak bars into a drill</h3><p>These bars had the highest missed-target rate in the latest complete pass. Launching one opens a single-bar loop.</p><div className="song-actions">{weakestBars.map(item => <button key={item.bar} type="button" onClick={() => onPractice(latest.sectionId, latest.partId, item.bar, latest.bpm)}>Practice bar {item.bar} · {item.missed}/{item.targets} missed</button>)}</div></section>}
+    <p>Comfortable tempo: {bpm ? `${bpm} BPM` : "No qualifying pass yet"} · fastest of the last ten matching scored attempts scoring at least 80%. This is a practice reference, not a readiness certificate.</p>
+    {comparisonCandidates.length > 1 && <section className="song-attempt-comparison"><h3>Compare two practice attempts</h3><div className="song-form-row"><label>Earlier or baseline attempt<select value={selectedA?.id ?? ""} onChange={event=>setComparisonA(event.target.value)}>{comparisonCandidates.map(attempt=><option key={attempt.id} value={attempt.id}>{new Date(attempt.playedAt).toLocaleString()} · {attempt.score}% · {attempt.bpm} BPM · {attempt.inputMode}</option>)}</select></label><label>Later or comparison attempt<select value={selectedB?.id ?? ""} onChange={event=>setComparisonB(event.target.value)}>{comparisonCandidates.map(attempt=><option key={attempt.id} value={attempt.id}>{new Date(attempt.playedAt).toLocaleString()} · {attempt.score}% · {attempt.bpm} BPM · {attempt.inputMode}</option>)}</select></label></div>{selectedA?.id === selectedB?.id ? <p>Select two different attempts.</p> : !comparisonsSharePart ? <p>Choose attempts from the same section and part for a direct bar by bar comparison.</p> : comparisonBars.length ? <div className="song-table-scroll"><table><caption>Practice comparison · {selectedA?.score}% at {selectedA?.bpm} BPM vs {selectedB?.score}% at {selectedB?.bpm} BPM</caption><thead><tr><th scope="col">Bar / voice</th><th scope="col">Baseline</th><th scope="col">Comparison</th></tr></thead><tbody>{comparisonBars.flatMap(bar=>comparisonVoices.map(item=>{const left=selectedA?.timing?.bars?.find(cell=>cell.bar===bar&&cell.instrument===item),right=selectedB?.timing?.bars?.find(cell=>cell.bar===bar&&cell.instrument===item);const describe=(cell:typeof left)=>cell?`${cell.missed}/${cell.targets} missed${cell.meanOffsetMs===null?" · no timing sample":` · ${cell.meanOffsetMs>0?"+":""}${cell.meanOffsetMs} ms`}`:"No recorded bar evidence";return <tr key={`${bar}:${item}`}><th scope="row">{bar} · {item}</th><td>{describe(left)}</td><td>{describe(right)}</td></tr>}))}</tbody></table></div> : <p>These attempts do not contain bar level evidence to compare. New complete scored sessions include it.</p>}</section>}
+    {evidenceAttempt && <section className="song-hit-evidence"><h3>Hit by hit review</h3><label>Attempt<select value={evidenceAttempt.id} onChange={event=>setEvidenceId(event.target.value)}>{attempts.slice(-20).map(attempt=><option key={attempt.id} value={attempt.id}>{new Date(attempt.playedAt).toLocaleString()} · {attempt.score}% · {attempt.bpm} BPM · {attempt.inputMode}</option>)}</select></label><p>Each row is an expected target. A missed target has no measured onset. Microphone confidence is an estimated voice similarity.</p>{evidenceAttempt.timing?.events?.length?<div className="song-table-scroll"><table><caption>Expected drum hits for this attempt</caption><thead><tr><th scope="col">Bar · beat</th><th scope="col">Voice</th><th scope="col">Result</th><th scope="col">Sticking</th></tr></thead><tbody>{evidenceAttempt.timing.events.slice(0,250).map((event,index)=><tr key={`${event.bar}:${event.beat}:${event.instrument}:${index}`} className={event.offsetMs===null?"is-missed":"is-clean"}><th scope="row">{event.bar} · {event.beat.toFixed(2)}</th><td>{event.instrument}</td><td>{event.offsetMs===null?"Missed target":`${event.offsetMs>0?"+":""}${event.offsetMs} ms${event.confidence===undefined?"":` · ${Math.round(event.confidence*100)}% mic similarity`}`}</td><td>{stickingEvidence(event)}</td></tr>)}</tbody></table>{evidenceAttempt.timing.events.length>250&&<p>Showing the first 250 of {evidenceAttempt.timing.events.length} expected hits.</p>}</div>:<p>This attempt predates hit-level evidence. New scored song sessions record each expected hit and its timing.</p>}{nearbyRecording&&<details><summary>Replay a nearby local recording · {new Date(nearbyRecording.createdAt).toLocaleString()}</summary><p>This is a local take recorded within five minutes of the selected attempt. It is not used to calculate that attempt’s score.</p><SongRecordingPlayback take={nearbyRecording}/></details>}</section>}
+    {latest && <section className="song-bar-voice-heatmap"><h3>Latest pass by bar and voice</h3><p>{new Date(latest.playedAt).toLocaleString()} · {latest.score}% · {latest.bpm} BPM. Each cell shows missed targets / targets and average timing offset when a hit was matched.</p>{heatmapBars.length ? <div className="song-table-scroll"><table><caption>Latest scored pass · bar and voice detail</caption><thead><tr><th scope="col">Bar in part</th>{heatmapVoices.map(item => <th scope="col" key={item}>{item}</th>)}</tr></thead><tbody>{heatmapBars.map(bar => <tr key={bar}><th scope="row">{bar}</th>{heatmapVoices.map(item => { const cell = latest.timing?.bars?.find(value => value.bar === bar && value.instrument === item); return <td key={item} className={cell ? cell.missed ? "is-missed" : "is-clean" : "is-empty"}>{cell ? <span>{cell.missed}/{cell.targets}<small>{cell.meanOffsetMs === null ? "No timing sample" : `${cell.meanOffsetMs > 0 ? "+" : ""}${cell.meanOffsetMs} ms`}</small></span> : "—"}</td>; })}</tr>)}</tbody></table></div> : <p>This attempt predates bar level evidence or used a partial loop. New complete song scorer passes add this detail.</p>}</section>}
+    {tempoSummaries.length > 0 && <section className="song-tempo-comparisons"><h3>Scores and timing at similar tempos</h3><p>Complete passes are grouped by the nearest 5 BPM. Timing spread is the variation in each pass’s average hit offset; it is not a per-hit timing grade.</p><div className="song-table-scroll"><table><caption>Comparable tempo groups for the current arrangement</caption><thead><tr><th scope="col">Tempo band</th><th scope="col">Passes</th><th scope="col">Mean score</th><th scope="col">Mean offset</th><th scope="col">Offset spread</th></tr></thead><tbody>{tempoSummaries.map(item=><tr key={item.tempo}><th scope="row">About {item.tempo} BPM</th><td>{item.count}</td><td>{item.score}%</td><td>{item.meanOffset===undefined?"No timing sample":`${item.meanOffset>0?"+":""}${item.meanOffset} ms`}</td><td>{item.offsetSpread===undefined?"Need more samples":`±${item.offsetSpread} ms`}</td></tr>)}</tbody></table></div></section>}
+    {attempts.length ? <>
+      <svg className="song-trend-chart" viewBox="0 0 800 220" role="img" aria-label="Complete scored accuracy and tempo over time"><line x1="40" x2="760" y1="180" y2="180" stroke="#777"/><text x="4" y="30">100%</text><text x="4" y="180">0%</text><polyline points={points.map(point => `${point.x},${point.accuracyY}`).join(" ")} fill="none" stroke="#155e4b" strokeWidth="3"/><polyline points={points.map(point => `${point.x},${point.tempoY}`).join(" ")} fill="none" stroke="#a34b08" strokeWidth="3" strokeDasharray="6 4"/>{points.map(point => <circle key={point.attempt.id} cx={point.x} cy={point.accuracyY} r="4" fill="#155e4b"><title>{new Date(point.attempt.playedAt).toLocaleString()}: {point.attempt.score}%, {point.attempt.bpm} BPM, {point.attempt.inputMode}</title></circle>)}<text x="40" y="210">Oldest</text><text x="700" y="210">Newest</text></svg>
+      <div className="song-table-scroll"><table><caption>Recent arrangement-matched attempts</caption><thead><tr><th>Section / part</th><th>Tempo</th><th>Input and evidence</th><th>Score</th><th>Voice misses</th><th>Date</th></tr></thead><tbody>{[...attempts].reverse().map(attempt => {
+        const section = song.sections.find(item => item.id === attempt.sectionId), targetPart = section?.parts.find(item => item.id === attempt.partId);
+        const voiceMisses = attempt.timing?.voices.filter(item => item.missed > 0).map(item => `${item.instrument}: ${item.missed}`).join(", ") || "None recorded";
+        return <tr key={attempt.id}><td>{section?.name ?? "Removed section"} / {targetPart?.name ?? "Removed part"}</td><td>{attempt.bpm} BPM</td><td>{attempt.inputMode}<small>{sourceNote(attempt.inputMode)}</small></td><td>{attempt.score}%{attempt.timing ? <small>{attempt.timing.meanOffsetMs > 0 ? "+" : ""}{attempt.timing.meanOffsetMs} ms mean offset</small> : null}</td><td>{voiceMisses}</td><td>{new Date(attempt.playedAt).toLocaleString()}</td></tr>;
+      })}</tbody></table></div>
+    </> : <p>No matching complete scored attempts yet. Select another input or complete a song practice round.</p>}
+  </details>;
+}

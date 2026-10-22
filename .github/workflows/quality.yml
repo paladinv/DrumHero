@@ -3,8 +3,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
 jobs:
-  qa:
+  qa-fast:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,14 +17,22 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run mobile:content:validate
-      - run: PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers npx playwright install --with-deps chromium webkit
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - run: npm run test:e2e
+      - run: PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers npx playwright install --with-deps chromium
+      - run: npm run qa:fast
+  qa-full:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers npx playwright install chromium webkit
+      - run: npm run qa:full
   mobile-ios:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

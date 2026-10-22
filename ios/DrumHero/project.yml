@@ -21,6 +21,8 @@ targets:
       - path: Sources
       - path: ../../shared/mobile/v1/drum-content.json
         buildPhase: resources
+      - path: Sources/Resources/Localizable.xcstrings
+        buildPhase: resources
       - path: ../../public/audio/drums/kick-1.wav
         buildPhase: resources
       - path: ../../public/audio/drums/kick-2.wav

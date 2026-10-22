@@ -1,4 +1,7 @@
+import { readTrainerTakes, type SavedTrainerTake } from "./trainer-take-library";
+import { storedRecordingBlob } from "./song-recording";
 const APP_PREFIX = "drum-hero:";
+const isAccountStorage = (key: string) => key.startsWith("drum-hero:cloud-account:") || key.startsWith("drum-hero:song-cloud-sync:");
 const MAX_BACKUP_BYTES = 128 * 1024 * 1024;
 const MAX_TOTAL_AUDIO_BYTES = 96 * 1024 * 1024;
 const SAMPLE_DATABASE = "drum-hero-song-builder-kit";
@@ -8,6 +11,7 @@ const RECORDING_STORE = "takes";
 
 type EncodedBlob = { mimeType: string; data: string };
 type BackupSample = { instrument: string; name: string; updatedAt: string; blob: EncodedBlob };
+type BackupTrainerTake = Omit<SavedTrainerTake, "blob"> & { blob: EncodedBlob };
 type LocalBackup = {
   application: "Drum Hero";
   format: "drum-hero-full-backup";
@@ -16,6 +20,7 @@ type LocalBackup = {
   localStorage: Record<string, string>;
   songRecordings: Array<{ id: string; blob: EncodedBlob }>;
   customSamples: BackupSample[];
+  trainerRecordings?: BackupTrainerTake[];
 };
 
 function encodeBase64(bytes: Uint8Array) {
@@ -84,7 +89,7 @@ function storageSnapshot() {
   const values: Record<string, string> = {};
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
-    if (key?.startsWith(APP_PREFIX)) {
+    if (key?.startsWith(APP_PREFIX) && !isAccountStorage(key)) {
       const value = localStorage.getItem(key);
       if (value !== null) values[key] = value;
     }
@@ -93,11 +98,16 @@ function storageSnapshot() {
 }
 
 export async function createLocalBackup(): Promise<string> {
-  const [recordingRows, sampleRows] = await Promise.all([
+  const [recordingRows, sampleRows, trainerRows] = await Promise.all([
     readStore(RECORDING_DATABASE, RECORDING_STORE),
-    readStore(SAMPLE_DATABASE, SAMPLE_STORE, "instrument")
+    readStore(SAMPLE_DATABASE, SAMPLE_STORE, "instrument"),
+    readTrainerTakes()
   ]);
-  const songRecordings = await Promise.all(recordingRows.flatMap(({ key, value }) => value instanceof Blob && typeof key === "string" ? [{ id: key, blob: value }] : []).map(async ({ id, blob }) => ({ id, blob: await encodeBlob(blob) })));
+  const retainedBytes = recordingRows.reduce((sum, row) => sum + (storedRecordingBlob(row.value)?.size ?? 0), 0)
+    + sampleRows.reduce((sum, row) => sum + (row.value && typeof row.value === 'object' && 'blob' in row.value && row.value.blob instanceof Blob ? row.value.blob.size : 0), 0)
+    + trainerRows.reduce((sum, take) => sum + take.blob.size, 0);
+  if (retainedBytes > MAX_TOTAL_AUDIO_BYTES) throw new Error('Local audio exceeds the 96 MB backup limit. Export and remove some recordings or samples first.');
+  const songRecordings = await Promise.all(recordingRows.flatMap(({ key, value }) => { const blob = storedRecordingBlob(value); return blob && typeof key === "string" ? [{ id: key, blob }] : []; }).map(async ({ id, blob }) => ({ id, blob: await encodeBlob(blob) })));
   const customSamples = await Promise.all(sampleRows.flatMap(({ value }) => {
     if (!value || typeof value !== "object") return [];
     const sample = value as { instrument?: unknown; name?: unknown; updatedAt?: unknown; blob?: unknown };
@@ -105,7 +115,8 @@ export async function createLocalBackup(): Promise<string> {
       ? [{ instrument: sample.instrument, name: sample.name, updatedAt: sample.updatedAt, blob: sample.blob }]
       : [];
   }).map(async (sample) => ({ instrument: sample.instrument, name: sample.name, updatedAt: sample.updatedAt, blob: await encodeBlob(sample.blob) })));
-  const audioBase64 = [...songRecordings.map((item) => item.blob.data), ...customSamples.map((item) => item.blob.data)];
+  const trainerRecordings = await Promise.all(trainerRows.map(async ({ blob, ...take }) => ({ ...take, blob: await encodeBlob(blob) })));
+  const audioBase64 = [...trainerRecordings.map(item => item.blob.data),...songRecordings.map((item) => item.blob.data), ...customSamples.map((item) => item.blob.data)];
   const audioBytes = audioBase64.reduce((total, data) => total + data.length / 4 * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0), 0);
   if (audioBytes > MAX_TOTAL_AUDIO_BYTES) throw new Error("Local audio exceeds the 96 MB backup limit. Export and remove some saved takes or custom samples, then try again.");
   const output = JSON.stringify({
@@ -115,7 +126,8 @@ export async function createLocalBackup(): Promise<string> {
     createdAt: new Date().toISOString(),
     localStorage: storageSnapshot(),
     songRecordings,
-    customSamples
+    customSamples,
+    trainerRecordings
   } satisfies LocalBackup);
   if (new TextEncoder().encode(output).byteLength > MAX_BACKUP_BYTES) throw new Error("Your backup is larger than the 128 MB file limit. Remove some local data and try again.");
   return output;
@@ -130,9 +142,12 @@ export function parseLocalBackup(raw: string): LocalBackup {
   if (backup.application !== "Drum Hero" || backup.format !== "drum-hero-full-backup" || backup.version !== 1 || typeof backup.createdAt !== "string" || Number.isNaN(Date.parse(backup.createdAt))) throw new Error("This backup format is not supported.");
   if (!backup.localStorage || typeof backup.localStorage !== "object" || Array.isArray(backup.localStorage) || Object.keys(backup.localStorage).length > 64) throw new Error("Backup settings are invalid.");
   for (const [key, item] of Object.entries(backup.localStorage)) {
+    if (isAccountStorage(key)) throw new Error("Account sessions and sync checkpoints cannot be restored from a backup.");
     if (!key.startsWith(APP_PREFIX) || key.length > 240 || typeof item !== "string" || item.length > 8_000_000) throw new Error("Backup contains invalid settings data.");
   }
-  if (!Array.isArray(backup.songRecordings) || backup.songRecordings.length > 100 || !Array.isArray(backup.customSamples) || backup.customSamples.length > 16) throw new Error("Backup audio data is invalid.");
+  // The song audio store includes both recorded takes and local reference tracks.
+  // Their independent library limits allow more than 100 files in one backup.
+  if (!Array.isArray(backup.songRecordings) || backup.songRecordings.length > 300 || !Array.isArray(backup.customSamples) || backup.customSamples.length > 16) throw new Error("Backup audio data is invalid.");
   let audioBytes = 0;
   const checkBlob = (blob: EncodedBlob) => {
     if (!blob || typeof blob.mimeType !== "string" || blob.mimeType.length > 100 || !blob.mimeType.startsWith("audio/") || typeof blob.data !== "string") throw new Error("Backup contains an invalid audio file.");
@@ -144,7 +159,16 @@ export function parseLocalBackup(raw: string): LocalBackup {
     if (!recording || typeof recording.id !== "string" || !recording.id || recording.id.length > 200) throw new Error("Backup contains an invalid song recording.");
     checkBlob(recording.blob);
   }
-  const validInstruments = new Set(["kick", "snare", "hihat", "tom", "crash", "openhat", "ride", "rimshot"]);
+  if (backup.trainerRecordings !== undefined && (!Array.isArray(backup.trainerRecordings) || backup.trainerRecordings.length > 12)) throw new Error("Backup Trainer recordings are invalid.");
+  const trainerIds = new Set<string>();
+  let pinned = 0;
+  for (const take of backup.trainerRecordings ?? []) {
+    if (!take || typeof take.id !== 'string' || !take.id || take.id.length > 200 || trainerIds.has(take.id) || typeof take.name !== 'string' || take.name.length > 1000 || typeof take.patternId !== 'string' || take.patternId.length > 1000 || typeof take.patternName !== 'string' || take.patternName.length > 1000 || typeof take.pinned !== 'boolean' || !Number.isFinite(take.bpm) || take.bpm < 40 || take.bpm > 220 || typeof take.createdAt !== 'string' || !Number.isFinite(Date.parse(take.createdAt)) || ![take.expectedMarkersMs, take.actualMarkersMs].every(markers => Array.isArray(markers) && markers.length <= 100000 && markers.every(value => typeof value === 'number' && Number.isFinite(value)))) throw new Error("Backup contains invalid Trainer recording metadata.");
+    trainerIds.add(take.id); if (take.pinned) pinned++;
+    checkBlob(take.blob);
+  }
+  if (pinned > 4) throw new Error("Backup exceeds the four pinned Trainer references limit.");
+  const validInstruments = new Set(["kick", "snare", "hihat", "tom", "crash", "openhat", "ride", "rimshot", "cowbell", "shaker", "tambourine"]);
   for (const sample of backup.customSamples) {
     if (!sample || typeof sample.instrument !== "string" || !validInstruments.has(sample.instrument) || typeof sample.name !== "string" || typeof sample.updatedAt !== "string") throw new Error("Backup contains an invalid custom drum sample.");
     const bytesBeforeSample = audioBytes;
@@ -155,10 +179,12 @@ export function parseLocalBackup(raw: string): LocalBackup {
 }
 
 async function replaceAudioStores(backup: LocalBackup) {
-  const recordings = backup.songRecordings.map(({ id, blob }) => ({ key: id, value: new Blob([decodeBase64(blob.data)], { type: blob.mimeType }) }));
+  const recordings = backup.songRecordings.map(({ id, blob }) => ({ key: id, value: { data: decodeBase64(blob.data).buffer, mimeType: blob.mimeType } }));
   const samples = backup.customSamples.map((sample) => ({ value: { ...sample, blob: new Blob([decodeBase64(sample.blob.data)], { type: sample.blob.mimeType }) } }));
   await replaceStore(RECORDING_DATABASE, RECORDING_STORE, recordings);
   await replaceStore(SAMPLE_DATABASE, SAMPLE_STORE, samples, "instrument");
+  // Older backups predate Trainer audio; keep existing Trainer takes when the field is absent.
+  if (backup.trainerRecordings !== undefined) await replaceStore('drum-hero-trainer-takes', 'takes', backup.trainerRecordings.map(({ blob, ...take }) => ({ value: { ...take, blob: new Blob([decodeBase64(blob.data)], { type: blob.mimeType }) } })), 'id');
 }
 
 function replaceLocalStorage(values: Record<string, string>) {

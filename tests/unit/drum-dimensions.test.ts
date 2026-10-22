@@ -4,7 +4,7 @@ import { DRUM_CONTACT_POINTS, DRUM_DIMENSIONS, DRUM_MODEL_VERSION, HAND_DIMENSIO
 describe("professional drum model dimensions", () => {
   it("uses metre-scale conventional kit sizes", () => {
     expect(MODEL_SCALE).toBe(1);
-    expect(DRUM_MODEL_VERSION).toBe("professional-v44");
+    expect(DRUM_MODEL_VERSION).toBe("professional-v62");
     expect(DRUM_DIMENSIONS.kick).toMatchObject({ diameter: 0.5588, depth: 0.4572 });
     expect(DRUM_DIMENSIONS.snare).toMatchObject({ diameter: 0.3556, depth: 0.1524 });
     expect(DRUM_DIMENSIONS.rackTom10.diameter).toBeCloseTo(0.254);

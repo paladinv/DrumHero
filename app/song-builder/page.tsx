@@ -1,17 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { SongBuilder } from "@/components/SongBuilder";
+import { LocalizedText } from "@/components/LocalizedText";
+import { translateRequest } from "@/lib/request-locale";
 
-export const metadata: Metadata = { title: "Song Builder" };
+export async function generateMetadata(): Promise<Metadata> { return { title: await translateRequest("Song Builder") }; }
 
 export default async function SongBuilderPage({ searchParams }: { searchParams: Promise<{ song?: string }> }) {
   const params = await searchParams;
   return <main id="main-content" className="page song-builder-page">
     <header className="page-heading">
-      <span className="eyebrow">Your music, your way</span>
-      <h1>Build a song <span>from the kit up.</span></h1>
-      <p>Arrange grooves and fills, edit every drum hit, then hear the whole song or follow the moving notes. Your songs stay in this browser and appear in the Song Library.</p>
-      <Link className="button-secondary song-builder-library-link" href="/song-library">Open Song Library</Link>
+      <span className="eyebrow"><LocalizedText text="Your music, your way"/></span>
+      <h1><LocalizedText text="Write the part you hear."/></h1>
+      <p><LocalizedText text="Arrange grooves and fills, edit every drum hit, then hear the whole song or follow the moving notes. Your songs stay in this browser and appear in the Song Library."/></p>
+      <Link className="button-secondary song-builder-library-link" href="/song-library"><LocalizedText text="Open Song Library"/></Link>
     </header>
     <SongBuilder initialSongId={params.song ?? ""} />
   </main>;

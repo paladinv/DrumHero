@@ -10,6 +10,9 @@ import { CUSTOM_GROOVES_EVENT, readCustomGrooves } from "@/lib/custom-grooves";
 import type { Instrument, PracticePattern, RatedHit, SessionResult } from "@/lib/types";
 import { useProgress } from "./ProgressProvider";
 import { DrumKitCanvas, type DrumKitCanvasHandle } from "./DrumKitCanvas";
+import { SongLinkedPractice } from "./SongLinkedPractice";
+import { useLocalization } from "./LocalizationProvider";
+import { localizedPattern } from "@/lib/teaching-pattern-display";
 
 type Mode="idle"|"loading"|"count-in"|"playing"|"paused"|"results";
 type ExpectedHit={at:number;instrument:Instrument;matched:boolean};
@@ -19,13 +22,14 @@ const instruments:Array<{id:Instrument;key:string;code:string}>=[
 
 export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const [libraryPatterns,setLibraryPatterns]=useState<PracticePattern[]>([]);
+  const [librarySongs,setLibrarySongs]=useState<ReturnType<typeof allSongs>>([]);
   const [customGrooves,setCustomGrooves]=useState<PracticePattern[]>([]);
   const availablePatterns=[...patterns,...libraryPatterns,...customGrooves];
   const initial=availablePatterns.find((item)=>item.id===initialPatternId)??patterns[0];
   const [patternId,setPatternId]=useState(initialPatternId??initial.id);
   const pattern=availablePatterns.find((item)=>item.id===patternId)??patterns[0];
   const [bpm,setBpm]=useState(initial.defaultBpm);
-  useEffect(()=>{const timer=window.setTimeout(()=>{const songs=allSongs(readSongLibrary());const next=songs.flatMap((song)=>song.sections.flatMap((section)=>section.parts.map((part)=>songPartPattern(song,section,part))));setLibraryPatterns(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(match.defaultBpm)},0);return()=>window.clearTimeout(timer)},[initialPatternId]);
+  useEffect(()=>{const timer=window.setTimeout(()=>{const songs=allSongs(readSongLibrary());setLibrarySongs(songs);const next=songs.flatMap((song)=>song.sections.flatMap((section)=>section.parts.map((part)=>songPartPattern(song,section,part))));setLibraryPatterns(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(match.defaultBpm)},0);return()=>window.clearTimeout(timer)},[initialPatternId]);
   useEffect(()=>{const load=()=>{const next=readCustomGrooves();setCustomGrooves(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(match.defaultBpm)};const timer=window.setTimeout(load,0);window.addEventListener(CUSTOM_GROOVES_EVENT,load);return()=>{window.clearTimeout(timer);window.removeEventListener(CUSTOM_GROOVES_EVENT,load)}},[initialPatternId]);
   const [mode,setModeState]=useState<Mode>("idle");
   const modeRef=useRef<Mode>("idle");
@@ -34,6 +38,7 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const [countIn,setCountIn]=useState(4);
   const [rated,setRated]=useState<RatedHit[]>([]);
   const ratedRef=useRef<RatedHit[]>([]);
+  const inputModeRef=useRef<"keyboard"|"touch"|"unknown">("unknown");
   const [lastHit,setLastHit]=useState<RatedHit|null>(null);
   const [audioMessage,setAudioMessage]=useState("Audio begins when you press Start.");
   const [bassEnabled,setBassEnabled]=useState(false);
@@ -50,6 +55,8 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const startRequestRef=useRef(0);
   const kitRef=useRef<DrumKitCanvasHandle>(null);
   const {recordSession,progress,setSound}=useProgress();
+  const {t,formatNumber,locale}=useLocalization();
+  const displayedPattern=localizedPattern(pattern,locale);
   const totalSteps=pattern.beats*(pattern.subdivision/4);
 
   const clearClock=useCallback(()=>{if(intervalRef.current){clearInterval(intervalRef.current);intervalRef.current=null}},[]);
@@ -59,7 +66,7 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
     clearClock();
     expectedRef.current.forEach((expected)=>{if(!expected.matched){expected.matched=true;appendRated({instrument:expected.instrument,rating:"miss",offsetMs:null})}});
     const summary=summarizeHits(ratedRef.current,pattern.id,pattern.name,bpm);
-    setResult(summary);recordSession(summary);if(pattern.id.startsWith("song:")){const [,songId,sectionId]=pattern.id.split(":");writeSongLibrary(recordSongScore(readSongLibrary(),songId,sectionId,summary.score))}setMode("results");setPlayhead(totalSteps-1);
+    setResult(summary);recordSession(summary);if(pattern.id.startsWith("song:")){const [,songId,sectionId,partId]=pattern.id.split(":");writeSongLibrary(recordSongScore(readSongLibrary(),songId,sectionId,summary.score,{partId,bpm,inputMode:inputModeRef.current,engine:"pad"}))}setMode("results");setPlayhead(totalSteps-1);
   },[appendRated,bpm,clearClock,pattern.id,pattern.name,recordSession,totalSteps]);
 
   const tick=useCallback((now=performance.now())=>{
@@ -75,7 +82,8 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
 
   const startClock=useCallback(()=>{clearClock();intervalRef.current=setInterval(()=>tick(),20)},[clearClock,tick]);
 
-  const reset=useCallback(()=>{startRequestRef.current+=1;clearClock();setMode("idle");setPlayhead(-1);setCountIn(4);ratedRef.current=[];setRated([]);setLastHit(null);setResult(null);expectedRef.current=[];lastStepRef.current=-1},[clearClock]);
+  const reset=useCallback(()=>{startRequestRef.current+=1;clearClock();setMode("idle");setPlayhead(-1);setCountIn(4);ratedRef.current=[];inputModeRef.current="unknown";setRated([]);setLastHit(null);setResult(null);expectedRef.current=[];lastStepRef.current=-1},[clearClock]);
+  useEffect(()=>{const stopForProfileChange=()=>reset();window.addEventListener("drum-hero:learner-profile-change",stopForProfileChange);return()=>window.removeEventListener("drum-hero:learner-profile-change",stopForProfileChange)},[reset]);
 
   const start=async()=>{
     reset();
@@ -104,8 +112,9 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const pause=()=>{if(modeRef.current!=="playing")return;pauseAtRef.current=performance.now();clearClock();setMode("paused")};
   const resume=()=>{if(modeRef.current!=="paused")return;const shift=performance.now()-pauseAtRef.current;startAtRef.current+=shift;expectedRef.current.forEach((hit)=>{hit.at+=shift});setMode("playing");startClock()};
 
-  const hit=useCallback((instrument:Instrument)=>{
+  const hit=useCallback((instrument:Instrument,source:"keyboard"|"touch"="touch")=>{
     if(modeRef.current!=="playing")return;
+    inputModeRef.current=source;
     const now=performance.now();const closest=findClosestExpected(now,expectedRef.current,instrument);
     let value:RatedHit;
     if(closest.index>=0&&Math.abs(closest.offset)<=100){expectedRef.current[closest.index].matched=true;value={instrument,rating:classifyOffset(closest.offset),offsetMs:Math.round(closest.offset)}}
@@ -114,7 +123,7 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   },[appendRated,progress.settings.sound]);
 
   useEffect(()=>{
-    const onKey=(event:KeyboardEvent)=>{if(event.repeat)return;const item=instruments.find((instrument)=>instrument.code===event.code);if(item){event.preventDefault();hit(item.id)}if(event.code==="KeyF"&&event.altKey){event.preventDefault();void(document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen())}};
+    const onKey=(event:KeyboardEvent)=>{if(event.repeat)return;const item=instruments.find((instrument)=>instrument.code===event.code);if(item){event.preventDefault();hit(item.id,"keyboard")}if(event.code==="KeyF"&&event.altKey){event.preventDefault();void(document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen())}};
     window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
   },[hit]);
   useEffect(()=>()=>{clearClock();audioRef.current?.close();void bassRef.current?.close()},[clearClock]);
@@ -124,19 +133,20 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const live=summarizeHits(rated,pattern.id,pattern.name,bpm,"live");
   const changePattern=(id:string)=>{reset();const next=availablePatterns.find((item)=>item.id===id)??patterns[0];setPatternId(id);setBpm(next.defaultBpm);if(next.beats%4!==0&&bassEnabled){setBassEnabled(false);setBassMessage("Bass accompaniment turned off because this pattern is not in complete 4/4 bars.")}};
   const changeBpm=(value:number)=>{reset();setBpm(Math.min(200,Math.max(40,value)))};
+  if (pattern.id.startsWith("song:") && librarySongs.some(song => song.id === pattern.id.split(":")[1])) return <SongLinkedPractice patternId={pattern.id} engine="pad" targetBpm={bpm} />;
   return <div className="practice-layout">
-    <section className="practice-console" aria-label="Practice controls">
-      <div className="practice-controls"><label>Pattern<select value={pattern.id} onChange={(event)=>changePattern(event.target.value)}>{availablePatterns.map((item)=><option value={item.id} key={item.id}>{item.name} · {item.level}</option>)}</select></label><label>Tempo <span>{bpm} BPM</span><input aria-label="Tempo" type="range" min="40" max="200" value={bpm} onChange={(event)=>changeBpm(Number(event.target.value))}/></label><button className="sound-toggle" aria-pressed={progress.settings.sound} onClick={()=>setSound(!progress.settings.sound)}>{progress.settings.sound?"Sound on":"Sound off"}</button><label className="bass-accompaniment-toggle"><span><input type="checkbox" checked={bassEnabled} disabled={pattern.beats%4!==0} onChange={(event)=>{setBassEnabled(event.target.checked);setBassMessage("")}}/> Add a bass pulse</span><small>{pattern.beats%4===0?"C–G notes on beats 1 and 3 · 4/4 bars":"Available for complete 4/4 bars"}</small>{bassMessage&&<small role="status">{bassMessage}</small>}</label></div>
+    <section className="practice-console" aria-label={t("Practice controls")}>
+      <div className="practice-controls"><label>{t("Pattern")}<select value={pattern.id} onChange={(event)=>changePattern(event.target.value)}>{availablePatterns.map((item)=><option value={item.id} key={item.id}>{localizedPattern(item,locale).name} · {t(item.level)}</option>)}</select></label><label>{t("Tempo")} <span>{formatNumber(bpm)} BPM</span><input aria-label={t("Tempo")} type="range" min="40" max="200" value={bpm} onChange={(event)=>changeBpm(Number(event.target.value))}/></label><button className="sound-toggle" aria-pressed={progress.settings.sound} onClick={()=>setSound(!progress.settings.sound)}>{progress.settings.sound?t("Sound on"):t("Sound off")}</button><label className="bass-accompaniment-toggle"><span><input type="checkbox" checked={bassEnabled} disabled={pattern.beats%4!==0} onChange={(event)=>{setBassEnabled(event.target.checked);setBassMessage("")}}/> {t("Add a bass pulse")}</span><small>{pattern.beats%4===0?t("C–G notes on beats 1 and 3 · 4/4 bars"):t("Available for complete 4/4 bars")}</small>{bassMessage&&<small role="status">{bassMessage}</small>}</label></div>
       <div className="practice-stage">
-        <div className="stage-top"><div><span className="label">{pattern.level} · {pattern.subdivision}th notes</span><h2>{pattern.name}</h2></div><div className={`mode-pill mode-${mode}`}>{mode}</div></div>
-        <p>{pattern.description}</p>
+        <div className="stage-top"><div><span className="label">{t(pattern.level)} · {formatNumber(pattern.subdivision)}th notes</span><h2>{displayedPattern.name}</h2></div><div className={`mode-pill mode-${mode}`}>{t(mode)}</div></div>
+        <p>{displayedPattern.description}</p>
         <div className="timeline" style={{gridTemplateColumns:`repeat(${totalSteps},minmax(30px,1fr))`}} aria-label="Pattern timeline">{Array.from({length:totalSteps},(_,step)=>{const stepHits=pattern.hits.filter((item)=>item.step===step);return <div className={step===playhead?"timeline-step active":"timeline-step"} key={step}><span>{step+1}</span>{stepHits.map((target,index)=><i className={`voice-${target.instrument}`} title={target.instrument} key={`${target.instrument}-${index}`}>{target.instrument.slice(0,1).toUpperCase()}</i>)}</div>})}</div>
         <DrumKitCanvas ref={kitRef} compact interactive={false} label="Practice pad 3D drum kit" />
-        <div className="transport">{mode==="idle"||mode==="results"?<button id="start-btn" className="button" onClick={(event)=>{event.currentTarget.blur();start()}}>{mode==="results"?"Try again":"Start 4-count"}</button>:null}{mode==="playing"?<button className="button" onClick={pause}>Pause</button>:null}{mode==="paused"?<button className="button" onClick={resume}>Resume</button>:null}<button className="button-secondary" onClick={reset} disabled={mode==="idle"}>Reset</button><span className="audio-status" role="status">{audioMessage}</span></div>
-        {mode==="count-in"?<div className="count-in" role="status" aria-live="assertive"><span>Get ready</span><strong>{countIn}</strong></div>:null}
+        <div className="transport">{mode==="idle"||mode==="results"?<button id="start-btn" className="button" onClick={(event)=>{event.currentTarget.blur();start()}}>{mode==="results"?t("Try again"):t("Start 4-count")}</button>:null}{mode==="playing"?<button className="button" onClick={pause}>{t("Pause")}</button>:null}{mode==="paused"?<button className="button" onClick={resume}>{t("Resume")}</button>:null}<button className="button-secondary" onClick={reset} disabled={mode==="idle"}>{t("Reset")}</button><span className="audio-status" role="status">{audioMessage}</span></div>
+        {mode==="count-in"?<div className="count-in" role="status" aria-live="assertive"><span>{t("Get ready")}</span><strong>{countIn}</strong></div>:null}
       </div>
       <div className="drum-pads" aria-label="Playable drum pads">{instruments.map((instrument)=><button className={`drum-pad pad-${instrument.id}`} key={instrument.id} onPointerDown={()=>hit(instrument.id)} disabled={mode!=="playing"}><span>{instrument.id}</span><kbd>{instrument.key}</kbd></button>)}</div>
     </section>
-    <aside className="score-panel" aria-label="Live timing score"><span className="label">Live feedback</span><strong className="live-score">{result?.score??live.score}</strong><span>score</span><div className="score-grid"><div><b>{result?.great??live.great}</b><span>Great</span></div><div><b>{result?.good??live.good}</b><span>Good</span></div><div><b>{result?.miss??live.miss}</b><span>Miss</span></div><div><b>{result?.extra??live.extra}</b><span>Extra</span></div></div><div className="last-hit" role="status" aria-live="polite">{lastHit?<><strong className={`rating-${lastHit.rating}`}>{lastHit.rating}</strong><span>{lastHit.offsetMs===null?lastHit.instrument:`${lastHit.offsetMs>0?"+":""}${lastHit.offsetMs} ms · ${lastHit.instrument}`}</span></>:<span>Your latest hit appears here.</span>}</div>{result?<div className="result-summary"><h3 ref={resultHeadingRef} tabIndex={-1}>Loop complete</h3><p><strong>{result.accuracy}%</strong> accuracy · <strong>{result.maxCombo}</strong> max combo</p></div>:null}<p className="scoring-note">Great ≤ 50 ms · Good ≤ 100 ms. Alt+F toggles fullscreen.</p></aside>
+    <aside className="score-panel" aria-label={t("Live timing score")}><span className="label">{t("Live feedback")}</span><strong className="live-score">{result?.score??live.score}</strong><span>score</span><div className="score-grid"><div><b>{result?.great??live.great}</b><span>{t("Great")}</span></div><div><b>{result?.good??live.good}</b><span>{t("Good")}</span></div><div><b>{result?.miss??live.miss}</b><span>{t("Miss")}</span></div><div><b>{result?.extra??live.extra}</b><span>{t("Extra")}</span></div></div><div className="last-hit" role="status" aria-live="polite">{lastHit?<><strong className={`rating-${lastHit.rating}`}>{t(({great:"Great",good:"Good",miss:"Miss",extra:"Extra"})[lastHit.rating])}</strong><span>{lastHit.offsetMs===null?lastHit.instrument:`${lastHit.offsetMs>0?"+":""}${lastHit.offsetMs} ms · ${lastHit.instrument}`}</span></>:<span>{t("Your latest hit appears here.")}</span>}</div>{result?<div className="result-summary"><h3 ref={resultHeadingRef} tabIndex={-1}>{t("Loop complete")}</h3><p><strong>{result.accuracy}%</strong> {t("accuracy")} · <strong>{result.maxCombo}</strong> max combo</p></div>:null}<p className="scoring-note">{t("Great")} ≤ 50 ms · {t("Good")} ≤ 100 ms. Alt+F toggles fullscreen.</p></aside>
   </div>;
 }

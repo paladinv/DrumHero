@@ -1,260 +1,18 @@
+import { expressionStrikes } from "./song-builder-creative";
 import type { SongInstrument } from "./types";
 import { DEFAULT_DRUM_MIX, type DrumMixSettings } from "./audio";
-import type { DrumSong } from "./song-library";
-import type { ArrangementBar } from "./song-builder";
+import { arrangementAutomationValue, automationScaleAtHit, type ArrangementBar } from "./song-builder";
+import { notationQuarterScale, paginateNotation, notationSystems, percussionRhythm, DEFAULT_NOTATION_OPTIONS, type NotationOptions } from "./song-builder-notation";
 
-export type NotationView = "tab" | "staff";
-export type NotationOptions = { barsPerPage: 4 | 6 | 8; cymbalNoteheads: "cross" | "diamond"; showSticking: boolean; beamGrouping: "auto" | "2" | "3" | "4" | "off" };
-export const BARS_PER_SHEET_PAGE = 6;
-export const SHEET_WIDTH = 1100;
-export const SHEET_HEIGHT = 850;
-export const DEFAULT_NOTATION_OPTIONS: NotationOptions = { barsPerPage: 6, cymbalNoteheads: "cross", showSticking: true, beamGrouping: "auto" };
+export { drawNotationPage, paginateNotation, notationGeometry, notationBarAtPoint, SHEET_WIDTH, SHEET_HEIGHT, BARS_PER_SHEET_PAGE, DEFAULT_NOTATION_OPTIONS, type NotationView, type NotationOptions } from "./song-builder-notation";
 
-const ink = "#20211e";
-const muted = "#6e6d67";
-const coral = "#e85348";
-const voiceY: Record<SongInstrument, number> = { crash: -49, ride: -65, openhat: -33, hihat: -17, tom: 0, rimshot: 33, snare: 17, kick: 49 };
-
-export function drawNotationPage(song: DrumSong, bars: ArrangementBar[], view: NotationView, pageIndex: number, cursor?: { barIndex: number; fraction: number } | null, options: NotationOptions = DEFAULT_NOTATION_OPTIONS) {
-  const canvas = document.createElement("canvas");
-  canvas.width = SHEET_WIDTH;
-  canvas.height = SHEET_HEIGHT;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("This browser could not prepare the notation image.");
-  context.fillStyle = "#fffdf8";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = ink;
-  context.font = "700 36px Arial, sans-serif";
-  context.fillText(song.title || "Untitled Song", 54, 66, 780);
-  context.font = "18px Arial, sans-serif";
-  context.fillStyle = muted;
-  context.fillText(`${song.artist || "Drum Hero"}   ·   ${song.bpm} BPM   ·   ${song.meter}`, 56, 98, 850);
-  context.font = "700 14px Arial, sans-serif";
-  context.fillStyle = coral;
-  context.fillText(view === "tab" ? "DRUM TAB" : "PERCUSSION STAFF", 56, 132);
-  context.textAlign = "right";
-  context.fillStyle = muted;
-  context.font = "13px Arial, sans-serif";
-  context.fillText(`Page ${pageIndex + 1}`, SHEET_WIDTH - 54, 132);
-  context.textAlign = "left";
-
-  const pageBars = bars.slice(pageIndex * options.barsPerPage, (pageIndex + 1) * options.barsPerPage);
-  const left = 130;
-  const right = SHEET_WIDTH - 42;
-  const width = (right - left) / Math.max(1, pageBars.length);
-  const top = view === "tab" ? 188 : 190;
-  const bottom = view === "tab" ? 706 : 630;
-  const names: SongInstrument[] = ["crash", "ride", "openhat", "hihat", "tom", "rimshot", "snare", "kick"];
-  context.strokeStyle = "#d7d1c7";
-  context.fillStyle = ink;
-  context.lineWidth = 1;
-
-  for (let barOffset = 0; barOffset < pageBars.length; barOffset += 1) {
-    const bar = pageBars[barOffset];
-    const x = left + barOffset * width;
-    context.fillStyle = coral;
-    context.font = "700 14px Arial, sans-serif";
-    const sectionLabel = [bar.marker, bar.endingPass ? `Ending ${bar.endingPass}` : "", bar.sectionName].filter(Boolean).join(" · ").toUpperCase();
-    context.fillText(sectionLabel, x + 8, 166, Math.max(30, width - 16));
-    context.fillStyle = ink;
-    context.font = "700 16px Arial, sans-serif";
-    context.fillText(`${bar.number}`, x + 8, 185);
-    context.font = "12px Arial, sans-serif";
-    context.fillStyle = muted;
-    context.fillText(`${bar.meter} · ${bar.bpm} BPM`, x + width - 93, 185, 88);
-    context.strokeStyle = "#bdb7ad";
-    context.beginPath();
-    context.moveTo(x, top);
-    context.lineTo(x, bottom);
-    context.stroke();
-
-    if (view === "tab") {
-      const rowGap = 61;
-      names.forEach((voice, row) => {
-        const y = 225 + row * rowGap;
-        context.strokeStyle = "#ded8ce";
-        context.beginPath();
-        context.moveTo(x, y + 21);
-        context.lineTo(x + width, y + 21);
-        context.stroke();
-        for (let beat = 1; beat < bar.beats; beat += 1) {
-          const beatX = x + 14 + beat / bar.measureBeats * Math.max(1, width - 28);
-          context.strokeStyle = "#ece7df";
-          context.beginPath();
-          context.moveTo(beatX, y - 5);
-          context.lineTo(beatX, y + 27);
-          context.stroke();
-        }
-        context.fillStyle = muted;
-        context.font = "700 12px Arial, sans-serif";
-        if (barOffset === 0) context.fillText(VOICE_NAMES[voice], 50, y + 25, 75);
-        bar.hits.filter((hit) => hit.instrument === voice).forEach((hit) => {
-          const hitX = x + 14 + hit.fraction * Math.max(1, width - 28);
-          context.fillStyle = hit.accent ? coral : ink;
-          context.beginPath();
-          context.arc(hitX, y + 21, Math.max(4, Math.min(9, hit.velocity / 15)), 0, Math.PI * 2);
-          if (hit.ghost) context.stroke();
-          else context.fill();
-          if (hit.accent) {
-            context.font = "700 13px Arial, sans-serif";
-            context.fillText(">", hitX - 4, y - 1);
-          }
-          if (hit.articulation && hit.articulation !== "normal") {
-            const label = hit.articulation === "flam" ? "fl" : hit.articulation === "drag" ? "dr" : hit.articulation === "buzz" ? "z" : "FS";
-            context.font = "700 10px Arial, sans-serif";
-            context.fillStyle = coral;
-            context.fillText(label, hitX - 5, y + 8);
-          }
-          if (options.showSticking && hit.sticking) {
-            context.font = "700 10px Arial, sans-serif";
-            context.fillStyle = muted;
-            context.fillText(hit.sticking, hitX - 3, y + 40);
-          }
-        });
-      });
-    } else {
-      const centerY = 408;
-      const staffTop = centerY - 40;
-      for (let line = 0; line < 5; line += 1) {
-        const y = staffTop + line * 20;
-        context.strokeStyle = ink;
-        context.lineWidth = line === 0 || line === 4 ? 1.5 : 1;
-        context.beginPath();
-        context.moveTo(x, y);
-        context.lineTo(x + width, y);
-        context.stroke();
-      }
-      if (barOffset === 0) {
-        context.fillStyle = ink;
-        context.font = "30px Georgia, serif";
-        context.fillText("𝄥", 63, centerY + 14);
-      }
-      bar.hits.forEach((hit) => {
-        const hitX = x + 14 + hit.fraction * Math.max(1, width - 28);
-        const hitY = centerY + voiceY[hit.instrument];
-        context.strokeStyle = ink;
-        context.fillStyle = ink;
-        if (hit.instrument === "hihat" || hit.instrument === "openhat" || hit.instrument === "crash" || hit.instrument === "ride") {
-          if (options.cymbalNoteheads === "cross") {
-            context.lineWidth = 2;
-            context.beginPath();
-            context.moveTo(hitX - 7, hitY - 7);
-            context.lineTo(hitX + 7, hitY + 7);
-            context.moveTo(hitX + 7, hitY - 7);
-            context.lineTo(hitX - 7, hitY + 7);
-            context.stroke();
-          } else {
-            context.beginPath();
-            context.moveTo(hitX, hitY - 8);
-            context.lineTo(hitX + 7, hitY);
-            context.lineTo(hitX, hitY + 8);
-            context.lineTo(hitX - 7, hitY);
-            context.closePath();
-            context.fill();
-          }
-        } else {
-          context.beginPath();
-          context.ellipse(hitX, hitY, 8, 5.5, -0.25, 0, Math.PI * 2);
-          context.fill();
-          context.lineWidth = 1.6;
-          context.beginPath();
-          context.moveTo(hitX + 7, hitY);
-          context.lineTo(hitX + 7, hitY - 34);
-          context.stroke();
-        }
-        if (hit.accent) {
-          context.font = "700 18px Arial, sans-serif";
-          context.fillText(">", hitX - 5, hitY - 13);
-        }
-        if (hit.articulation && hit.articulation !== "normal") {
-          const label = hit.articulation === "flam" ? "fl" : hit.articulation === "drag" ? "dr" : hit.articulation === "buzz" ? "z" : "FS";
-          context.font = "700 11px Arial, sans-serif";
-          context.fillStyle = coral;
-          context.fillText(label, hitX - 5, hitY + 19);
-        }
-        if (options.showSticking && hit.sticking) {
-          context.font = "700 10px Arial, sans-serif";
-          context.fillStyle = muted;
-          context.fillText(hit.sticking, hitX - 3, hitY + 18);
-        }
-      });
-      if (options.beamGrouping !== "off") {
-        const grouping = options.beamGrouping === "auto" ? Math.max(2, Math.round(bar.subdivision / 4)) : Number(options.beamGrouping);
-        const groups = new Map<number, typeof bar.hits>();
-        for (const hit of bar.hits) {
-          const localStep = Math.round(hit.beat * bar.subdivision / 4);
-          const key = Math.floor(localStep / grouping);
-          groups.set(key, [...(groups.get(key) ?? []), hit]);
-        }
-        const beamY = staffTop - 30;
-        for (const group of groups.values()) {
-          const byStep = new Map<number, typeof bar.hits[number]>();
-          group.forEach((hit) => byStep.set(Math.round(hit.beat * bar.subdivision / 4), hit));
-          const steps = [...byStep.keys()].sort((a, b) => a - b);
-          for (let index = 1; index < steps.length; index += 1) {
-            const leftStep = steps[index - 1];
-            const rightStep = steps[index];
-            if (leftStep === undefined || rightStep !== leftStep + 1) continue;
-            const leftHit = byStep.get(leftStep);
-            const rightHit = byStep.get(rightStep);
-            if (!leftHit || !rightHit) continue;
-            const xFor = (hit: typeof leftHit) => x + 14 + hit.fraction * Math.max(1, width - 28) + 7;
-            const yFor = (hit: typeof leftHit) => centerY + voiceY[hit.instrument];
-            context.strokeStyle = ink;
-            context.lineWidth = 1.2;
-            context.beginPath();
-            context.moveTo(xFor(leftHit), yFor(leftHit) - 4);
-            context.lineTo(xFor(leftHit), beamY);
-            context.moveTo(xFor(rightHit), yFor(rightHit) - 4);
-            context.lineTo(xFor(rightHit), beamY);
-            context.stroke();
-            context.lineWidth = 4;
-            context.beginPath();
-            context.moveTo(xFor(leftHit), beamY);
-            context.lineTo(xFor(rightHit), beamY);
-            context.stroke();
-          }
-        }
-      }
-      context.fillStyle = muted;
-      context.font = "13px Arial, sans-serif";
-        context.fillText(`Percussion staff: cymbals use ${options.cymbalNoteheads} noteheads; dynamics show velocity and accents.`, 56, 688, 960);
-    }
-  }
-
-  context.strokeStyle = ink;
-  context.lineWidth = 1.5;
-  context.beginPath();
-  context.moveTo(right, top);
-  context.lineTo(right, bottom);
-  context.stroke();
-  if (cursor && cursor.barIndex >= pageIndex * options.barsPerPage && cursor.barIndex < (pageIndex + 1) * options.barsPerPage) {
-    const localBar = cursor.barIndex - pageIndex * options.barsPerPage;
-    const x = left + localBar * width + 14 + cursor.fraction * Math.max(1, width - 28);
-    context.save();
-    context.strokeStyle = coral;
-    context.lineWidth = 3;
-    context.setLineDash([7, 5]);
-    context.beginPath();
-    context.moveTo(x, top - 4);
-    context.lineTo(x, bottom + 4);
-    context.stroke();
-    context.restore();
-  }
-  context.fillStyle = muted;
-  context.font = "13px Arial, sans-serif";
-  context.fillText("● hit   ○ ghost note   > accent   fl flam   dr drag   z buzz roll   FS foot splash   · beat lines divide quarter-note pulses", 56, 758, 990);
-  context.fillText("Drum Hero Song Builder", 56, 810);
-  return canvas;
-}
-
-const VOICE_NAMES: Record<SongInstrument, string> = { kick: "KICK", snare: "SNARE", hihat: "HI-HAT", openhat: "OPEN HAT", ride: "RIDE", rimshot: "RIMSHOT", tom: "TOM", crash: "CRASH" };
+const VOICE_NAMES: Record<SongInstrument, string> = { kick: "KICK", snare: "SNARE", hihat: "HI-HAT", openhat: "OPEN HAT", ride: "RIDE", rimshot: "RIMSHOT", tom: "TOM", crash: "CRASH", cowbell: "COWBELL", shaker: "SHAKER", tambourine: "TAMBOURINE", custom1: "CUSTOM 1", custom2: "CUSTOM 2", custom3: "CUSTOM 3", custom4: "CUSTOM 4" };
 
 export function canvasPng(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not create the PNG image.")), "image/png"));
 }
 
-export function canvasesPdf(canvases: HTMLCanvasElement[]) {
+export function canvasesPdf(canvases: HTMLCanvasElement[], options: NotationOptions = DEFAULT_NOTATION_OPTIONS) {
   if (!canvases.length) throw new Error("There is no notation to export yet.");
   const chunks: Uint8Array[] = [];
   let length = 0;
@@ -274,14 +32,16 @@ export function canvasesPdf(canvases: HTMLCanvasElement[]) {
   const pageRefs = canvases.map((_, index) => `${3 + index * 3} 0 R`).join(" ");
   object(2, () => text(`<< /Type /Pages /Count ${canvases.length} /Kids [${pageRefs}] >>`));
   canvases.forEach((canvas, index) => {
+    const paper=options.paperSize==='a4'?[595.28,841.89]:[612,792];
+    const [pageWidth,pageHeight]=options.orientation==='portrait'?paper:[paper[1],paper[0]];
     const pageObject = 3 + index * 3;
     const contentObject = pageObject + 1;
     const imageObject = pageObject + 2;
     const data = canvas.toDataURL("image/jpeg", 0.94).split(",")[1];
     if (!data) throw new Error("Could not encode a PDF page.");
     const jpeg = Uint8Array.from(atob(data), (character) => character.charCodeAt(0));
-    object(pageObject, () => text(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 792 612] /Resources << /XObject << /Im0 ${imageObject} 0 R >> >> /Contents ${contentObject} 0 R >>`));
-    const content = new TextEncoder().encode("q\n792 0 0 612 0 0 cm\n/Im0 Do\nQ\n");
+    object(pageObject, () => text(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 ${imageObject} 0 R >> >> /Contents ${contentObject} 0 R >>`));
+    const content = new TextEncoder().encode(`q\n${pageWidth} 0 0 ${pageHeight} 0 0 cm\n/Im0 Do\nQ\n`);
     object(contentObject, () => { text(`<< /Length ${content.length} >>\nstream\n`); append(content); text("endstream"); });
     object(imageObject, () => { text(`<< /Type /XObject /Subtype /Image /Width ${canvas.width} /Height ${canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`); append(jpeg); text("\nendstream"); });
   });
@@ -293,7 +53,7 @@ export function canvasesPdf(canvases: HTMLCanvasElement[]) {
   return new Blob(buffers, { type: "application/pdf" });
 }
 
-const midiNotes: Record<SongInstrument, number> = { kick: 36, rimshot: 37, snare: 38, hihat: 42, openhat: 46, tom: 50, crash: 49, ride: 51 };
+const midiNotes: Record<SongInstrument, number> = { kick: 36, rimshot: 37, snare: 38, hihat: 42, openhat: 46, tom: 50, crash: 49, ride: 51, cowbell: 56, shaker: 82, tambourine: 54, custom1: 60, custom2: 61, custom3: 62, custom4: 63 };
 
 function variableLength(value: number) {
   let buffer = Math.max(0, Math.floor(value)) & 0x7f;
@@ -314,9 +74,11 @@ function uint32(value: number) {
   return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
 }
 
-export function arrangementMidi(bars: ArrangementBar[], title: string, noteMap: Record<SongInstrument, number> = midiNotes) {
+export function arrangementMidi(bars: ArrangementBar[], title: string, noteMap: Record<SongInstrument, number> = midiNotes, swing = 50, separateTracks = true) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
-  const events: { tick: number; priority: number; bytes: number[] }[] = [];
+  type MidiEvent = { tick: number; priority: number; bytes: number[] };
+  const conductor: MidiEvent[] = [];
+  const voiceEvents = new Map<SongInstrument, MidiEvent[]>();
   let absoluteBeat = 0;
   let previousBpm = 0;
   let previousMeter = "";
@@ -324,7 +86,7 @@ export function arrangementMidi(bars: ArrangementBar[], title: string, noteMap: 
     const barTick = Math.round(absoluteBeat * 480);
     if (bar.bpm !== previousBpm) {
       const micros = Math.round(60_000_000 / bar.bpm);
-      events.push({ tick: barTick, priority: -3, bytes: [0xff, 0x51, 0x03, (micros >> 16) & 0xff, (micros >> 8) & 0xff, micros & 0xff] });
+      conductor.push({ tick: barTick, priority: -3, bytes: [0xff, 0x51, 0x03, (micros >> 16) & 0xff, (micros >> 8) & 0xff, micros & 0xff] });
       previousBpm = bar.bpm;
     }
     if (bar.meter !== previousMeter) {
@@ -332,50 +94,65 @@ export function arrangementMidi(bars: ArrangementBar[], title: string, noteMap: 
       const numerator = Number(match?.[1] ?? 4);
       const denominator = Number(match?.[2] ?? 4);
       const exponent = Math.max(0, Math.round(Math.log2(denominator)));
-      events.push({ tick: barTick, priority: -2, bytes: [0xff, 0x58, 0x04, numerator & 0xff, exponent, 24, 8] });
+      conductor.push({ tick: barTick, priority: -2, bytes: [0xff, 0x58, 0x04, numerator & 0xff, exponent, 24, 8] });
       previousMeter = bar.meter;
     }
-    const markerText = [bar.marker, bar.endingPass ? `Ending ${bar.endingPass}` : ""].filter(Boolean).join(" · ");
+    const markerText = [bar.marker, bar.rehearsalCue ? `Cue: ${bar.rehearsalCue}` : "", bar.endingPass ? `Ending ${bar.endingPass}` : ""].filter(Boolean).join(" · ");
     if (markerText) {
       const markerBytes = [...new TextEncoder().encode(markerText.slice(0, 100))];
-      events.push({ tick: barTick, priority: -1, bytes: [0xff, 0x06, ...variableLength(markerBytes.length), ...markerBytes] });
+      conductor.push({ tick: barTick, priority: -1, bytes: [0xff, 0x06, ...variableLength(markerBytes.length), ...markerBytes] });
     }
     for (const hit of bar.hits) {
-      const at = barTick + Math.max(0, Math.round(hit.beat * 480));
+      const gridPosition=hit.step%bar.subdivision;
+      const swingableOffbeat=(bar.subdivision===8&&gridPosition%2===1)||(bar.subdivision===16&&gridPosition%4===2);
+      const clipSwing=bar.clipOverrides?.swing??swing;
+      const swingDelay=swingableOffbeat?Math.round(480*(Math.max(50,Math.min(75,clipSwing))-50)/100):0;
+      const at = barTick + Math.max(0, Math.round(hit.beat * 480)+swingDelay);
       const duration = Math.max(1, Math.round((480 * 4 / bar.subdivision) * 0.55));
-      const velocity = Math.max(1, Math.min(127, Math.round(hit.velocity)));
+      const automationScale = automationScaleAtHit(bar, hit);
+      if (automationScale <= 0.001) continue;
+      const voice = hit.articulation === "foot-splash" ? "openhat" : hit.instrument;
+      const velocityScale = arrangementAutomationValue(bar, voice, "velocity", (bar.arrangementBeatStart ?? 0) + hit.beat, 1);
+      const velocity = Math.max(1, Math.min(127, Math.round(hit.velocity * automationScale * velocityScale)));
       const note = hit.articulation === "foot-splash" ? 44 : noteMap[hit.instrument] ?? midiNotes[hit.instrument];
-      const grace = Math.max(1, Math.round(bar.bpm * 0.02 * 8));
-      const strikes = hit.articulation === "flam" ? [[Math.max(barTick, at - grace), Math.round(velocity * 0.48)], [at, velocity]]
-        : hit.articulation === "drag" ? [[Math.max(barTick, at - grace * 2), Math.round(velocity * 0.35)], [Math.max(barTick, at - grace), Math.round(velocity * 0.55)], [at, velocity]]
-        : hit.articulation === "buzz" ? Array.from({ length: 5 }, (_, index) => [at + index * grace, Math.round(velocity * (index === 0 ? 1 : 0.58))])
-        : [[at, velocity]];
+      const events = separateTracks ? (voiceEvents.get(voice) ?? (voiceEvents.set(voice, []), voiceEvents.get(voice)!)) : conductor;
+      const strikes = expressionStrikes(hit.articulation,60000/bar.bpm*4/bar.subdivision).map(([ms,scale]) => [Math.max(barTick,at+Math.round(ms*bar.bpm*480/60000)),Math.max(1,Math.round(velocity*scale))]);
       for (const [strikeAt, strikeVelocity] of strikes) {
         events.push({ tick: strikeAt, priority: 1, bytes: [0x99, note, strikeVelocity] });
-        events.push({ tick: strikeAt + duration, priority: 0, bytes: [0x89, note, 0] });
+        events.push({ tick: strikeAt + (hit.articulation === "choke" ? Math.round(.12*bar.bpm*8) : duration), priority: 0, bytes: [0x89, note, 0] });
       }
     }
     absoluteBeat += bar.beats;
   });
-  events.sort((a, b) => a.tick - b.tick || a.priority - b.priority);
-  const encoded: number[] = [];
-  const nameBytes = [...new TextEncoder().encode(title.slice(0, 100))];
-  encoded.push(...variableLength(0), 0xff, 0x03, ...variableLength(nameBytes.length), ...nameBytes);
-  let previousTick = 0;
-  for (const event of events) {
-    encoded.push(...variableLength(event.tick - previousTick), ...event.bytes);
-    previousTick = event.tick;
-  }
-  encoded.push(...variableLength(0), 0xff, 0x2f, 0x00);
-  const header = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 1, 0xe0];
-  const trackHeader = [0x4d, 0x54, 0x72, 0x6b, ...uint32(encoded.length)];
-  return new Blob([new Uint8Array([...header, ...trackHeader, ...encoded])], { type: "audio/midi" });
+  const tracks = separateTracks ? [{name:title,events:conductor}, ...[...voiceEvents.entries()].map(([voice, events])=>({name:VOICE_NAMES[voice]??voice,events}))] : [{name:title,events:conductor}];
+  const encodeTrack = (events: MidiEvent[], name: string) => {
+    const encoded: number[] = [];
+    const nameBytes = [...new TextEncoder().encode(name.slice(0, 100))];
+    encoded.push(...variableLength(0), 0xff, 0x03, ...variableLength(nameBytes.length), ...nameBytes);
+    events.sort((a, b) => a.tick - b.tick || a.priority - b.priority);
+    let previousTick = 0;
+    for (const event of events) { encoded.push(...variableLength(Math.max(0,event.tick-previousTick)), ...event.bytes); previousTick = event.tick; }
+    encoded.push(...variableLength(0), 0xff, 0x2f, 0x00);
+    return encoded;
+  };
+  const encodedTracks = tracks.map(track=>encodeTrack(track.events,track.name));
+  const header = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, separateTracks ? 1 : 0, (encodedTracks.length >> 8) & 0xff, encodedTracks.length & 0xff, 1, 0xe0];
+  const file = [...header, ...encodedTracks.flatMap(encoded => [0x4d,0x54,0x72,0x6b,...uint32(encoded.length),...encoded])];
+  return new Blob([new Uint8Array(file)], { type: "audio/midi" });
 }
 
 const xmlEscape = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&apos;" })[character] ?? character);
-const midiInstrumentNumber: Record<SongInstrument, number> = { kick: 36, rimshot: 37, snare: 38, hihat: 42, openhat: 46, tom: 50, crash: 49, ride: 51 };
-const displayPitch: Record<SongInstrument, [string, number]> = { kick: ["F", 4], rimshot: ["B", 4], snare: ["C", 5], tom: ["A", 4], hihat: ["G", 5], openhat: ["A", 5], crash: ["E", 5], ride: ["D", 6] };
-const percussionOrder: SongInstrument[] = ["kick", "rimshot", "snare", "tom", "hihat", "openhat", "crash", "ride"];
+const midiInstrumentNumber: Record<SongInstrument, number> = { kick: 36, rimshot: 37, snare: 38, hihat: 42, openhat: 46, tom: 50, crash: 49, ride: 51, cowbell: 56, shaker: 82, tambourine: 54, custom1: 60, custom2: 61, custom3: 62, custom4: 63 };
+const displayPitch: Record<SongInstrument, [string, number]> = { kick: ["F", 4], rimshot: ["C", 5], snare: ["C", 5], tom: ["D", 5], hihat: ["G", 5], openhat: ["G", 5], crash: ["A", 5], ride: ["F", 5], cowbell: ["C", 5], shaker: ["B", 5], tambourine: ["A", 5], custom1: ["C", 5], custom2: ["D", 5], custom3: ["E", 5], custom4: ["F", 5] };
+const defaultStaffPositions: Record<SongInstrument, number> = { kick: 3, snare: -1, rimshot: -1, tom: -2, hihat: -5, openhat: -5, ride: -4, crash: -6, cowbell: -3, shaker: -7, tambourine: -6, custom1: 0, custom2: 1, custom3: -1, custom4: 2 };
+const percussionOrder: SongInstrument[] = ["kick", "rimshot", "snare", "tom", "hihat", "openhat", "crash", "ride", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4"];
+function staffPitch(voice: SongInstrument, options: NotationOptions) {
+  const [baseStep, baseOctave] = displayPitch[voice], letter = ["C", "D", "E", "F", "G", "A", "B"];
+  const position = Math.max(-8, Math.min(8, options.staffPositions?.[voice] ?? defaultStaffPositions[voice]));
+  const baseIndex = baseOctave * 7 + letter.indexOf(baseStep);
+  const shifted = baseIndex + defaultStaffPositions[voice] - position;
+  return [letter[((shifted % 7) + 7) % 7]!, Math.floor(shifted / 7)] as const;
+}
 
 function musicType(ticks: number) {
   const types: Record<number, { type: string; dotted?: boolean; triplet?: boolean }> = {
@@ -387,75 +164,63 @@ function musicType(ticks: number) {
   return types[ticks];
 }
 
-function xmlRest(ticks: number, voice: number) {
-  const notation = musicType(ticks);
-  const modification = notation?.triplet ? "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>" : "";
-  return `<note><rest/><duration>${ticks}</duration><voice>${voice}</voice>${notation ? `<type>${notation.type}</type>${notation.dotted ? "<dot/>" : ""}` : ""}${modification}</note>`;
-}
-
-export function arrangementMusicXml(bars: ArrangementBar[], title: string, artist: string, noteMap: Record<SongInstrument, number> = midiNotes) {
+export function arrangementMusicXml(bars: ArrangementBar[], title: string, artist: string, noteMap: Record<SongInstrument, number> = midiNotes, options:NotationOptions=DEFAULT_NOTATION_OPTIONS) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
-  const instruments = percussionOrder.map((voice, index) => `<score-instrument id="P1-I${index + 1}"><instrument-name>${xmlEscape(VOICE_NAMES[voice])}</instrument-name></score-instrument>`).join("");
-  const midiInstruments = percussionOrder.map((voice, index) => `<midi-instrument id="P1-I${index + 1}"><midi-channel>10</midi-channel><midi-program>1</midi-program><midi-unpitched>${noteMap[voice] ?? midiInstrumentNumber[voice]}</midi-unpitched></midi-instrument>`).join("");
-  const measures = bars.map((bar, index) => {
-    const match = bar.meter.match(/(\d+)\s*\/\s*(\d+)/);
-    const numerator = Number(match?.[1] ?? 4);
-    const denominator = Number(match?.[2] ?? 4);
-    const fullMeasureBeats = numerator * 4 / denominator;
-    const measureTicks = Math.max(1, Math.round(bar.beats * 48));
-    const meter = `<attributes><divisions>48</divisions><time><beats>${numerator}</beats><beat-type>${denominator}</beat-type></time><clef><sign>percussion</sign><line>2</line></clef></attributes>`;
-    const directionLabel = [bar.marker, bar.endingPass ? `Ending ${bar.endingPass}` : "", bar.sectionName].filter(Boolean).join(" · ");
-    const direction = `<direction placement="above"><direction-type><words>${xmlEscape(directionLabel)} · ${bar.bpm} BPM</words><metronome><beat-unit>quarter</beat-unit><per-minute>${bar.bpm}</per-minute></metronome></direction-type><sound tempo="${bar.bpm}"/></direction>`;
-    const voices = percussionOrder.map((voice, voiceIndex) => {
-      const lane = voiceIndex + 1;
-      const events = bar.hits.filter((hit) => hit.instrument === voice).map((hit) => ({ tick: Math.max(0, Math.min(measureTicks, Math.round(hit.beat * 48))), hit })).sort((a, b) => a.tick - b.tick);
-      const uniqueEvents = events.filter((item, eventIndex) => eventIndex === 0 || item.tick !== events[eventIndex - 1]?.tick);
-      let cursor = 0;
-      let body = "";
-      const appendRest = (amount: number) => {
-        let left = amount;
-        const values = [192, 144, 96, 72, 48, 36, 32, 24, 18, 16, 12, 8, 6, 4, 3, 2, 1];
-        while (left > 0) {
-          const value = values.find((candidate) => candidate <= left) ?? 1;
-          body += xmlRest(value, lane);
-          left -= value;
-        }
-      };
-      uniqueEvents.forEach((event, eventIndex) => {
-        if (event.tick > cursor) appendRest(event.tick - cursor);
-        const nextTick = uniqueEvents[eventIndex + 1]?.tick ?? measureTicks;
-        const duration = Math.max(1, nextTick - event.tick);
-        const notation = musicType(duration);
-        const [step, octave] = displayPitch[voice];
-        const isCymbal = voice === "hihat" || voice === "openhat" || voice === "crash" || voice === "ride";
-        const notehead = isCymbal ? "<notehead>x</notehead>" : "";
-        const timeModification = notation?.triplet ? "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>" : "";
-        const articulation = event.hit.articulation && event.hit.articulation !== "normal"
-          ? `<other-notation type="single">${event.hit.articulation}</other-notation>` : "";
-        const sticking = event.hit.sticking ? `<technical><fingering>${event.hit.sticking}</fingering></technical>` : "";
-        const dynamics = event.hit.ghost || event.hit.accent || articulation || sticking
-          ? `<notations>${event.hit.ghost ? "<technical><other-technical>ghost</other-technical></technical>" : ""}${sticking}${event.hit.accent ? "<articulations><accent/></articulations>" : ""}${articulation}</notations>` : "";
-        body += `<note><unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched><duration>${duration}</duration><instrument id="P1-I${percussionOrder.indexOf(voice) + 1}"/><voice>${lane}</voice>${notation ? `<type>${notation.type}</type>${notation.dotted ? "<dot/>" : ""}` : ""}${timeModification}<stem>up</stem>${notehead}${dynamics}</note>`;
-        cursor = event.tick + duration;
-      });
-      if (cursor < measureTicks) appendRest(measureTicks - cursor);
-      return `${voiceIndex ? `<backup><duration>${measureTicks}</duration></backup>` : ""}${body}`;
-    }).join("");
-    const implicit = Math.abs(bar.beats - fullMeasureBeats) > 0.001 ? ' implicit="yes"' : "";
-    return `<measure number="${index + 1}"${implicit}>${meter}${direction}${voices}</measure>`;
-  }).join("");
-  const xml = `<?xml version="1.0" encoding="UTF-8" standalone="no"?><!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd"><score-partwise version="4.0"><work><work-title>${xmlEscape(title)}</work-title></work><identification><creator type="composer">${xmlEscape(artist)}</creator><encoding><software>Drum Hero Song Builder</software></encoding></identification><part-list><score-part id="P1"><part-name>Drum Set</part-name>${instruments}${midiInstruments}</score-part></part-list><part id="P1">${measures}</part></score-partwise>`;
-  return new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
+  const instrumentId=(voice:SongInstrument)=>`P1-I${percussionOrder.indexOf(voice)+1}`;
+  const instruments=percussionOrder.map(voice=>`<score-instrument id="${instrumentId(voice)}"><instrument-name>${xmlEscape(bars[0]?.voiceLabels?.[voice] || VOICE_NAMES[voice])}</instrument-name></score-instrument>`).join('');
+  const midiInstruments=percussionOrder.map(voice=>`<midi-instrument id="${instrumentId(voice)}"><midi-channel>10</midi-channel><midi-program>1</midi-program><midi-unpitched>${(noteMap[voice]??midiInstrumentNumber[voice])+1}</midi-unpitched></midi-instrument>`).join('');
+  const pages=paginateNotation(bars,options),newPages=new Set(pages.slice(1).map(page=>page[0]));
+  const newSystems=new Set(pages.flatMap(page=>notationSystems(page,options).slice(1).map(system=>system[0])));
+  const measures=bars.map((bar,index)=>{
+    const signature=bar.meter.match(/(\d+)\s*\/\s*(\d+)/),numerator=Number(signature?.[1]??4),denominator=Number(signature?.[2]??4),scale=notationQuarterScale(bar);
+    const measureTicks=Math.max(1,Math.round(bar.beats*scale*48));
+    const attributes=`<attributes><divisions>48</divisions><time><beats>${numerator}</beats><beat-type>${denominator}</beat-type></time><clef><sign>percussion</sign><line>2</line></clef></attributes>`;
+    const label=[bar.marker,bar.sectionName,bar.dynamics,bar.annotation,bar.endingPass?`Ending ${bar.endingPass}`:''].filter(Boolean).join(' · ');
+    const dynamic=bar.dynamics && /^(ppp|pp|p|mp|mf|f|ff|fff|sfz)$/.test(bar.dynamics.trim())?`<dynamics><${bar.dynamics.trim()}/></dynamics>`:'';
+    const rehearsal=bar.marker?`<rehearsal>${xmlEscape(bar.marker)}</rehearsal>`:'';
+    const direction=`<direction placement="above"><direction-type>${rehearsal}${dynamic}<words>${xmlEscape(label)}</words><metronome><beat-unit>quarter</beat-unit>${scale===1.5?'<beat-unit-dot/>':''}<per-minute>${bar.bpm}</per-minute></metronome></direction-type><sound tempo="${bar.bpm*scale}"/></direction>`;
+    const body=(['hands','feet'] as const).map((lane,laneIndex)=>{
+      const events=percussionRhythm(bar,lane,options),voice=laneIndex+1,stem=lane==='feet'?'down':'up';
+      return `${laneIndex?`<backup><duration>${measureTicks}</duration></backup>`:''}`+events.map((event,eventIndex)=>{
+        const duration=event.measureRest?measureTicks:Math.max(1,Math.round(event.duration*4/bar.subdivision*scale*48)),type=musicType(duration);
+        const durationXml=`<duration>${duration}</duration><voice>${voice}</voice>${type&&!event.measureRest?`<type>${type.type}</type>${type.dotted?'<dot/>':''}`:''}${type?.triplet&&!event.measureRest?'<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>':''}`;
+        const tuplet=bar.subdivision===12&&scale===1&&event.duration===1?`${event.step%3===0?'<tuplet type="start" bracket="yes"/>':''}${event.step%3===2?'<tuplet type="stop"/>':''}`:'';
+        if(!event.hits.length)return `<note><rest${event.measureRest?' measure="yes"':''}/>${durationXml}${tuplet?`<notations>${tuplet}</notations>`:''}</note>`;
+        const previous=events[eventIndex-1],next=events[eventIndex+1];
+        const beamBefore=Boolean(previous?.hits.length&&previous.group===event.group&&previous.step+previous.duration===event.step);
+        const beamAfter=Boolean(next?.hits.length&&next.group===event.group&&event.step+event.duration===next.step);
+        const beamCount=type?.type==='16th'?2:type?.type==='eighth'?1:0;
+        const beams=options.beamGrouping!=='off'&&(beamBefore||beamAfter)?Array.from({length:beamCount},(_,beam)=>`<beam number="${beam+1}">${beamBefore&&beamAfter?'continue':beamBefore?'end':'begin'}</beam>`).join(''):'';
+        return event.hits.map((hit,hitIndex)=>{
+          const [step,octave]=staffPitch(hit.instrument,options),cymbal=['hihat','openhat','crash','ride','rimshot'].includes(hit.instrument);
+          const pitch=`<unpitched><display-step>${step}</display-step><display-octave>${octave}</display-octave></unpitched>`;
+          const technical=options.showSticking&&hit.sticking?`<technical><fingering>${hit.sticking}</fingering></technical>`:'';
+          const showMarks=options.showArticulationMarks!==false;
+          const articulations=showMarks&&hit.accent?'<articulations><accent/></articulations>':'';
+          const notations=`${hitIndex===0?tuplet:''}${technical}${articulations}${hit.instrument==='openhat'?'<technical><open-string/></technical>':''}${showMarks&&hit.ghost?'<technical><other-technical>ghost</other-technical></technical>':''}${showMarks&&(hit.articulation==='buzz'||hit.articulation==='roll')?'<ornaments><tremolo type="single">3</tremolo></ornaments>':''}${showMarks&&hit.articulation==='choke'?'<technical><stopped/></technical>':''}${showMarks&&hit.articulation==='foot-splash'?'<other-notation type="single">foot splash</other-notation>':''}`;
+          const graceCount=showMarks?(hit.articulation==='drag'?2:hit.articulation==='flam'?1:0):0;
+          const grace=hitIndex===0?Array.from({length:graceCount},()=>`<note><grace slash="yes"/>${pitch}<instrument id="${instrumentId(hit.instrument)}"/><voice>${voice}</voice><type>eighth</type><stem>${stem}</stem></note>`).join(''):'';
+          return `${grace}<note dynamics="${Math.round(hit.velocity/90*100)}">${hitIndex?'<chord/>':''}${pitch}${durationXml.replace(`<voice>${voice}</voice>`,`<instrument id="${instrumentId(hit.instrument)}"/><voice>${voice}</voice>`)}<stem>${stem}</stem>${cymbal||(hit.ghost&&options.showArticulationMarks!==false)?`<notehead${hit.ghost&&options.showArticulationMarks!==false?' parentheses="yes"':''}>${cymbal?hit.instrument==='rimshot'||options.cymbalNoteheads==='cross'?'x':'diamond':'normal'}</notehead>`:''}${hitIndex===0?beams:''}${notations?`<notations>${notations}</notations>`:''}</note>`;
+        }).join('');
+      }).join('');
+    }).join('');
+    const implicit=Math.abs(bar.beats*scale-numerator*4/denominator)>0.001?' implicit="yes"':'';
+    const print=newPages.has(bar)?'<print new-page="yes"/>':newSystems.has(bar)?'<print new-system="yes"/>':'';
+    return `<measure number="${index+1}"${implicit}>${print}${attributes}${direction}${body}</measure>`;
+  }).join('');
+  return new Blob([`<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"><work><work-title>${xmlEscape(title)}</work-title></work><identification><creator type="composer">${xmlEscape(artist)}</creator></identification><part-list><score-part id="P1"><part-name>Drum Set</part-name>${instruments}${midiInstruments}</score-part></part-list><part id="P1">${measures}</part></score-partwise>`],{type:'application/vnd.recordare.musicxml+xml'});
 }
 
 const wavSamplePaths: Record<SongInstrument, string[]> = {
   kick: [1, 2, 3, 4].map((take) => `/audio/drums/kick-${take}.wav`), snare: [1, 2, 3].map((take) => `/audio/drums/snare-${take}.wav`),
   hihat: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`), openhat: [4, 3, 2, 1].map((take) => `/audio/drums/hihat-${take}.wav`),
   tom: [1, 2, 3].map((take) => `/audio/drums/tom-${take}.wav`), crash: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`),
-  ride: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`), rimshot: [1, 2, 3].map((take) => `/audio/drums/snare-${take}.wav`)
+  ride: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`), rimshot: [1, 2, 3].map((take) => `/audio/drums/snare-${take}.wav`),
+  cowbell: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`), shaker: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`), tambourine: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`),
+  custom1: ["/audio/drums/kick-1.wav"], custom2: ["/audio/drums/snare-1.wav"], custom3: ["/audio/drums/tom-1.wav"], custom4: ["/audio/drums/crash-1.wav"]
 };
 
-export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob>> = {}) {
+export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob>> = {}, options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number } = {}) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
   const sampleRate = 44_100;
   const totalSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0) + 1;
@@ -481,21 +246,29 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
   let activeOpenHat: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
   for (const bar of bars) {
     const quarterSeconds = 60 / bar.bpm;
+    if (options.metronome) for (let beat = 0; beat < bar.beats; beat++) {
+      const at = startSeconds + beat * quarterSeconds, oscillator = context.createOscillator(), gain = context.createGain();
+      oscillator.frequency.value = beat === 0 ? 1400 : 1000;
+      gain.gain.setValueAtTime(.16,at); gain.gain.exponentialRampToValueAtTime(.001,at+.04);
+      oscillator.connect(gain).connect(context.destination); oscillator.start(at); oscillator.stop(at+.05);
+    }
     for (const hit of bar.hits) {
       const instrument = hit.articulation === "foot-splash" ? "openhat" : hit.instrument;
-      if (mix.muted[instrument] || (mix.solo && mix.solo !== instrument)) continue;
+      const automationScale = automationScaleAtHit(bar, hit);
+      if (automationScale <= 0.001 || mix.muted[instrument] || (mix.solo && mix.solo !== instrument)) continue;
       const buffer = buffers.get(instrument);
       if (!buffer) continue;
+      const automationBeat = (bar.arrangementBeatStart ?? 0) + hit.beat;
+      const arrangementVelocityScale = arrangementAutomationValue(bar, instrument, "velocity", automationBeat, 1);
+      const panAutomation = arrangementAutomationValue(bar, instrument, "pan", automationBeat, mix.pan[instrument] ?? 0);
       const gridPosition = hit.step % bar.subdivision;
       const swingableOffbeat = (bar.subdivision === 8 && gridPosition % 2 === 1) || (bar.subdivision === 16 && gridPosition % 4 === 2);
-      const swingSeconds = swingableOffbeat ? quarterSeconds * (Math.max(50, Math.min(75, swing)) - 50) / 100 : 0;
+      const clipSwing = bar.clipOverrides?.swing ?? swing;
+      const swingSeconds = swingableOffbeat ? quarterSeconds * (Math.max(50, Math.min(75, clipSwing)) - 50) / 100 : 0;
       const hitAt = startSeconds + hit.beat * quarterSeconds + swingSeconds;
       const articulation = hit.articulation ?? "normal";
-      const strikes: Array<[number, number]> = articulation === "flam" ? [[-0.034, 0.48], [0, 1]]
-        : articulation === "drag" ? [[-0.058, 0.35], [-0.029, 0.58], [0, 1]]
-        : articulation === "buzz" ? [[0, 1], [0.018, 0.72], [0.036, 0.62], [0.054, 0.52]]
-        : [[0, 1]];
-      for (const [delay, velocityScale] of strikes) {
+      const strikes = expressionStrikes(articulation,quarterSeconds*4000/bar.subdivision).map(([ms, velocity]) => [ms / 1000, velocity] as const);
+      for (const [delay, articulationVelocityScale] of strikes) {
         const source = context.createBufferSource();
         const gain = context.createGain();
         const eventAt = Math.max(0, hitAt + delay);
@@ -507,15 +280,23 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
           activeOpenHat = null;
         }
         source.buffer = buffer;
-        gain.gain.value = Math.max(0, Math.min(1, hit.velocity / 127)) * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)) * velocityScale;
+        gain.gain.value = Math.max(0, Math.min(1, hit.velocity * arrangementVelocityScale * articulationVelocityScale / 127)) * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)) * automationScale;
         const panner = context.createStereoPanner();
-        panner.pan.value = Math.max(-1, Math.min(1, mix.pan[instrument] ?? 0));
+        panner.pan.value = Math.max(-1, Math.min(1, panAutomation));
         source.connect(gain).connect(panner).connect(context.destination);
         source.start(eventAt);
+        if (articulation === 'choke') { gain.gain.setValueAtTime(gain.gain.value,eventAt+.08); gain.gain.linearRampToValueAtTime(0,eventAt+.12); source.stop(eventAt+.13); }
         if (instrument === "openhat") activeOpenHat = { source, gain };
       }
     }
     startSeconds += bar.beats * quarterSeconds;
+  }
+  if (options.backing) {
+    const buffer = await context.decodeAudioData(await options.backing.blob.arrayBuffer());
+    const source = context.createBufferSource(), gain = context.createGain(); source.buffer = buffer;
+    gain.gain.value = options.backing.volume; source.connect(gain).connect(context.destination);
+    const offset = options.backing.downbeat + (options.backingOffsetSeconds ?? 0), start = Math.max(0,-offset);
+    if (Math.max(0,offset) < buffer.duration && start < totalSeconds) source.start(start,Math.max(0,offset),Math.min(buffer.duration-Math.max(0,offset),totalSeconds-start));
   }
   const rendered = await context.startRendering();
   const leftSamples = rendered.getChannelData(0);
@@ -535,4 +316,96 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
     }
   }
   return new Blob([wav], { type: "audio/wav" });
+}
+
+type StemZipFile = { name: string; blob: Blob };
+
+function zipHeader(signature: number, size: number, filename: Uint8Array, crc = 0, offset = 0) {
+  const central = signature === 0x02014b50;
+  const header = new Uint8Array((central ? 46 : 30) + filename.length);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, signature, true);
+  if (central) {
+    view.setUint16(4, 20, true); view.setUint16(6, 20, true);
+    view.setUint32(16, crc, true); view.setUint32(20, size, true); view.setUint32(24, size, true);
+    view.setUint16(28, filename.length, true); view.setUint32(42, offset, true);
+    header.set(filename, 46);
+  } else {
+    view.setUint16(4, 20, true); view.setUint32(14, crc, true);
+    view.setUint32(18, size, true); view.setUint32(22, size, true);
+    view.setUint16(26, filename.length, true); header.set(filename, 30);
+  }
+  return header;
+}
+
+async function blobCrc32(blob: Blob) {
+  let crc = 0xffffffff;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+async function storedZip(files: StemZipFile[]) {
+  const local: BlobPart[] = [], central: Uint8Array[] = [];
+  let localOffset = 0;
+  for (const file of files) {
+    const filename = new TextEncoder().encode(file.name), crc = await blobCrc32(file.blob);
+    const header = zipHeader(0x04034b50, file.blob.size, filename, crc);
+    local.push(header, file.blob);
+    central.push(zipHeader(0x02014b50, file.blob.size, filename, crc, localOffset));
+    localOffset += header.length + file.blob.size;
+  }
+  const centralOffset = localOffset, centralSize = central.reduce((sum, chunk) => sum + chunk.length, 0);
+  const end = new Uint8Array(22), view = new DataView(end.buffer);
+  view.setUint32(0, 0x06054b50, true); view.setUint16(8, files.length, true); view.setUint16(10, files.length, true);
+  view.setUint32(12, centralSize, true); view.setUint32(16, centralOffset, true);
+  const blobParts: BlobPart[] = [...local, ...central, end].map((chunk) => {
+    if (chunk instanceof Blob) return chunk;
+    const view = chunk as Uint8Array;
+    const copy = new Uint8Array(view.byteLength);
+    copy.set(view);
+    return copy.buffer;
+  });
+  return new Blob(blobParts, { type: "application/zip" });
+}
+
+export async function arrangementStemsZip(
+  bars: ArrangementBar[],
+  swing = 50,
+  mix: DrumMixSettings = DEFAULT_DRUM_MIX,
+  customSamples: Partial<Record<SongInstrument, Blob>> = {},
+  options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number } = {}
+) {
+  if (!bars.length) throw new Error("There is no arrangement to export yet.");
+  const durationSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0);
+  if (durationSeconds > 180) throw new Error("Stem ZIP exports are limited to three minutes to keep the browser memory use reasonable. Choose a section and export the remaining sections separately.");
+  const voices = [...new Set(bars.flatMap(bar => bar.hits.map(hit => hit.articulation === "foot-splash" ? "openhat" : hit.instrument)))];
+  if (!voices.length && !options.metronome && !options.backing) throw new Error("There are no drum hits or optional tracks to export in this range.");
+  const files: StemZipFile[] = [];
+  for (const voice of voices) {
+    const stemMix: DrumMixSettings = {
+      ...mix,
+      solo: "",
+      muted: Object.fromEntries(Object.keys(mix.muted).map(key => [key, key === voice ? mix.muted[voice] : true])) as DrumMixSettings["muted"]
+    };
+    files.push({ name: `drums-${voice}.wav`, blob: await arrangementWav(bars, swing, stemMix, customSamples) });
+  }
+  files.push({ name: "tempo-map.mid", blob: arrangementMidi(bars.map(bar => ({ ...bar, hits: [] })), "Tempo and meter map") });
+  if (options.metronome) files.push({ name: "metronome.wav", blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { metronome: true }) });
+  if (options.backing) files.push({ name: "backing-track.wav", blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { backing: options.backing, backingOffsetSeconds: options.backingOffsetSeconds }) });
+  const minutes = Math.floor(durationSeconds / 60), seconds = Math.round(durationSeconds % 60);
+  const readme = [
+    "Drum Hero aligned WAV stems",
+    `Arrangement duration: ${minutes}:${String(seconds).padStart(2, "0")}`,
+    "Every stem starts at the same arrangement position and uses the same sample rate and bit depth.",
+    "Drum stems follow the selected kit samples, per-voice level and pan. They are not peak-normalized.",
+    "Import tempo-map.mid into the same DAW session to recover section tempo, meter and marker changes.",
+    "Metronome and backing audio are included as separate stems when selected.",
+    ...files.map(file => `- ${file.name}`)
+  ].join("\n");
+  files.push({ name: "README.txt", blob: new Blob([readme], { type: "text/plain" }) });
+  return storedZip(files);
 }
