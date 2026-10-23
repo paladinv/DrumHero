@@ -18,13 +18,14 @@ import {
 
 const uid = () => crypto.randomUUID();
 const scoreOptions: RubricScore[] = [1, 2, 3, 4];
+type SnapshotRestoreScope = { sectionId?: string; partId?: string; bar?: number };
 
 export function SongRehearsal({ state, song, section, save, restore }: {
   state: SongLibraryState;
   song: DrumSong;
   section?: SongSection;
   save: (state: SongLibraryState) => void;
-  restore: (snapshot: ArrangementSnapshot) => void;
+  restore: (snapshot: ArrangementSnapshot, scope?: SnapshotRestoreScope) => void;
 }) {
   const { formatDate } = useLocalization();
   const [name, setName] = useState("");
@@ -35,6 +36,7 @@ export function SongRehearsal({ state, song, section, save, restore }: {
   const [selectedRubricId, setSelectedRubricId] = useState(DRUM_REHEARSAL_RUBRICS[0].id);
   const [rubricScores, setRubricScores] = useState<Record<string, RubricScore>>({});
   const [rubricNotes, setRubricNotes] = useState("");
+  const [snapshotTargets, setSnapshotTargets] = useState<Record<string, SnapshotRestoreScope>>({});
   const status = readiness(state, song);
   const review = section && state.reviews.find((entry) => entry.songId === song.id && entry.sectionId === section.id);
   const rubric = DRUM_REHEARSAL_RUBRICS.find((entry) => entry.id === selectedRubricId) ?? DRUM_REHEARSAL_RUBRICS[0];
@@ -163,22 +165,44 @@ export function SongRehearsal({ state, song, section, save, restore }: {
       </>}
 
       <h4>Arrangement history and snapshots</h4>
-      <p>Automatic revisions are saved after arrangement edits settle. Named snapshots are useful checkpoints you can restore directly.</p>
+      <p>Automatic revisions are saved after arrangement edits settle. Restore a whole snapshot or recover one section, part, or bar while keeping the rest of today’s arrangement.</p>
       <label>Snapshot label<input value={name} onChange={(event) => setName(event.target.value)} /></label>
       <button type="button" onClick={() => {
         if (!name.trim()) return;
         save({ ...state, snapshots: [...state.snapshots, { id: uid(), songId: song.id, label: name.trim().slice(0, 80), bpm: song.bpm, meter: song.meter, referenceTempoMap: structuredClone(song.referenceTempoMap), arrangementAutomation: structuredClone(song.arrangementAutomation), voiceLabels: structuredClone(song.voiceLabels), sections: structuredClone(song.sections), createdAt: new Date().toISOString() }] });
         setName("");
       }}>Save snapshot</button>
-      {state.snapshots.filter((snapshot) => snapshot.songId === song.id).map((snapshot) => (
-        <p key={snapshot.id}>
-          {snapshot.automatic ? "Automatic revision" : snapshot.label} · {formatDate(new Date(snapshot.createdAt))}
-          <button type="button" onClick={() => {
-            if (window.confirm(`Restore ${snapshot.label}? Current tempo, meter, tempo map, and sections will be replaced.`)) restore(structuredClone(snapshot));
-          }}>Restore</button>
-          <button type="button" onClick={() => save({ ...state, snapshots: state.snapshots.filter((entry) => entry.id !== snapshot.id) })}>Delete</button>
-        </p>
-      ))}
+      {state.snapshots.filter((snapshot) => snapshot.songId === song.id).map((snapshot) => {
+        const savedSection = snapshotTargets[snapshot.id]?.sectionId ? snapshot.sections.find(item => item.id === snapshotTargets[snapshot.id].sectionId) : undefined;
+        const restoreSection = savedSection ?? snapshot.sections[0];
+        const restorePart = restoreSection?.parts.find(item => item.id === snapshotTargets[snapshot.id]?.partId) ?? restoreSection?.parts[0];
+        const meter = restoreSection?.meter ?? snapshot.meter ?? song.meter;
+        const meterNumerator = Number(meter.split("/")[0]);
+        const barBeats = Number.isFinite(meterNumerator) && meterNumerator > 0 ? meterNumerator : 4;
+        const barCount = restorePart ? Math.max(1, Math.min(128, Math.ceil(restorePart.beats / barBeats))) : 0;
+        const target = snapshotTargets[snapshot.id] ?? {};
+        return <details className="song-snapshot-restore" key={snapshot.id}>
+          <summary>{snapshot.automatic ? "Automatic revision" : snapshot.label} · {formatDate(new Date(snapshot.createdAt))}</summary>
+          <div className="song-actions"><button type="button" onClick={() => {
+            if (window.confirm("Restore the full snapshot “" + snapshot.label + "”? Current tempo, meter, tempo map, and sections will be replaced.")) restore(structuredClone(snapshot));
+          }}>Restore full snapshot</button><button type="button" onClick={() => save({ ...state, snapshots: state.snapshots.filter((entry) => entry.id !== snapshot.id) })}>Delete snapshot</button></div>
+          {snapshot.sections.length > 0 ? <>
+            <label>Section to recover<select value={restoreSection?.id ?? ""} onChange={event => setSnapshotTargets(current => ({ ...current, [snapshot.id]: { ...current[snapshot.id], sectionId: event.target.value, partId: undefined, bar: 1 } }))}>{snapshot.sections.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            {restoreSection && <button type="button" onClick={() => {
+              if (window.confirm("Restore only “" + restoreSection.name + "” from this snapshot? Other sections and song metadata will stay as they are.")) restore(structuredClone(snapshot), { sectionId: restoreSection.id });
+            }}>Restore this section</button>}
+            {restoreSection?.parts.length ? <>
+              <label>Part to recover<select value={restorePart?.id ?? ""} onChange={event => setSnapshotTargets(current => ({ ...current, [snapshot.id]: { ...current[snapshot.id], sectionId: restoreSection.id, partId: event.target.value, bar: 1 } }))}>{restoreSection.parts.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              {restorePart && <><button type="button" onClick={() => {
+                if (window.confirm("Restore only the part “" + restorePart.name + "” in “" + restoreSection.name + "”? Other parts and sections will stay as they are.")) restore(structuredClone(snapshot), { sectionId: restoreSection.id, partId: restorePart.id });
+              }}>Restore this part</button>{barCount > 1 && <><label>Bar to recover<select value={target.bar ?? 1} onChange={event => setSnapshotTargets(current => ({ ...current, [snapshot.id]: { ...current[snapshot.id], sectionId: restoreSection.id, partId: restorePart.id, bar: Number(event.target.value) } }))}>{Array.from({ length: barCount }, (_, index) => <option key={index + 1} value={index + 1}>Bar {index + 1}</option>)}</select></label><button type="button" onClick={() => {
+                const bar = target.bar ?? 1;
+                if (window.confirm("Restore bar " + bar + " of “" + restorePart.name + "” from this snapshot? Hits outside this bar will stay as they are.")) restore(structuredClone(snapshot), { sectionId: restoreSection.id, partId: restorePart.id, bar });
+              }}>Restore selected bar</button></>}</>}
+            </> : <p>This section has no drum parts to recover.</p>}
+          </> : <p>This snapshot has no sections to recover.</p>}
+        </details>;
+      })}
 
       <h4>Checklists</h4>
       <button type="button" onClick={() => save({ ...state, checklists: [...state.checklists, { id: uid(), name: `${song.title} rehearsal`, items: [] }] })}>Create checklist</button>

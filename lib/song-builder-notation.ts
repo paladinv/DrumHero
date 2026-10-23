@@ -1,6 +1,6 @@
 import type { DrumSong } from './song-library';
 import { songVoiceLabel, type ArrangementBar, type ArrangedHit } from './song-builder';
-import type { SongInstrument } from './types';
+import { SONG_INSTRUMENTS, type SongInstrument } from './types';
 export type NotationView='tab'|'staff';
 export type NotationOptions={paperSize?:'letter'|'a4';orientation?:'portrait'|'landscape';barsPerPage:4|6|8;cymbalNoteheads:'cross'|'diamond';showSticking:boolean;showArticulationMarks?:boolean;staffPositions?:Partial<Record<SongInstrument,number>>;beamGrouping:'auto'|'2'|'3'|'4'|'off';barsPerLine?:1|2|3|4;sectionLineBreaks?:boolean;pageBreakBeforeSections?:string[]};
 export const SHEET_WIDTH=1100,SHEET_HEIGHT=850,BARS_PER_SHEET_PAGE=6;
@@ -28,6 +28,13 @@ export function notationGeometry(bars:ArrangementBar[],pageIndex:number,options:
   return rows.flatMap((row,rowIndex)=>row.map((bar,column)=>({bar,barIndex:bars.indexOf(bar),x:112+column*availableWidth/row.length,y:166+rowIndex*height,width:availableWidth/row.length,height,first:column===0})));
 }
 export function notationBarAtPoint(bars:ArrangementBar[],page:number,options:NotationOptions,x:number,y:number){return notationGeometry(bars,page,options).find(rect=>x>=rect.x&&x<rect.x+rect.width&&y>=rect.y&&y<rect.y+rect.height)?.barIndex;}
+export function notationStaffStepAtPoint(bars:ArrangementBar[],page:number,options:NotationOptions,x:number,y:number){
+  const rect=notationGeometry(bars,page,options).find(item=>item.bar&&x>=item.x+18&&x<item.x+item.width-20&&y>=item.y+42&&y<item.y+item.height-8);
+  if(!rect)return undefined;
+  const count=Math.max(1,Math.round(rect.bar.beats*rect.bar.subdivision/4));
+  const position=Math.max(0,Math.min(count-1,Math.round((x-(rect.x+18))/Math.max(1,rect.width-38)*count)));
+  return {barIndex:rect.barIndex,step:position};
+}
 
 export function meterBeamGroups(meter:string):number[]{
   const signature=meter.match(/(\d+)\s*\/\s*(\d+)/),numerator=Number(signature?.[1]??4),denominator=Number(signature?.[2]??4);
@@ -68,11 +75,11 @@ export function percussionRhythm(bar:ArrangementBar,lane:'hands'|'feet',options:
 
 function fitText(c:CanvasRenderingContext2D,text:string,width:number){if(c.measureText(text).width<=width)return text;let end=text.length;while(end>0&&c.measureText(text.slice(0,end)+'…').width>width)end--;return text.slice(0,end)+'…';}
 const ink='#20211e',muted='#6e6d67',coral='#e85348';
-const voices:SongInstrument[]=['crash','ride','openhat','hihat','tom','rimshot','snare','kick','cowbell','shaker','tambourine','custom1','custom2','custom3','custom4'];
-const names:Record<SongInstrument,string>={kick:'Kick',snare:'Snare',hihat:'Hi-hat',openhat:'Open hat',ride:'Ride',rimshot:'Rimshot',tom:'Tom',crash:'Crash',cowbell:'Cowbell',shaker:'Shaker',tambourine:'Tambourine',custom1:'Custom 1',custom2:'Custom 2',custom3:'Custom 3',custom4:'Custom 4'};
+const voices:SongInstrument[]=['crash','ride','openhat','hihat','tom','rimshot','snare','kick','cowbell','shaker','tambourine',...SONG_INSTRUMENTS.filter(voice=>voice.startsWith('custom'))];
+const names:Partial<Record<SongInstrument,string>>={kick:'Kick',snare:'Snare',hihat:'Hi-hat',openhat:'Open hat',ride:'Ride',rimshot:'Rimshot',tom:'Tom',crash:'Crash',cowbell:'Cowbell',shaker:'Shaker',tambourine:'Tambourine',...Object.fromEntries(SONG_INSTRUMENTS.filter(voice=>voice.startsWith('custom')).map((voice,index)=>[voice,`Custom ${index+1}`]))};
 // Common drum-set placement on a five-line percussion staff.
-const defaultStaffPositions:Record<SongInstrument,number>={kick:3,snare:-1,rimshot:-1,tom:-2,hihat:-5,openhat:-5,ride:-4,crash:-6,cowbell:-3,shaker:-7,tambourine:-6,custom1:0,custom2:1,custom3:-1,custom4:2};
-const voiceY=(voice:SongInstrument,options:NotationOptions)=>Math.max(-8,Math.min(8,options.staffPositions?.[voice]??defaultStaffPositions[voice]))*5;
+const defaultStaffPositions:Partial<Record<SongInstrument,number>>={kick:3,snare:-1,rimshot:-1,tom:-2,hihat:-5,openhat:-5,ride:-4,crash:-6,cowbell:-3,shaker:-7,tambourine:-6,...Object.fromEntries(SONG_INSTRUMENTS.filter(voice=>voice.startsWith('custom')).map((voice,index)=>[voice,[0,1,-1,2][index%4]]))};
+const voiceY=(voice:SongInstrument,options:NotationOptions)=>Math.max(-8,Math.min(8,options.staffPositions?.[voice]??defaultStaffPositions[voice]??0))*5;
 function line(c:CanvasRenderingContext2D,x1:number,y1:number,x2:number,y2:number,width=1){c.lineWidth=width;c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();}
 function rest(c:CanvasRenderingContext2D,x:number,y:number,quarters:number,scale:number,measure=false){
   c.save();c.translate(x,y);c.scale(scale,scale);c.fillStyle=ink;c.strokeStyle=ink;

@@ -13,8 +13,8 @@ test("create a song, edit a drum part, and open practice", async ({ page }) => {
   await page.getByRole("button", { name: "Add part" }).click();
   await page.getByRole("button", { name: "kick step 1" }).click();
   await expect(page.getByRole("button", { name: "kick step 1" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("link", { name: "Practice section" }).click();
-  await expect(page.getByRole("heading", { name: /A New Beat/ })).toBeVisible();
+  await page.getByRole("button", { name: "Practice this part here", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Practice", exact: true })).toHaveAttribute("aria-selected", "true");
 });
 
 test("library persists across reload", async ({ page }) => {
@@ -23,7 +23,7 @@ test("library persists across reload", async ({ page }) => {
   await page.getByLabel("Artist", { exact: true }).fill("Drummer");
   await page.getByRole("button", { name: "Add song" }).click();
   await page.reload();
-  await expect(page.getByRole("button", { name: /Saved Song/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Saved Song Drummer/ })).toBeVisible();
 });
 
 test("review and merge a library backup", async ({ page }) => {
@@ -33,10 +33,10 @@ test("review and merge a library backup", async ({ page }) => {
   await page.getByText("Backup and account sync", { exact: true }).click();
   await page.getByText("Merge library backup", { exact: true }).click();
   await page.getByLabel("Library backup JSON").fill(JSON.stringify(backup));
-  await page.getByRole("button", { name: "Merge backup", exact: true }).click();
+  await page.getByRole("button", { name: "Review metadata backup", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Review library backup" })).toBeVisible();
-  await page.getByRole("button", { name: "Merge records" }).click();
-  await expect(page.getByRole("button", { name: /Backup Beat/ })).toBeVisible();
+  await page.getByRole("button", { name: "Merge reviewed records", exact: true }).click();
+  await expect(page.getByRole("button", { name: /^Backup Beat Test Artist/ })).toBeVisible();
 });
 
 test("imports a Song Builder file and can undo a library edit", async ({ page }) => {
@@ -102,7 +102,10 @@ test("saved takes load audio with expected-hit waveform markers", async ({ page 
     state.recordings = [{ id: "wave-take", songId: "example-open-sky", sectionId: "verse", createdAt: "2026-10-19T00:00:00Z", durationMs: 500, mimeType: "audio/wav", hitCount: 2, timingConsistency: 100, onsetTimes: [.06, .26], expectedTimes: [.05, .25] }];
     localStorage.setItem("drum-hero:song-library:v1", JSON.stringify(state)); window.dispatchEvent(new Event("drum-hero:song-library-change"));
   });
+  await page.reload();
+  await page.getByRole("button", { name: /^Open Sky Drum Hero Originals/ }).click();
   await page.getByRole("tab", { name: "Rehearsal", exact: true }).click();
+  await page.getByText("Library tools and recordings", { exact: true }).click();
   await page.getByText("Local recordings", { exact: true }).click();
   await page.getByRole("button", { name: "Load audio and waveform" }).click();
   await expect(page.getByRole("img", { name: "Recorded waveform with expected hit and detected onset markers" })).toBeVisible();
@@ -114,6 +117,7 @@ test("saved takes load audio with expected-hit waveform markers", async ({ page 
   const offset=await page.evaluate(()=>JSON.parse(localStorage.getItem("drum-hero:song-library:v1")!).recordings[0].alignmentOffsetMs);
   expect(offset).toBe(120);
   await page.getByRole("tab",{name:"Rehearsal",exact:true}).click();
+  await page.getByText("Library tools and recordings", { exact: true }).click();
   await page.getByText("Local recordings",{exact:true}).click();
   await page.getByText("Trim recording silence",{exact:true}).click();
   await page.getByRole("spinbutton",{name:"Trim start (seconds)",exact:true}).fill("0.1");

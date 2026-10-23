@@ -1,6 +1,7 @@
 export type Level = "Beginner" | "Intermediate" | "Advanced";
 export type Instrument = "kick" | "snare" | "hihat" | "tom" | "crash";
-export type SongInstrument = Instrument | "openhat" | "ride" | "rimshot" | "cowbell" | "shaker" | "tambourine" | "custom1" | "custom2" | "custom3" | "custom4";
+export type SongInstrument = Instrument | "openhat" | "ride" | "rimshot" | "cowbell" | "shaker" | "tambourine" | "custom1" | "custom2" | "custom3" | "custom4" | "custom5" | "custom6" | "custom7" | "custom8";
+export const SONG_INSTRUMENTS: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4", "custom5", "custom6", "custom7", "custom8"];
 export type SongHitArticulation = "normal" | "flam" | "drag" | "buzz" | "roll" | "choke" | "foot-splash";
 export type MidiArticulation = "closed-hat" | "open-hat" | "pedal-hat" | "foot-splash" | "ride" | "crash";
 export type SongPartHit = Omit<PatternHit, "instrument" | "articulation"> & { instrument: SongInstrument; velocity?: number; ghost?: boolean; articulation?: SongHitArticulation; sticking?: "R" | "L"; timingOffsetMs?: number };
@@ -24,7 +25,7 @@ export type PracticePattern = {
   defaultBpm: number;
   tempoRange: [number, number];
   hits: PatternHit[];
-  /** Runtime-only section markers added to generated Trainer phrases. */
+  /** Section ranges that should be scored and summarized as fills. */
   trainerFillStepRanges?: Array<[number, number]>;
 };
 

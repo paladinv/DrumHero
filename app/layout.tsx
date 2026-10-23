@@ -10,6 +10,8 @@ import { loadCatalog } from "@/lib/catalog-loader";
 import { cookies, headers } from "next/headers";
 import { translateRequest } from "@/lib/request-locale";
 import { OfflineNavigationGuard } from "@/components/OfflineNavigationGuard";
+import { ThemeProvider } from "@/components/ThemeProvider";
+import { parseThemePreference, THEME_PREFERENCE_COOKIE } from "@/lib/theme-preference";
 
 const display = Barlow_Condensed({ subsets: ["latin"], weight: ["600", "700", "800"], variable: "--font-display" });
 const body = Manrope({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-body" });
@@ -27,12 +29,15 @@ export const viewport: Viewport = { themeColor: "#e85348" };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
+  const initialTheme = parseThemePreference(cookieStore.get(THEME_PREFERENCE_COOKIE)?.value);
   const saved = cookieStore.get("drumHeroLanguage")?.value;
   const initialPreference: LanguagePreference = saved === "auto" ? "auto" : saved && isLocale(saved) ? saved : "auto";
   const initialLocale = initialPreference === "auto" ? resolveAcceptLanguage(requestHeaders.get("accept-language")) : resolveLocale(initialPreference);
   const initialCatalog = await loadCatalog(initialLocale);
-  return <html lang={initialLocale} dir={directionFor(initialLocale)}><body className={`${display.variable} ${body.variable}`}>
-    <ProgressProvider initialLocale={initialLocale} initialPreference={initialPreference} initialCatalog={initialCatalog}><OfflineNavigationGuard /><SkipLink /><SiteHeader />{children}<SiteFooter />
-    </ProgressProvider>
+  return <html lang={initialLocale} dir={directionFor(initialLocale)} data-theme={initialTheme}><body className={`${display.variable} ${body.variable}`}>
+    <ThemeProvider initialPreference={initialTheme}>
+      <ProgressProvider initialLocale={initialLocale} initialPreference={initialPreference} initialCatalog={initialCatalog}><OfflineNavigationGuard /><SkipLink /><SiteHeader />{children}<SiteFooter />
+      </ProgressProvider>
+    </ThemeProvider>
   </body></html>;
 }

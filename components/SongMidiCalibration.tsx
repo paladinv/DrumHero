@@ -1,14 +1,15 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { SongInstrument } from "@/lib/types";
+import { SONG_INSTRUMENTS, type SongInstrument } from "@/lib/types";
+import { DEFAULT_MIDI_NOTES } from "@/lib/song-builder-settings";
 
 type MidiInput = { id: string; name?: string | null; state?: string; onmidimessage: ((event: { data: Uint8Array; timeStamp: number }) => void) | null };
 type MidiAccess = { inputs: Map<string, MidiInput>; onstatechange: (() => void) | null };
 type MidiConfig = { inputId: string; latencyMs: number; notes: Record<SongInstrument, number> };
 type MidiDiagnostic = { note: number; velocity: number; voice?: SongInstrument };
 const KEY = "drum-hero:song-midi:v1";
-const defaults: Record<SongInstrument, number> = { kick: 36, snare: 38, hihat: 42, openhat: 46, ride: 51, rimshot: 37, tom: 50, crash: 49, cowbell: 56, shaker: 82, tambourine: 54, custom1: 60, custom2: 61, custom3: 62, custom4: 63 };
-const voices: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4"];
+const defaults: Record<SongInstrument, number> = DEFAULT_MIDI_NOTES;
+const voices: SongInstrument[] = SONG_INSTRUMENTS;
 function readConfig(): MidiConfig {
   try {
     const value = JSON.parse(localStorage.getItem(KEY) || "null") as Partial<MidiConfig> | null;
@@ -27,6 +28,7 @@ export function SongMidiCalibration({ targetId }: { targetId: string }) {
   const [testingVoice, setTestingVoice] = useState<SongInstrument | "">("");
   const [testHits, setTestHits] = useState<MidiDiagnostic[]>([]);
   useEffect(() => { const timer = setTimeout(() => setConfig(readConfig()), 0); return () => clearTimeout(timer); }, []);
+  useEffect(() => { const sync = () => setConfig(readConfig()); window.addEventListener("drum-hero:song-midi-config-change", sync); return () => window.removeEventListener("drum-hero:song-midi-config-change", sync); }, []);
   useEffect(() => { if (!access) return; const refresh = () => { const next = [...access.inputs.values()].filter(input => input.state !== "disconnected"); setInputs(next); if (!next.some(input => input.id === config.inputId)) setConfig(current => ({ ...current, inputId: next[0]?.id ?? "" })); }; refresh(); access.onstatechange = refresh; return () => { access.onstatechange = null; }; }, [access, config.inputId]);
   useEffect(() => { if (!access || !config.inputId) return; const input = access.inputs.get(config.inputId); if (!input) return; input.onmidimessage = event => { const statusByte = event.data[0] ?? 0, note = event.data[1] ?? -1, velocity = event.data[2] ?? 0; if ((statusByte & 0xf0) !== 0x90 || velocity === 0 || note < 0) return; const voice = voices.find(item => config.notes[item] === note); window.dispatchEvent(new CustomEvent("drum-hero:song-midi-hit", { detail: { targetId, voice, note, velocity, at: event.timeStamp - config.latencyMs } })); }; return () => { input.onmidimessage = null; }; }, [access, config, targetId]);
   useEffect(() => { const inspect = (event: Event) => { const detail = (event as CustomEvent<MidiDiagnostic & { targetId?: string }>).detail; if (detail?.targetId !== targetId || !testingVoice) return; setTestHits(current => [...current.slice(-19), { note: detail.note, velocity: detail.velocity, voice: detail.voice }]); const expected = config.notes[testingVoice]; setStatus(detail.note === expected ? `${testingVoice}: correct note ${detail.note}, velocity ${detail.velocity}.` : `${testingVoice}: expected note ${expected}, received ${detail.note}${detail.voice ? ` (currently mapped to ${detail.voice})` : " (unmapped)"}, velocity ${detail.velocity}.`); }; window.addEventListener("drum-hero:song-midi-hit", inspect); return () => window.removeEventListener("drum-hero:song-midi-hit", inspect); }, [targetId, testingVoice, config.notes]);

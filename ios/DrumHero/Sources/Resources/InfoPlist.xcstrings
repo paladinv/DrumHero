@@ -1,0 +1,34 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSMicrophoneUsageDescription" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Drum Hero analysiert Mikrofonpegel lokal, um eine ausgewählte Schlagzeugstimme zu bewerten. Audio wird nicht aufgenommen oder gespeichert."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Drum Hero analiza localmente los niveles del micrófono para puntuar una voz de batería seleccionada. No graba ni guarda audio."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Drum Hero analyse localement le niveau du microphone pour évaluer une voix de batterie sélectionnée. L’audio n’est ni enregistré ni sauvegardé."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "O Drum Hero analisa localmente o nível do microfone para pontuar uma voz de bateria selecionada. O áudio não é gravado nem salvo."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

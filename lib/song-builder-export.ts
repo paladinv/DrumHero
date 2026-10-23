@@ -1,12 +1,13 @@
 import { expressionStrikes } from "./song-builder-creative";
-import type { SongInstrument } from "./types";
+import type { CustomSampleLayers } from "./song-builder-samples";
+import { SONG_INSTRUMENTS, type SongInstrument } from "./types";
 import { DEFAULT_DRUM_MIX, type DrumMixSettings } from "./audio";
 import { arrangementAutomationValue, automationScaleAtHit, type ArrangementBar } from "./song-builder";
 import { notationQuarterScale, paginateNotation, notationSystems, percussionRhythm, DEFAULT_NOTATION_OPTIONS, type NotationOptions } from "./song-builder-notation";
 
-export { drawNotationPage, paginateNotation, notationGeometry, notationBarAtPoint, SHEET_WIDTH, SHEET_HEIGHT, BARS_PER_SHEET_PAGE, DEFAULT_NOTATION_OPTIONS, type NotationView, type NotationOptions } from "./song-builder-notation";
+export { drawNotationPage, paginateNotation, notationGeometry, notationBarAtPoint, notationStaffStepAtPoint, SHEET_WIDTH, SHEET_HEIGHT, BARS_PER_SHEET_PAGE, DEFAULT_NOTATION_OPTIONS, type NotationView, type NotationOptions } from "./song-builder-notation";
 
-const VOICE_NAMES: Record<SongInstrument, string> = { kick: "KICK", snare: "SNARE", hihat: "HI-HAT", openhat: "OPEN HAT", ride: "RIDE", rimshot: "RIMSHOT", tom: "TOM", crash: "CRASH", cowbell: "COWBELL", shaker: "SHAKER", tambourine: "TAMBOURINE", custom1: "CUSTOM 1", custom2: "CUSTOM 2", custom3: "CUSTOM 3", custom4: "CUSTOM 4" };
+const VOICE_NAMES: Record<SongInstrument, string> = Object.fromEntries([["kick","KICK"],["snare","SNARE"],["hihat","HI-HAT"],["openhat","OPEN HAT"],["ride","RIDE"],["rimshot","RIMSHOT"],["tom","TOM"],["crash","CRASH"],["cowbell","COWBELL"],["shaker","SHAKER"],["tambourine","TAMBOURINE"],...Array.from({length:8},(_,index)=>[`custom${index+1}`,`CUSTOM ${index+1}`])]) as Record<SongInstrument,string>;
 
 export function canvasPng(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not create the PNG image.")), "image/png"));
@@ -53,7 +54,7 @@ export function canvasesPdf(canvases: HTMLCanvasElement[], options: NotationOpti
   return new Blob(buffers, { type: "application/pdf" });
 }
 
-const midiNotes: Record<SongInstrument, number> = { kick: 36, rimshot: 37, snare: 38, hihat: 42, openhat: 46, tom: 50, crash: 49, ride: 51, cowbell: 56, shaker: 82, tambourine: 54, custom1: 60, custom2: 61, custom3: 62, custom4: 63 };
+const midiNotes: Record<SongInstrument, number> = Object.fromEntries([["kick",36],["rimshot",37],["snare",38],["hihat",42],["openhat",46],["tom",50],["crash",49],["ride",51],["cowbell",56],["shaker",82],["tambourine",54],...Array.from({length:8},(_,index)=>[`custom${index+1}`,60+index])]) as Record<SongInstrument,number>;
 
 function variableLength(value: number) {
   let buffer = Math.max(0, Math.floor(value)) & 0x7f;
@@ -105,7 +106,7 @@ export function arrangementMidi(bars: ArrangementBar[], title: string, noteMap: 
     for (const hit of bar.hits) {
       const gridPosition=hit.step%bar.subdivision;
       const swingableOffbeat=(bar.subdivision===8&&gridPosition%2===1)||(bar.subdivision===16&&gridPosition%4===2);
-      const clipSwing=bar.clipOverrides?.swing??swing;
+      const clipSwing=bar.clipOverrides?.swing??bar.playbackFeel?.swing??(bar.feel?(bar.feel.kind==="straight"?50:bar.feel.amount):swing);
       const swingDelay=swingableOffbeat?Math.round(480*(Math.max(50,Math.min(75,clipSwing))-50)/100):0;
       const at = barTick + Math.max(0, Math.round(hit.beat * 480)+swingDelay);
       const duration = Math.max(1, Math.round((480 * 4 / bar.subdivision) * 0.55));
@@ -142,15 +143,15 @@ export function arrangementMidi(bars: ArrangementBar[], title: string, noteMap: 
 }
 
 const xmlEscape = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&apos;" })[character] ?? character);
-const midiInstrumentNumber: Record<SongInstrument, number> = { kick: 36, rimshot: 37, snare: 38, hihat: 42, openhat: 46, tom: 50, crash: 49, ride: 51, cowbell: 56, shaker: 82, tambourine: 54, custom1: 60, custom2: 61, custom3: 62, custom4: 63 };
-const displayPitch: Record<SongInstrument, [string, number]> = { kick: ["F", 4], rimshot: ["C", 5], snare: ["C", 5], tom: ["D", 5], hihat: ["G", 5], openhat: ["G", 5], crash: ["A", 5], ride: ["F", 5], cowbell: ["C", 5], shaker: ["B", 5], tambourine: ["A", 5], custom1: ["C", 5], custom2: ["D", 5], custom3: ["E", 5], custom4: ["F", 5] };
-const defaultStaffPositions: Record<SongInstrument, number> = { kick: 3, snare: -1, rimshot: -1, tom: -2, hihat: -5, openhat: -5, ride: -4, crash: -6, cowbell: -3, shaker: -7, tambourine: -6, custom1: 0, custom2: 1, custom3: -1, custom4: 2 };
-const percussionOrder: SongInstrument[] = ["kick", "rimshot", "snare", "tom", "hihat", "openhat", "crash", "ride", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4"];
+const midiInstrumentNumber: Record<SongInstrument, number> = midiNotes;
+const displayPitch: Record<SongInstrument, [string, number]> = Object.fromEntries([["kick",["F",4]],["rimshot",["C",5]],["snare",["C",5]],["tom",["D",5]],["hihat",["G",5]],["openhat",["G",5]],["crash",["A",5]],["ride",["F",5]],["cowbell",["C",5]],["shaker",["B",5]],["tambourine",["A",5]],...Array.from({length:8},(_,index)=>[`custom${index+1}`,[["C","D","E","F"][index%4],5]])]) as Record<SongInstrument,[string,number]>;
+const defaultStaffPositions: Partial<Record<SongInstrument, number>> = { kick: 3, snare: -1, rimshot: -1, tom: -2, hihat: -5, openhat: -5, ride: -4, crash: -6, cowbell: -3, shaker: -7, tambourine: -6, ...Object.fromEntries(SONG_INSTRUMENTS.filter(voice=>voice.startsWith("custom")).map((voice,index)=>[voice,[0,1,-1,2][index%4]])) };
+const percussionOrder: SongInstrument[] = ["kick", "rimshot", "snare", "tom", "hihat", "openhat", "crash", "ride", "cowbell", "shaker", "tambourine", ...SONG_INSTRUMENTS.filter(voice=>voice.startsWith("custom"))];
 function staffPitch(voice: SongInstrument, options: NotationOptions) {
   const [baseStep, baseOctave] = displayPitch[voice], letter = ["C", "D", "E", "F", "G", "A", "B"];
-  const position = Math.max(-8, Math.min(8, options.staffPositions?.[voice] ?? defaultStaffPositions[voice]));
+  const position = Math.max(-8, Math.min(8, options.staffPositions?.[voice] ?? defaultStaffPositions[voice] ?? 0));
   const baseIndex = baseOctave * 7 + letter.indexOf(baseStep);
-  const shifted = baseIndex + defaultStaffPositions[voice] - position;
+  const shifted = baseIndex + (defaultStaffPositions[voice] ?? 0) - position;
   return [letter[((shifted % 7) + 7) % 7]!, Math.floor(shifted / 7)] as const;
 }
 
@@ -211,16 +212,16 @@ export function arrangementMusicXml(bars: ArrangementBar[], title: string, artis
   return new Blob([`<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"><work><work-title>${xmlEscape(title)}</work-title></work><identification><creator type="composer">${xmlEscape(artist)}</creator></identification><part-list><score-part id="P1"><part-name>Drum Set</part-name>${instruments}${midiInstruments}</score-part></part-list><part id="P1">${measures}</part></score-partwise>`],{type:'application/vnd.recordare.musicxml+xml'});
 }
 
-const wavSamplePaths: Record<SongInstrument, string[]> = {
+const wavSamplePaths = {
   kick: [1, 2, 3, 4].map((take) => `/audio/drums/kick-${take}.wav`), snare: [1, 2, 3].map((take) => `/audio/drums/snare-${take}.wav`),
   hihat: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`), openhat: [4, 3, 2, 1].map((take) => `/audio/drums/hihat-${take}.wav`),
   tom: [1, 2, 3].map((take) => `/audio/drums/tom-${take}.wav`), crash: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`),
   ride: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`), rimshot: [1, 2, 3].map((take) => `/audio/drums/snare-${take}.wav`),
   cowbell: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`), shaker: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`), tambourine: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`),
-  custom1: ["/audio/drums/kick-1.wav"], custom2: ["/audio/drums/snare-1.wav"], custom3: ["/audio/drums/tom-1.wav"], custom4: ["/audio/drums/crash-1.wav"]
-};
+  ...Object.fromEntries(Array.from({length:8},(_,index)=>[`custom${index+1}`, [`/audio/drums/${["kick","snare","tom","crash"][index%4]}-1.wav`]]))
+} as Record<SongInstrument, string[]>;
 
-export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob>> = {}, options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number } = {}) {
+export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number } = {}) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
   const sampleRate = 44_100;
   const totalSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0) + 1;
@@ -229,18 +230,22 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
   if (!Offline) throw new Error("Offline audio export is unavailable in this browser.");
   const context = new Offline(2, Math.ceil(totalSeconds * sampleRate), sampleRate);
   const voices = [...new Set(bars.flatMap((bar) => bar.hits.map((hit) => hit.articulation === "foot-splash" ? "openhat" : hit.instrument)))];
-  const buffers = new Map<SongInstrument, AudioBuffer>();
+  const buffers = new Map<SongInstrument, { primary: AudioBuffer; accent?: AudioBuffer }>();
   await Promise.all(voices.map(async (voice) => {
     if (mix.muted[voice] || (mix.solo && mix.solo !== voice)) return;
     if (mix.sampleIndex[voice] < 0 && customSamples[voice]) {
-      buffers.set(voice, await context.decodeAudioData(await customSamples[voice]!.arrayBuffer()));
+      const source = customSamples[voice]!;
+      const layers = source instanceof Blob ? { primary: source } : source;
+      const primary = await context.decodeAudioData(await layers.primary.arrayBuffer());
+      const accent = layers.accent ? await context.decodeAudioData(await layers.accent.arrayBuffer()).catch(() => undefined) : undefined;
+      buffers.set(voice, { primary, ...(accent ? { accent } : {}) });
       return;
     }
     const samplePaths = wavSamplePaths[voice];
     const samplePath = samplePaths[Math.max(0, Math.min(samplePaths.length - 1, mix.sampleIndex[voice] ?? 0))] ?? samplePaths[0];
     const response = await fetch(samplePath);
     if (!response.ok) throw new Error(`Could not load the ${VOICE_NAMES[voice]} sample for WAV export.`);
-    buffers.set(voice, await context.decodeAudioData(await response.arrayBuffer()));
+    buffers.set(voice, { primary: await context.decodeAudioData(await response.arrayBuffer()) });
   }));
   let startSeconds = 0;
   let activeOpenHat: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
@@ -256,14 +261,14 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
       const instrument = hit.articulation === "foot-splash" ? "openhat" : hit.instrument;
       const automationScale = automationScaleAtHit(bar, hit);
       if (automationScale <= 0.001 || mix.muted[instrument] || (mix.solo && mix.solo !== instrument)) continue;
-      const buffer = buffers.get(instrument);
-      if (!buffer) continue;
+      const sampleLayers = buffers.get(instrument);
+      if (!sampleLayers) continue;
       const automationBeat = (bar.arrangementBeatStart ?? 0) + hit.beat;
       const arrangementVelocityScale = arrangementAutomationValue(bar, instrument, "velocity", automationBeat, 1);
       const panAutomation = arrangementAutomationValue(bar, instrument, "pan", automationBeat, mix.pan[instrument] ?? 0);
       const gridPosition = hit.step % bar.subdivision;
       const swingableOffbeat = (bar.subdivision === 8 && gridPosition % 2 === 1) || (bar.subdivision === 16 && gridPosition % 4 === 2);
-      const clipSwing = bar.clipOverrides?.swing ?? swing;
+      const clipSwing = bar.clipOverrides?.swing ?? bar.playbackFeel?.swing ?? (bar.feel ? (bar.feel.kind === "straight" ? 50 : bar.feel.amount) : swing);
       const swingSeconds = swingableOffbeat ? quarterSeconds * (Math.max(50, Math.min(75, clipSwing)) - 50) / 100 : 0;
       const hitAt = startSeconds + hit.beat * quarterSeconds + swingSeconds;
       const articulation = hit.articulation ?? "normal";
@@ -279,8 +284,9 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
           try { previous.source.stop(eventAt + 0.05); } catch { /* The sample may already have ended. */ }
           activeOpenHat = null;
         }
-        source.buffer = buffer;
-        gain.gain.value = Math.max(0, Math.min(1, hit.velocity * arrangementVelocityScale * articulationVelocityScale / 127)) * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)) * automationScale;
+        const strikeVelocity = hit.velocity * arrangementVelocityScale * articulationVelocityScale;
+        source.buffer = strikeVelocity >= 96 && sampleLayers.accent ? sampleLayers.accent : sampleLayers.primary;
+        gain.gain.value = Math.max(0, Math.min(1, strikeVelocity / 127)) * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)) * automationScale;
         const panner = context.createStereoPanner();
         panner.pan.value = Math.max(-1, Math.min(1, panAutomation));
         source.connect(gain).connect(panner).connect(context.destination);
@@ -376,7 +382,7 @@ export async function arrangementStemsZip(
   bars: ArrangementBar[],
   swing = 50,
   mix: DrumMixSettings = DEFAULT_DRUM_MIX,
-  customSamples: Partial<Record<SongInstrument, Blob>> = {},
+  customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {},
   options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number } = {}
 ) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");

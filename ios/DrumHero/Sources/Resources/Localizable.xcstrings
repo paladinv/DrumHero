@@ -95560,6 +95560,1490 @@
           }
         }
       }
+    },
+    "Input setup": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuración de entrada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuration de l’entrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Eingabeeinstellungen"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuração de entrada"
+          }
+        }
+      }
+    },
+    "Input": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Entrada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Entrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Eingabe"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Entrada"
+          }
+        }
+      }
+    },
+    "Touch pads": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pads táctiles"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pads tactiles"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Touch-Pads"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pads de toque"
+          }
+        }
+      }
+    },
+    "Microphone · one voice": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Micrófono · una voz"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Microphone · une voix"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mikrofon · eine Stimme"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Microfone · uma voz"
+          }
+        }
+      }
+    },
+    "MIDI drum kit": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Batería MIDI"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Batterie MIDI"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "MIDI-Schlagzeug"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bateria MIDI"
+          }
+        }
+      }
+    },
+    "Touch scoring works without permissions or extra equipment.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La puntuación táctil funciona sin permisos ni equipo adicional."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Le score tactile fonctionne sans autorisation ni équipement supplémentaire."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Touch-Auswertung funktioniert ohne Berechtigungen oder zusätzliche Geräte."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "A pontuação por toque funciona sem permissões nem equipamento adicional."
+          }
+        }
+      }
+    },
+    "Choose one drum voice. Drum Hero detects level changes on this device and does not record or save audio. Use headphones to reduce playback bleed.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Elige una voz de batería. Drum Hero detecta cambios de nivel en este dispositivo y no graba ni guarda audio. Usa auriculares para reducir el sonido de la reproducción captado por el micrófono."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Choisissez une voix de batterie. Drum Hero détecte les variations de niveau sur cet appareil sans enregistrer ni sauvegarder l’audio. Utilisez un casque pour réduire la reprise du son diffusé."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Wähle eine Schlagzeugstimme. Drum Hero erkennt Pegeländerungen auf diesem Gerät und zeichnet Audio weder auf noch speichert es. Kopfhörer verringern die Aufnahme der Wiedergabe."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Escolha uma voz da bateria. O Drum Hero detecta variações de nível neste dispositivo e não grava nem salva áudio. Use fones para reduzir o vazamento do som reproduzido."
+          }
+        }
+      }
+    },
+    "Connect a USB or Bluetooth MIDI drum kit. Standard General MIDI drum notes are set by default and can be changed below.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Conecta una batería MIDI por USB o Bluetooth. De forma predeterminada se usan las notas estándar de percusión General MIDI; puedes cambiarlas abajo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Connectez une batterie MIDI en USB ou Bluetooth. Les notes de batterie General MIDI standard sont définies par défaut et peuvent être modifiées ci-dessous."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Verbinde ein USB- oder Bluetooth-MIDI-Schlagzeug. Standardmäßige General-MIDI-Drumnoten sind voreingestellt und können unten geändert werden."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Conecte uma bateria MIDI por USB ou Bluetooth. As notas de bateria padrão do General MIDI já vêm configuradas e podem ser alteradas abaixo."
+          }
+        }
+      }
+    },
+    "Microphone setup": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuración del micrófono"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuration du microphone"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mikrofoneinstellungen"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuração do microfone"
+          }
+        }
+      }
+    },
+    "Score this voice": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Puntuar esta voz"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Évaluer cette voix"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Stimme werten"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pontuar esta voz"
+          }
+        }
+      }
+    },
+    "Enable microphone input": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Activar entrada de micrófono"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Activer l’entrée microphone"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mikrofoneingabe aktivieren"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ativar entrada do microfone"
+          }
+        }
+      }
+    },
+    "Stop microphone input": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Detener entrada de micrófono"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Arrêter l’entrée microphone"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mikrofoneingabe stoppen"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Parar entrada do microfone"
+          }
+        }
+      }
+    },
+    "Measure room noise": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Medir el ruido ambiente"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mesurer le bruit ambiant"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Raumgeräusch messen"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Medir o ruído do ambiente"
+          }
+        }
+      }
+    },
+    "Sensitivity threshold": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Umbral de sensibilidad"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Seuil de sensibilité"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Empfindlichkeitsschwelle"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Limite de sensibilidade"
+          }
+        }
+      }
+    },
+    "Microphone sensitivity": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sensibilidad del micrófono"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sensibilité du microphone"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mikrofonempfindlichkeit"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sensibilidade do microfone"
+          }
+        }
+      }
+    },
+    "MIDI setup": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuración MIDI"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuration MIDI"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "MIDI-Einstellungen"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configuração MIDI"
+          }
+        }
+      }
+    },
+    "Connect or refresh MIDI devices": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Conectar o actualizar dispositivos MIDI"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Connecter ou actualiser les appareils MIDI"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "MIDI-Geräte verbinden oder aktualisieren"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Conectar ou atualizar dispositivos MIDI"
+          }
+        }
+      }
+    },
+    "MIDI is disconnected.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "MIDI está desconectado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Le MIDI est déconnecté."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "MIDI ist getrennt."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "O MIDI está desconectado."
+          }
+        }
+      }
+    },
+    "No MIDI sources found. Connect a kit, then refresh the list.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se encontraron fuentes MIDI. Conecta una batería y actualiza la lista."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aucune source MIDI détectée. Connectez une batterie, puis actualisez la liste."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Keine MIDI-Quelle gefunden. Verbinde ein Schlagzeug und aktualisiere die Liste."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nenhuma fonte MIDI encontrada. Conecte uma bateria e atualize a lista."
+          }
+        }
+      }
+    },
+    "Drum note mapping": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Asignación de notas de batería"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correspondance des notes de batterie"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Zuordnung der Drumnoten"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mapeamento das notas da bateria"
+          }
+        }
+      }
+    },
+    "Restore standard drum notes": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Restaurar notas de batería estándar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Rétablir les notes de batterie standard"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Standard-Drumnoten wiederherstellen"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Restaurar notas padrão da bateria"
+          }
+        }
+      }
+    },
+    "Timing correction": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Corrección de ritmo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correction du timing"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Timing-Korrektur"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correção de ritmo"
+          }
+        }
+      }
+    },
+    "Current input correction": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Corrección de entrada actual"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correction de l’entrée actuelle"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktuelle Eingabekorrektur"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correção da entrada atual"
+          }
+        }
+      }
+    },
+    "Input timing correction": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Corrección del ritmo de entrada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correction du timing d’entrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Timing-Korrektur der Eingabe"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correção do ritmo de entrada"
+          }
+        }
+      }
+    },
+    "Positive values move detected hits earlier in scoring. Tune this on the current device with a short scored round; this is a personal correction, not a certified latency measurement.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Los valores positivos adelantan los golpes detectados al puntuar. Ajusta este valor en el dispositivo actual con una ronda corta puntuable; es una corrección personal, no una medición certificada de latencia."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les valeurs positives avancent les frappes détectées dans le score. Ajustez ce réglage sur l’appareil actuel avec une courte séquence évaluée ; il s’agit d’une correction personnelle, pas d’une mesure certifiée de latence."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Positive Werte verschieben erkannte Schläge bei der Wertung nach vorn. Stimme den Wert auf diesem Gerät in einer kurzen Wertungsrunde ab. Dies ist eine persönliche Korrektur und keine zertifizierte Latenzmessung."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Valores positivos antecipam as batidas detectadas na pontuação. Ajuste no dispositivo atual com uma rodada curta pontuada; esta é uma correção pessoal, não uma medição certificada de latência."
+          }
+        }
+      }
+    },
+    "Play the selected drum voice.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Toca la voz de batería seleccionada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Jouez la voix de batterie sélectionnée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Spiele die ausgewählte Schlagzeugstimme."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Toque a voz de bateria selecionada."
+          }
+        }
+      }
+    },
+    "Play the connected MIDI kit.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Toca la batería MIDI conectada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Jouez sur la batterie MIDI connectée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Spiele auf dem verbundenen MIDI-Schlagzeug."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Toque na bateria MIDI conectada."
+          }
+        }
+      }
+    },
+    "Start microphone input before measuring room noise.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Activa la entrada de micrófono antes de medir el ruido ambiente."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Activez l’entrée microphone avant de mesurer le bruit ambiant."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktiviere die Mikrofoneingabe, bevor du das Raumgeräusch misst."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ative a entrada do microfone antes de medir o ruído ambiente."
+          }
+        }
+      }
+    },
+    "Measuring room noise. Keep the drums quiet for one second.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Midiendo el ruido ambiente. Mantén la batería en silencio durante un segundo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mesure du bruit ambiant. Gardez la batterie silencieuse pendant une seconde."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Raumgeräusch wird gemessen. Lass das Schlagzeug eine Sekunde lang still."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Medindo o ruído do ambiente. Mantenha a bateria em silêncio por um segundo."
+          }
+        }
+      }
+    },
+    "Room noise measured. Tap the selected drum to check sensitivity.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ruido ambiente medido. Toca el tambor seleccionado para comprobar la sensibilidad."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bruit ambiant mesuré. Frappez le tambour sélectionné pour vérifier la sensibilité."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Raumgeräusch gemessen. Spiele die ausgewählte Trommel, um die Empfindlichkeit zu prüfen."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ruído ambiente medido. Toque o tambor selecionado para conferir a sensibilidade."
+          }
+        }
+      }
+    },
+    "Microphone access is off. Allow it in Settings to score audio input.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "El acceso al micrófono está desactivado. Permítelo en Ajustes para puntuar la entrada de audio."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’accès au microphone est désactivé. Autorisez-le dans Réglages pour évaluer l’entrée audio."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Der Mikrofonzugriff ist deaktiviert. Erlaube ihn in den Einstellungen, um Audioeingaben zu werten."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "O acesso ao microfone está desativado. Permita-o nos Ajustes para pontuar a entrada de áudio."
+          }
+        }
+      }
+    },
+    "No microphone input is available on this audio route.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No hay entrada de micrófono disponible en esta ruta de audio."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aucune entrée microphone n’est disponible sur cette sortie audio."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Für diese Audioverbindung ist kein Mikrofoneingang verfügbar."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Não há entrada de microfone disponível nesta rota de áudio."
+          }
+        }
+      }
+    },
+    "Your projects": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tus proyectos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vos projets"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Deine Projekte"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Seus projetos"
+          }
+        }
+      }
+    },
+    "No personal songs yet": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aún no hay canciones personales"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aucun morceau personnel pour le moment"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Noch keine eigenen Songs"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ainda não há músicas pessoais"
+          }
+        }
+      }
+    },
+    "Create a song here or import a Drum Hero song JSON file. Projects stay on this device until you export them.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Crea una canción aquí o importa un archivo JSON de Drum Hero. Los proyectos permanecen en este dispositivo hasta que los exportes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Créez un morceau ici ou importez un fichier JSON Drum Hero. Les projets restent sur cet appareil jusqu’à leur exportation."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Erstelle hier einen Song oder importiere eine Drum-Hero-JSON-Datei. Projekte bleiben auf diesem Gerät, bis du sie exportierst."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Crie uma música aqui ou importe um arquivo JSON do Drum Hero. Os projetos ficam neste dispositivo até que você os exporte."
+          }
+        }
+      }
+    },
+    "New song project": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nuevo proyecto de canción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nouveau projet de morceau"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Neues Songprojekt"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Novo projeto de música"
+          }
+        }
+      }
+    },
+    "Import song JSON": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importar JSON de canción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importer un fichier JSON de morceau"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Song-JSON importieren"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importar JSON de música"
+          }
+        }
+      }
+    },
+    "Export song JSON": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Exportar JSON de canción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Exporter le JSON du morceau"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Song-JSON exportieren"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Exportar JSON de música"
+          }
+        }
+      }
+    },
+    "Edit song project": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Editar proyecto de canción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Modifier le projet de morceau"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Songprojekt bearbeiten"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Editar projeto de música"
+          }
+        }
+      }
+    },
+    "Source attribution": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Atribución de la fuente"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Attribution de la source"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quellenangabe"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Atribuição da fonte"
+          }
+        }
+      }
+    },
+    "Native editing supports kick, snare, hi-hat, tom, and crash. Other web voices remain unsupported on iOS.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La edición nativa admite bombo, caja, hi-hat, tom y crash. Otras voces de la web aún no son compatibles con iOS."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La modification native prend en charge la grosse caisse, la caisse claire, le charleston, le tom et la cymbale crash. Les autres voix web ne sont pas encore prises en charge sur iOS."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die native Bearbeitung unterstützt Kick, Snare, Hi-Hat, Tom und Crash. Andere Web-Stimmen werden unter iOS noch nicht unterstützt."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "A edição nativa oferece bumbo, caixa, chimbal, tom e crash. Outras vozes da versão web ainda não são compatíveis com o iOS."
+          }
+        }
+      }
+    },
+    "Tap a voice at a step to add or remove its hit. H means hi-hat. Each part can contain up to 256 hits.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Toca una voz en un paso para añadir o quitar el golpe. H indica hi-hat. Cada parte admite hasta 256 golpes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Touchez une voix sur un temps pour ajouter ou retirer une frappe. H désigne le charleston. Chaque partie peut contenir jusqu’à 256 frappes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tippe auf einem Schritt auf eine Stimme, um den Schlag hinzuzufügen oder zu entfernen. H steht für Hi-Hat. Jeder Part kann bis zu 256 Schläge enthalten."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Toque em uma voz no passo para adicionar ou remover a batida. H representa o chimbal. Cada parte pode ter até 256 batidas."
+          }
+        }
+      }
+    },
+    "This file uses the shared Drum Hero song format and can be imported into the web Song Library.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Este archivo usa el formato compartido de canciones de Drum Hero y se puede importar en la biblioteca web."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ce fichier utilise le format de morceau partagé de Drum Hero et peut être importé dans la bibliothèque web."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Datei nutzt das gemeinsame Drum-Hero-Songformat und kann in die Web-Songbibliothek importiert werden."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Este arquivo usa o formato compartilhado de músicas do Drum Hero e pode ser importado na biblioteca web."
+          }
+        }
+      }
+    },
+    "Song projects must be 8 MB or smaller.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Los proyectos de canción deben ocupar 8 MB o menos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les projets de morceau doivent faire 8 Mo ou moins."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Songprojekte dürfen höchstens 8 MB groß sein."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Os projetos de música devem ter no máximo 8 MB."
+          }
+        }
+      }
+    },
+    "Save lesson checkpoints, practice sessions, Trainer rounds, best scores, and personal song projects as a versioned JSON file. Recordings and cloud data are not included.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Guarda los hitos de lecciones, las sesiones de práctica, las rondas del Trainer, las mejores puntuaciones y los proyectos personales como un archivo JSON versionado. No se incluyen grabaciones ni datos de la nube."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Enregistrez les étapes des leçons, les séances d’entraînement, les rounds du Trainer, les meilleurs scores et les projets de morceaux personnels dans un fichier JSON versionné. Les enregistrements et les données cloud sont exclus."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Speichere Lernabschnitte, Übungseinheiten, Trainer-Runden, Bestwerte und eigene Songprojekte in einer versionierten JSON-Datei. Aufnahmen und Cloud-Daten sind nicht enthalten."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Salve etapas das lições, sessões de prática, rodadas do Trainer, melhores pontuações e projetos pessoais de música em um arquivo JSON versionado. Gravações e dados da nuvem não são incluídos."
+          }
+        }
+      }
+    },
+    "Replace local progress?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Reemplazar el progreso local?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Remplacer la progression locale ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Lokalen Fortschritt ersetzen?"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Substituir o progresso local?"
+          }
+        }
+      }
+    },
+    "Replace this device’s data": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reemplazar los datos de este dispositivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Remplacer les données de cet appareil"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Daten auf diesem Gerät ersetzen"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Substituir os dados deste dispositivo"
+          }
+        }
+      }
+    },
+    "Personal songs on this device will be kept because this older backup does not contain them.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se conservarán las canciones personales de este dispositivo porque esta copia antigua no las incluye."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les morceaux personnels de cet appareil seront conservés, car cette ancienne sauvegarde ne les contient pas."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Eigene Songs auf diesem Gerät bleiben erhalten, da diese ältere Sicherung sie nicht enthält."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "As músicas pessoais deste dispositivo serão mantidas porque este backup antigo não as inclui."
+          }
+        }
+      }
+    },
+    "Each drum voice needs a different MIDI note.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cada voz de batería necesita una nota MIDI diferente."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Chaque voix de batterie doit utiliser une note MIDI différente."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Jede Schlagzeugstimme benötigt eine eigene MIDI-Note."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cada voz da bateria precisa de uma nota MIDI diferente."
+          }
+        }
+      }
+    },
+    "MIDI note mapping saved on this device.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Asignación de notas MIDI guardada en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correspondance des notes MIDI enregistrée sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "MIDI-Notenzuordnung auf diesem Gerät gespeichert."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mapeamento de notas MIDI salvo neste dispositivo."
+          }
+        }
+      }
+    },
+    "This backup file is larger than 64 MB.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Este archivo de copia de seguridad supera los 64 MB."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ce fichier de sauvegarde dépasse 64 Mo."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Sicherungsdatei ist größer als 64 MB."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Este arquivo de backup tem mais de 64 MB."
+          }
+        }
+      }
+    },
+    "This backup version is not supported by this app.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta versión de la copia de seguridad no es compatible con la aplicación."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette version de la sauvegarde n’est pas prise en charge par l’application."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Sicherungsversion wird von der App nicht unterstützt."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta versão do backup não é compatível com o aplicativo."
+          }
+        }
+      }
+    },
+    "The backup contains records that do not match this app’s lessons or patterns.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La copia de seguridad contiene registros que no coinciden con las lecciones o los patrones de esta aplicación."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La sauvegarde contient des éléments qui ne correspondent pas aux leçons ou aux motifs de l’application."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Sicherung enthält Einträge, die nicht zu den Lektionen oder Mustern dieser App passen."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "O backup contém registros que não correspondem às lições ou aos padrões deste aplicativo."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -1,6 +1,49 @@
 import { normalizeSong, type DrumSong } from "./song-library";
 import { readSongProjectFile, type SongBuilderProjectFile } from "./song-builder-project";
 export type SongImportReview = { song: DrumSong; project?: SongBuilderProjectFile };
+export type SongImportCandidate = { song: DrumSong; score: number; reasons: string[] };
+
+const textTokens = (value: string) => new Set(value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+const tokenSimilarity = (left: Set<string>, right: Set<string>) => {
+  if (!left.size || !right.size) return 0;
+  const shared = [...left].filter((token) => right.has(token)).length;
+  return shared / (left.size + right.size - shared);
+};
+function arrangementTokens(song: DrumSong): Set<string> {
+  const tokens: string[] = [];
+  for (const section of song.sections) {
+    const sectionName = [...textTokens(section.name)].join("_") || section.kind;
+    tokens.push(`section:${sectionName}`, `kind:${section.kind}`);
+    for (const part of section.parts) {
+      const partName = [...textTokens(part.name)].join("_") || "part";
+      tokens.push(`part:${sectionName}:${partName}`, `grid:${sectionName}:${part.beats}/${part.subdivision}`);
+      for (const hit of part.hits) tokens.push(`hit:${sectionName}:${partName}:${hit.step}:${hit.instrument}:${hit.accent ? 1 : 0}:${hit.articulation ?? "normal"}`);
+    }
+  }
+  return new Set(tokens);
+}
+
+export function findSongImportCandidates(songs: DrumSong[], incoming: DrumSong, limit = 8): SongImportCandidate[] {
+  const incomingTitle = textTokens(incoming.title), incomingArtist = textTokens(incoming.artist), incomingStructure = arrangementTokens(incoming);
+  return songs.flatMap((song) => {
+    const titleScore = tokenSimilarity(textTokens(song.title), incomingTitle);
+    const artistScore = tokenSimilarity(textTokens(song.artist), incomingArtist);
+    const structureScore = tokenSimilarity(arrangementTokens(song), incomingStructure);
+    const identityMatch = titleScore >= 0.7 && artistScore >= 0.6;
+    const structuralMatch = structureScore >= 0.78 && (titleScore >= 0.25 || artistScore >= 0.5);
+    if (!identityMatch && !structuralMatch) return [];
+    const score = Math.round(titleScore * 40 + artistScore * 20 + structureScore * 40);
+    const reasons: string[] = [];
+    if (titleScore === 1) reasons.push("same title");
+    else if (titleScore >= 0.7) reasons.push("similar title");
+    if (artistScore === 1) reasons.push("same artist");
+    else if (artistScore >= 0.6) reasons.push("similar artist");
+    if (structureScore >= 0.95) reasons.push("matching arrangement structure");
+    else if (structureScore >= 0.78) reasons.push("similar arrangement structure");
+    return [{ song, score, reasons }];
+  }).sort((left, right) => right.score - left.score || left.song.title.localeCompare(right.song.title)).slice(0, Math.max(1, limit));
+}
+
 export function parseLibrarySongImport(text: string): SongImportReview {
   if (text.length > 40 * 1024 * 1024) throw new Error("Song files must be 40 MB or smaller.");
   let parsed: { format?: string; song?: unknown };

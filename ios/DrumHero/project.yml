@@ -21,7 +21,11 @@ targets:
       - path: Sources
       - path: ../../shared/mobile/v1/drum-content.json
         buildPhase: resources
+      - path: ../../shared/assessment-v1.json
+        buildPhase: resources
       - path: Sources/Resources/Localizable.xcstrings
+        buildPhase: resources
+      - path: Sources/Resources/InfoPlist.xcstrings
         buildPhase: resources
       - path: ../../public/audio/drums/kick-1.wav
         buildPhase: resources
@@ -67,6 +71,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Drum Hero
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Drum Hero analyzes microphone levels locally to score one selected drum voice. It does not record or save audio.
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
     info:
@@ -88,6 +93,12 @@ targets:
     sources:
       - path: Tests
       - path: ../../shared/mobile/v1/drum-content.json
+        buildPhase: resources
+      - path: ../../shared/assessment-v1.json
+        buildPhase: resources
+      - path: ../../shared/sight-reading-v1.json
+        buildPhase: resources
+      - path: ../../shared/assessment-fixtures-v1.json
         buildPhase: resources
       - path: Tests/Fixtures/scoring-fixtures.json
         buildPhase: resources

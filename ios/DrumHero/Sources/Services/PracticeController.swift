@@ -18,7 +18,8 @@ final class PracticeController: ObservableObject {
     @Published private(set) var lastFeedback = "Ready when you are"
     @Published private(set) var audioUnavailable = false
     @Published private(set) var repetitions = 1
-    private let audio: DrumAudioService
+    @Published private(set) var isMuted = false
+    private let audio: any DrumAudioPlaying
     private var task: Task<Void, Never>?
     private var expected: [ExpectedHit] = []
     private var pattern: PracticePattern?
@@ -32,7 +33,7 @@ final class PracticeController: ObservableObject {
     private var interruptionObserver: AudioNotificationToken?
     private var routeChangeObserver: AudioNotificationToken?
 
-    init(audio: DrumAudioService = DrumAudioService()) {
+    init(audio: any DrumAudioPlaying = DrumAudioService()) {
         self.audio = audio
         interruptionObserver = AudioNotificationToken(NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
@@ -63,21 +64,26 @@ final class PracticeController: ObservableObject {
         self.countInBeats = min(4, max(1, countInBeats))
         self.repetitions = max(1, repetitions)
         expected = PracticeRules.expectedHits(pattern: pattern, bpm: self.bpm, repetitions: self.repetitions, startAt: 0)
-        do { try audio.prepare(); audioUnavailable = false }
-        catch { audioUnavailable = true }
+        if isMuted {
+            audioUnavailable = false
+        } else {
+            do { try audio.prepare(); audioUnavailable = false }
+            catch { audioUnavailable = true }
+        }
         status = .countIn
         task = Task { [weak self] in await self?.runCountInAndPattern() }
     }
 
-    func hit(_ voice: DrumVoice) {
+    func hit(_ voice: DrumVoice, at timestamp: TimeInterval? = nil, correctionMs: Double = 0) {
         guard status == .playing else { return }
-        let at = ProcessInfo.processInfo.systemUptime - activeUptimeStart
+        let inputTime = timestamp ?? ProcessInfo.processInfo.systemUptime
+        let at = inputTime - activeUptimeStart - correctionMs / 1_000
         markMissed(until: at - 0.1)
         guard let index = PracticeRules.closestUnmatchedIndex(at: at, in: expected, instrument: voice),
               abs(expected[index].at - at) <= 0.1 else {
             ratings.append(RatedHit(instrument: voice, rating: .extra, offsetMs: nil, step: nil, repetition: nil))
             lastFeedback = "Extra · \(voice.title)"
-            audio.play(voice)
+            playAudio(voice)
             return
         }
         let offset = (at - expected[index].at) * 1_000
@@ -86,7 +92,12 @@ final class PracticeController: ObservableObject {
         ratings.append(RatedHit(instrument: voice, rating: rating, offsetMs: Int(offset.rounded()),
                                 step: expected[index].step, repetition: expected[index].repetition))
         lastFeedback = "\(rating.rawValue.capitalized) · \(voice.title) · \(offset >= 0 ? "+" : "")\(Int(offset.rounded())) ms"
-        audio.play(voice)
+        playAudio(voice)
+    }
+
+    func toggleMute() {
+        isMuted.toggle()
+        if isMuted { audio.stop() }
     }
 
     func pause() {
@@ -130,6 +141,11 @@ final class PracticeController: ObservableObject {
 
     func stopForInterruption() { pause() }
 
+    private func playAudio(_ voice: DrumVoice) {
+        guard !isMuted else { return }
+        if !audio.play(voice) { audioUnavailable = true }
+    }
+
     private func runCountInAndPattern() async {
         let clock = ContinuousClock()
         let beat = Duration.milliseconds(Int(60_000 / bpm))
@@ -137,7 +153,7 @@ final class PracticeController: ObservableObject {
         for index in 0..<countInBeats {
             guard !Task.isCancelled else { return }
             do { try await clock.sleep(until: countInStart + beat * index) } catch { return }
-            audio.play(.hihat)
+            playAudio(.hihat)
             playhead = index
         }
         guard !Task.isCancelled else { return }
@@ -160,7 +176,7 @@ final class PracticeController: ObservableObject {
             guard !Task.isCancelled else { return }
             gridIndex = index
             playhead = index % pattern.totalSteps
-            for hit in pattern.hits where hit.step == playhead { audio.play(hit.instrument) }
+            for hit in pattern.hits where hit.step == playhead { playAudio(hit.instrument) }
             let now = ProcessInfo.processInfo.systemUptime - activeUptimeStart
             markMissed(until: now - 0.1)
         }

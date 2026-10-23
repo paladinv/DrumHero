@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { TrainerRound } from "@/lib/trainer";
+import { summarizeTrainerInputQuality, trainerInputQualityAdvice } from "@/lib/trainer-input-quality";
 import { useLocalization } from "./LocalizationProvider";
 
 type DeviceInfo = { browser: string; platform: string; secure: boolean; audio: boolean; midi: boolean; microphone: boolean };
@@ -47,8 +48,9 @@ function identifyPlatform(ua: string, ios: boolean) {
   return "Unknown platform";
 }
 
-export function TrainerDeviceReadiness({ profileKey, latencyMs, rounds, disabled, onCalibrate }: { profileKey: string; latencyMs: number; rounds: TrainerRound[]; disabled: boolean; onCalibrate: () => void }) {
+export function TrainerDeviceReadiness({ profileKey, latencyMs, rounds, disabled, onCalibrate, openAtStart = false }: { profileKey: string; latencyMs: number; rounds: TrainerRound[]; disabled: boolean; onCalibrate: () => void; openAtStart?: boolean }) {
   const { t, formatNumber } = useLocalization();
+  const [setupOpen, setSetupOpen] = useState(openAtStart);
   const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [trials, setTrials] = useState<CalibrationTrial[]>([]);
   const [setup, setSetup] = useState("");
@@ -58,12 +60,15 @@ export function TrainerDeviceReadiness({ profileKey, latencyMs, rounds, disabled
   const [diagnosticsConsent, setDiagnosticsConsent] = useState(false);
   const [diagnosticMessage, setDiagnosticMessage] = useState("");
   useEffect(() => {
-    const ua = navigator.userAgent;
-    const ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    const browser = identifyBrowser(ua, ios);
-    const platform = identifyPlatform(ua, ios);
-    setDevice({ browser, platform, secure: window.isSecureContext, audio: typeof window.AudioContext === "function", midi: typeof navigator.requestMIDIAccess === "function", microphone: Boolean(navigator.mediaDevices?.getUserMedia) });
-    setTrials(readTrials(localStorage.getItem(TRIALS_KEY)));
+    const timer = window.setTimeout(() => {
+      const ua = navigator.userAgent;
+      const ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      const browser = identifyBrowser(ua, ios);
+      const platform = identifyPlatform(ua, ios);
+      setDevice({ browser, platform, secure: window.isSecureContext, audio: typeof window.AudioContext === "function", midi: typeof navigator.requestMIDIAccess === "function", microphone: Boolean(navigator.mediaDevices?.getUserMedia) });
+      setTrials(readTrials(localStorage.getItem(TRIALS_KEY)));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
   const stats = useMemo(() => {
     const matching = rounds.filter((round) => round.mode === "scored" && round.result && (round.inputProfile ?? round.source) === profileKey)
@@ -85,6 +90,8 @@ export function TrainerDeviceReadiness({ profileKey, latencyMs, rounds, disabled
       uncertainRounds: matching.filter((round) => Boolean(round.inputClipped || round.uncertainDetections)).length
     };
   }, [profileKey, rounds]);
+  const audioQuality = useMemo(() => summarizeTrainerInputQuality(rounds, profileKey), [profileKey, rounds]);
+  const audioAdvice = useMemo(() => trainerInputQualityAdvice(audioQuality), [audioQuality]);
   const comparableTrials = trials.filter((trial) => trial.inputProfile === profileKey && trial.setup.trim().toLowerCase() === setup.trim().toLowerCase() && trial.output === output && (!device || (trial.browser === device.browser && trial.platform === device.platform))).slice(0, 3);
   const spread = comparableTrials.length === 3 ? Math.max(...comparableTrials.map((trial) => trial.correctionMs)) - Math.min(...comparableTrials.map((trial) => trial.correctionMs)) : null;
 
@@ -114,7 +121,11 @@ export function TrainerDeviceReadiness({ profileKey, latencyMs, rounds, disabled
         roundsWithUncertainInput: stats.uncertainRounds,
         timedHits: stats.hits,
         meanAbsoluteTimingDistanceMs: stats.meanDistance,
-        inputRoutes: stats.inputRoutes
+        inputRoutes: stats.inputRoutes,
+        recentAudioRounds: audioQuality.audioRounds,
+        cleanAudioRounds: audioQuality.cleanAudioRounds,
+        flaggedAudioRounds: audioQuality.flaggedAudioRounds,
+        audioReliabilityPercent: audioQuality.audioReliabilityPercent
       }
     };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
@@ -127,10 +138,11 @@ export function TrainerDeviceReadiness({ profileKey, latencyMs, rounds, disabled
     setDiagnosticMessage(t("Diagnostics file exported. Share it only with someone helping you troubleshoot."));
   };
 
-  return <details className="trainer-device-readiness">
+  return <details id="trainer-device-readiness" className="trainer-device-readiness" open={setupOpen} onToggle={(event) => setSetupOpen(event.currentTarget.open)}>
     <summary>Device timing and compatibility</summary>
     {device ? <><p>{device.browser} · {device.platform} · input profile <strong>{profileKey}</strong></p><p>Secure context: {device.secure ? "yes" : "no"} · Web Audio: {device.audio ? "available" : "unavailable"} · microphone: {device.microphone ? "available" : "unavailable"} · Web MIDI: {device.midi ? "available" : "unavailable"}</p></> : <p>Reading this browser’s audio and input capabilities…</p>}
     <p>Saved latency correction: <strong>{latencyMs > 0 ? "+" : ""}{latencyMs} ms</strong>. {stats.rounds ? `${stats.rounds} recent clean rounds on this profile · ${stats.hits} timed hits · ${stats.meanDistance === null ? "no scored offsets" : `${stats.meanDistance} ms mean absolute offset`}.` : "Complete a scored round on this profile to summarize its recent timing."}</p>
+    {audioQuality.audioRounds > 0 && <div className="trainer-input-quality-history"><p><strong>Recent audio input quality:</strong> {audioQuality.cleanAudioRounds}/{audioQuality.audioRounds} rounds had no clipping or uncertain hits ({audioQuality.audioReliabilityPercent}%); {audioQuality.flaggedAudioRounds} rounds had at least one input-quality flag. This summarizes up to the 10 latest scored rounds for this profile.</p>{audioAdvice && <p className="trainer-input-quality-advice"><strong>{audioAdvice.title}:</strong> {audioAdvice.message}</p>}<details><summary>View round-by-round quality</summary><ol>{audioQuality.rounds.map(point => <li key={point.id}><time dateTime={point.playedAt}>{new Date(point.playedAt).toLocaleDateString()}</time> · {point.source === "audio-voices" ? "Calibrated voice input" : "Audio timing input"} · {point.reliable ? "Clear input" : [point.uncertainDetections ? `${point.uncertainDetections} uncertain hit${point.uncertainDetections === 1 ? "" : "s"}` : "", point.inputClipped ? "clipping" : ""].filter(Boolean).join(" · ")}</li>)}</ol></details></div>}
     <p>Calibration estimates this input on this device; it is not a universal hardware measurement. Recalibrate after changing the kit, browser, or audio route. Bluetooth audio may add delay that the browser cannot identify.</p>
     {!device?.secure && device && <p role="status">This page is not in a secure browser context. Microphone and MIDI access may be restricted.</p>}
     <button type="button" className="button-secondary" disabled={disabled || !device?.audio} onClick={onCalibrate}>Run input latency calibration</button>
@@ -141,6 +153,7 @@ export function TrainerDeviceReadiness({ profileKey, latencyMs, rounds, disabled
         <strong>{t("Device capabilities")}</strong>
         {device && <span>{[device.audio && "Web Audio", device.midi && "Web MIDI", device.microphone && "Microphone"].filter(Boolean).join(" · ") || "No timing input APIs detected"} · {device.browser} · {device.platform}</span>}
         <span>{t("Recent clean rounds")}: {formatNumber(stats.rounds)} · {t("Timed hits")}: {formatNumber(stats.hits)} · {t("Mean timing distance")}: {stats.meanDistance === null ? "—" : `${formatNumber(stats.meanDistance)} ms`}</span>
+        {audioQuality.audioRounds > 0 && <span>Audio input quality: {audioQuality.cleanAudioRounds}/{audioQuality.audioRounds} clear rounds · {audioQuality.flaggedAudioRounds} with uncertain hits or clipping</span>}
         {!stats.rounds && <span>{t("No clean scored rounds on this input profile yet.")}</span>}
       </div>
       <label className="trainer-diagnostics-consent"><input type="checkbox" checked={diagnosticsConsent} onChange={(event) => setDiagnosticsConsent(event.currentTarget.checked)} /><span>{t("I agree to export the device capabilities and aggregate timing summary shown below. No audio, device IDs, hit-by-hit data, or personal notes are included.")}</span></label>

@@ -1,17 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { applyDynamicsTargets, summarizeDynamics } from "@/lib/trainer-dynamics";
-import { transitionFeedback } from "@/lib/trainer-coaching";
+import { nextCoaching, transitionFeedback } from "@/lib/trainer-coaching";
 import { shouldPlayTrainerClick } from "@/lib/trainer-metronome";
 import { summarizeTrainerProgress } from "@/lib/trainer-progress";
 import { summarizeRepetitionDrift } from "@/components/TrainerTimingBreakdown";
+import { summarizeTrainerBars, summarizeTrainerTransitions } from "@/lib/trainer-bar-analysis";
+import { buildTrainerSongFormPattern } from "@/lib/trainer-song-form";
+import { parseCustomGrooves } from "@/lib/custom-grooves";
+import { summarizeTrainerRoundInsight } from "@/lib/trainer-round-insights";
+import { trainerBackingNotes } from "@/lib/trainer-backing";
 import { createTrainerCuePattern } from "@/lib/trainer-cues";
 import { summarizeTrainerMilestones } from "@/lib/trainer-milestones";
 import { parseTrainerSetupTransfer } from "@/lib/trainer-enhancements";
 import { estimateTrainerTempo } from "@/lib/trainer-tempo";
 import { summarizeTrainerLiveTiming } from "@/lib/trainer-live-coaching";
 import { getTrainerGoalPatterns } from "@/lib/trainer-goals";
+import { summarizeTrainerInputQuality, trainerInputQualityAdvice } from "@/lib/trainer-input-quality";
 import type { TrainerRound } from "@/lib/trainer";
-import type { PracticePattern, RatedHit } from "@/lib/types";
+import type { Groove, PracticePattern, RatedHit } from "@/lib/types";
 
 const fourBeatPattern: PracticePattern = {
   id: "test-groove", name: "Test groove", level: "Beginner", description: "Test", subdivision: 4,
@@ -49,6 +55,140 @@ describe("Trainer improvements", () => {
     expect(first.cueSteps).toEqual(first.callouts?.map(callout => callout.step));
   });
 
+  it("spaces random cues across repeated one-bar grooves", () => {
+    const spaced = createTrainerCuePattern(fourBeatPattern, "random", 1, undefined, 42, 4, 1, 8);
+    expect(spaced.repetitionPatterns).toHaveLength(8);
+    expect(spaced.callouts?.map(callout => [callout.repetition, callout.bar])).toEqual([[0, 1], [4, 5]]);
+    expect(spaced.repetitionPatterns?.[1].hits).toEqual(fourBeatPattern.hits);
+    expect(spaced.label).toContain("every 4 bars across the round (2 cues)");
+  });
+
+  it("adds scored voice-drop and accent-shift cues", () => {
+    const groove = { ...fourBeatPattern, subdivision: 8 as const, hits: [
+      ...[0, 2, 4, 5, 6].map(step => ({ step, instrument: "hihat" as const })),
+      { step: 0, instrument: "kick" as const },
+      { step: 4, instrument: "snare" as const },
+    ] };
+    const dropout = createTrainerCuePattern(groove, "dropout", 3, undefined, 1, 1, 1, 4, "hihat");
+    expect(dropout.callouts).toEqual([{ step: 2, bar: 1, label: "Next: drop hihat from beat 3." }]);
+    expect(dropout.pattern.hits.filter(hit => hit.instrument === "hihat").map(hit => hit.step)).toEqual([0, 2]);
+    expect(dropout.pattern.hits.filter(hit => hit.instrument === "kick")).toHaveLength(1);
+
+    const accent = createTrainerCuePattern(groove, "accent-shift", 3);
+    expect(accent.hasDynamicsTargets).toBe(true);
+    expect(accent.pattern.hits.filter(hit => hit.instrument === "hihat").map(hit => [hit.accent, hit.velocityTarget])).toEqual([[false, 45], [false, 45], [true, 105], [true, 105], [false, 45]]);
+    expect(accent.callouts?.[0].label).toBe("Next: move the accent to beat 3.");
+  });
+
+  it("turns scored recap data into an instrument-specific one-beat drill", () => {
+    const round: TrainerRound = {
+      id: "coaching", patternId: fourBeatPattern.id, patternName: fourBeatPattern.name, bpm: 90,
+      playedAt: "2026-10-01T12:00:00.000Z", mode: "scored", source: "midi", ratings: [], result: null,
+      hits: [{ instrument: "kick", rating: "miss", offsetMs: null, step: 0, repetition: 0 }],
+    };
+    expect(nextCoaching(round, fourBeatPattern)).toMatchObject({ instrument: "kick", beat: 1, bpm: 85 });
+  });
+
+  it("summarizes recent audio input reliability by selected profile", () => {
+    const round = (id: string, profile: string, source: "audio-timing" | "audio-voices", quality: { inputClipped?: boolean; uncertainDetections?: number } = {}): TrainerRound => ({
+      id, patternId: "test-groove", patternName: "Test groove", bpm: 80,
+      playedAt: `2026-10-0${id === "three" ? "3" : id === "two" ? "2" : "1"}T12:00:00.000Z`, mode: "scored", source,
+      inputProfile: profile, ratings: [], result: { id, patternId: "test-groove", patternName: "Test groove", bpm: 80, playedAt: "2026-10-01T12:00:00.000Z", score: 80, accuracy: 80, great: 4, good: 0, miss: 0, extra: 0, maxCombo: 4 },
+      ...quality,
+    });
+    const summary = summarizeTrainerInputQuality([
+      round("one", "audio:kit-a", "audio-timing"),
+      round("two", "audio:kit-a", "audio-voices", { uncertainDetections: 2 }),
+      round("three", "audio:kit-a", "audio-voices", { inputClipped: true }),
+      round("other", "audio:kit-b", "audio-voices", { inputClipped: true }),
+    ], "audio:kit-a");
+    expect(summary).toMatchObject({ audioRounds: 3, cleanAudioRounds: 1, flaggedAudioRounds: 2, audioReliabilityPercent: 33 });
+    expect(summary.rounds.map(point => point.id)).toEqual(["three", "two", "one"]);
+  });
+
+  it("turns recent audio flags into a concrete calibration recommendation", () => {
+    const summary = {
+      rounds: [
+        { id: "clip-a", playedAt: "2026-10-03T00:00:00.000Z", source: "audio-timing", uncertainDetections: 0, inputClipped: true, reliable: false },
+        { id: "clip-b", playedAt: "2026-10-02T00:00:00.000Z", source: "audio-timing", uncertainDetections: 0, inputClipped: true, reliable: false },
+      ], audioRounds: 2, cleanAudioRounds: 0, flaggedAudioRounds: 2, audioReliabilityPercent: 0,
+    };
+    expect(trainerInputQualityAdvice(summary)).toMatchObject({ action: "lower-gain", title: "Lower the input gain" });
+  });
+
+  it("builds a complete AABA form and summarizes groove, fill, and landing accuracy", () => {
+    const grooveA: Groove = { ...fourBeatPattern, meter: "4/4", style: "Groove", focus: "A part", hits: [{ step: 0, instrument: "snare" }] };
+    const grooveB: Groove = { ...fourBeatPattern, id: "part-b", name: "Part B", meter: "4/4", style: "Groove", focus: "B part", hits: [{ step: 0, instrument: "kick" }] };
+    const fill: Groove = { ...fourBeatPattern, id: "fill-test", name: "Fill: Single hit", meter: "4/4", style: "Fill study", focus: "Fill", hits: [{ step: 2, instrument: "tom" }] };
+    const form = buildTrainerSongFormPattern({ id: "custom-form-test", template: "AABA", partA: grooveA, partB: grooveB, fill, fillAfterSections: [2] });
+    expect(form).toMatchObject({ beats: 20, meter: "5 bars · 4/4", trainerFillStepRanges: [[8, 12]] });
+    const hits: RatedHit[] = [
+      { instrument: "snare", rating: "great", offsetMs: 0, step: 4, repetition: 0 },
+      { instrument: "tom", rating: "miss", offsetMs: null, step: 10, repetition: 0 },
+      { instrument: "kick", rating: "good", offsetMs: 12, step: 12, repetition: 0 },
+    ];
+    expect(summarizeTrainerTransitions(hits, form!)).toEqual([{ fillBar: 3, grooveBefore: "100% on time", fill: "0% on time", landing: "100% on time" }]);
+  });
+
+  it("builds custom multi-bar arrangements with repeats, dynamics, and persistable targets", () => {
+    const grooveA: Groove = { ...fourBeatPattern, meter: "4/4", style: "Groove", focus: "A part", hits: [{ step: 0, instrument: "snare" }] };
+    const grooveB: Groove = { ...fourBeatPattern, id: "part-b", name: "Part B", meter: "4/4", style: "Groove", focus: "B part", hits: [{ step: 0, instrument: "kick" }] };
+    const form = buildTrainerSongFormPattern({
+      id: "custom-form-dynamics", template: "Custom", partA: grooveA, partB: grooveB,
+      customSections: [
+        { part: "A", bars: 2, repeats: 1, intensity: "soft" },
+        { part: "B", bars: 4, repeats: 2, intensity: "strong" },
+      ],
+    });
+    expect(form).toMatchObject({ beats: 40, meter: "10 bars · 4/4" });
+    expect(form?.hits[0]).toMatchObject({ step: 0, velocityTarget: 48, accent: false });
+    expect(form?.hits[2]).toMatchObject({ step: 8, velocityTarget: 110, accent: true });
+    const restored = parseCustomGrooves(JSON.stringify([form]));
+    expect(restored[0].hits[0]).toMatchObject({ velocityTarget: 48 });
+    expect(restored[0].hits[2]).toMatchObject({ velocityTarget: 110 });
+    expect(parseCustomGrooves(JSON.stringify([{ ...form, hits: [{ step: 0, instrument: "kick", velocityTarget: 128 }] }]))).toEqual([]);
+  });
+
+  it("explains scored outcomes and flags unreliable audio input", () => {
+    const round: TrainerRound = {
+      id: "insight", patternId: fourBeatPattern.id, patternName: fourBeatPattern.name, bpm: 90,
+      playedAt: "2026-10-01T12:00:00.000Z", mode: "scored", source: "midi", inputProfile: "midi:practice-kit",
+      ratings: [], result: { id: "insight", patternId: fourBeatPattern.id, patternName: fourBeatPattern.name, bpm: 90, playedAt: "2026-10-01T12:00:00.000Z", score: 70, accuracy: 70, great: 2, good: 1, miss: 1, extra: 0, maxCombo: 3 },
+      hits: [{ instrument: "snare", rating: "miss", offsetMs: null, step: 1, repetition: 0 }],
+    };
+    expect(summarizeTrainerRoundInsight(round, fourBeatPattern)).toMatchObject({
+      title: "Focus on the missed strokes", nextStep: expect.stringContaining("beat 2"),
+      reliability: expect.stringContaining("midi:practice-kit"),
+    });
+    const clipped = summarizeTrainerRoundInsight({ ...round, inputClipped: true }, fourBeatPattern);
+    expect(clipped).toMatchObject({ title: "Check the input before using this score", warning: expect.stringContaining("clipped") });
+    expect(summarizeTrainerRoundInsight({ ...round, mode: "self" }, fourBeatPattern)).toBeNull();
+  });
+
+  it("provides distinct synthesized backing note patterns for Trainer challenges", () => {
+    const sixteenthPattern = { ...fourBeatPattern, subdivision: 16 as const };
+    expect(trainerBackingNotes(sixteenthPattern, "rock").map(note => note.kind)).toContain("shaker");
+    expect(trainerBackingNotes(sixteenthPattern, "funk").some(note => note.kind === "bass" && note.step % 4 === 3)).toBe(true);
+    expect(trainerBackingNotes(sixteenthPattern, "shuffle").some(note => note.kind === "shaker")).toBe(true);
+  });
+
+  it("reports timing and measured dynamics for each bar across repeated multi-bar patterns", () => {
+    const twoBars = { ...fourBeatPattern, beats: 8, meter: "2 bars · 4/4" };
+    const bars = summarizeTrainerBars([
+      { instrument: "snare", rating: "great", offsetMs: 10, velocity: 90, velocityTarget: 100, step: 0, repetition: 0 },
+      { instrument: "kick", rating: "miss", offsetMs: null, step: 1, repetition: 0 },
+      { instrument: "snare", rating: "good", offsetMs: -20, velocity: 80, velocityTarget: 100, step: 4, repetition: 0 },
+      { instrument: "snare", rating: "great", offsetMs: 0, step: 0, repetition: 1 },
+      { instrument: "snare", rating: "great", offsetMs: 0, step: 0, repetition: 1, transition: "landing" },
+      { instrument: "snare", rating: "extra", offsetMs: null, step: 4, repetition: 1 },
+    ], twoBars);
+    expect(bars).toMatchObject([
+      { bar: 1, targets: 2, onTime: 1, missed: 1, averageOffsetMs: 10, typicalOffsetMs: 10, dynamicsSamples: 1, averageDynamicsError: 10 },
+      { bar: 2, targets: 1, onTime: 1, missed: 0, averageOffsetMs: -20, typicalOffsetMs: 20, dynamicsSamples: 1, averageDynamicsError: 20 },
+      { bar: 3, targets: 1, onTime: 1, missed: 0 },
+    ]);
+  });
+
   it("estimates tap tempo while filtering an isolated missed beat", () => {
     expect(estimateTrainerTempo([0, 500, 1000, 1500])).toBe(120);
     expect(estimateTrainerTempo([0, 500, 1000, 2600, 3100])).toBe(120);
@@ -63,8 +203,16 @@ describe("Trainer improvements", () => {
     ];
     expect(summarizeTrainerLiveTiming(hits)?.message).toContain("trending 21 ms late");
     const oddMeter = { ...fourBeatPattern, id: "odd-meter", beats: 5, meter: "1 bar · 5/4" };
+    const focusPatterns: PracticePattern[] = [
+      { ...fourBeatPattern, id: "ghost", name: "Ghost Note Pocket", description: "Quiet snare taps" },
+      { ...fourBeatPattern, id: "syncopated", name: "Offbeat Kick", description: "Displaced accents" },
+      { ...fourBeatPattern, id: "dynamics", name: "Hat Accent Alternation", description: "Soft and strong strokes" },
+    ];
     expect(getTrainerGoalPatterns([fourBeatPattern, oddMeter], "odd-meter").map(pattern => pattern.id)).toEqual(["odd-meter"]);
     expect(getTrainerGoalPatterns([fourBeatPattern, oddMeter], "backbeat").map(pattern => pattern.id)).toEqual(["test-groove"]);
+    expect(getTrainerGoalPatterns(focusPatterns, "ghost-notes").map(pattern => pattern.id)).toEqual(["ghost"]);
+    expect(getTrainerGoalPatterns(focusPatterns, "syncopation").map(pattern => pattern.id)).toEqual(["syncopated"]);
+    expect(getTrainerGoalPatterns(focusPatterns, "dynamics").map(pattern => pattern.id)).toContain("dynamics");
   });
 
   it("fills new cue and audio settings with defaults when importing an older setup", () => {
@@ -76,9 +224,11 @@ describe("Trainer improvements", () => {
       spokenCount: "off", dynamicsPractice: false, practicePathId: "backbeat"
     };
     const setup = parseTrainerSetupTransfer(JSON.stringify(legacySetup), new Set(["test-groove"]));
-    expect(setup).toMatchObject({ cueMode: "off", cueBeat: 1, trainerDrumLevel: 100, trainerClickLevel: 100, clickSound: "hat" });
+    expect(setup).toMatchObject({ cueMode: "off", cueVoice: "hihat", cueBeat: 1, trainerDrumLevel: 100, trainerClickLevel: 100, clickSound: "hat" });
     const randomSetup = parseTrainerSetupTransfer(JSON.stringify({ ...legacySetup, cueMode: "random" }), new Set(["test-groove"]));
     expect(randomSetup.cueMode).toBe("random");
+    const dropoutSetup = parseTrainerSetupTransfer(JSON.stringify({ ...legacySetup, cueMode: "dropout", cueVoice: "tom" }), new Set(["test-groove"]));
+    expect(dropoutSetup).toMatchObject({ cueMode: "dropout", cueVoice: "tom" });
   });
 
   it("tracks reliable practice milestones and ignores clipped attempts", () => {
@@ -100,8 +250,9 @@ describe("Trainer improvements", () => {
   it("alternates two audible bars with two silent bars, carrying through one-bar repetitions", () => {
     const firstBeat = (repetition: number) => shouldPlayTrainerClick(fourBeatPattern, 0, "progressive-silence", repetition, 1);
     expect([0, 1, 2, 3, 4].map(firstBeat)).toEqual([true, true, false, false, true]);
-    expect(shouldPlayTrainerClick(fourBeatPattern, 0, "all")).toBe(true);
-    expect(shouldPlayTrainerClick(fourBeatPattern, 1, "all")).toBe(false);
+    const eighthNotePattern = { ...fourBeatPattern, subdivision: 8 };
+    expect(shouldPlayTrainerClick(eighthNotePattern, 0, "all")).toBe(true);
+    expect(shouldPlayTrainerClick(eighthNotePattern, 1, "all")).toBe(false);
   });
 
   it("creates distinct dynamics targets for contrast, crescendo, and evenness", () => {

@@ -1,6 +1,6 @@
 import { mappedSeconds } from "./song-builder-tools";
-import type { Groove, SongHitArticulation, SongInstrument } from "./types";
-import type { DrumPart, DrumSong, SongArrangementAutomationPoint, SongClip, SongClipOverrides, SongFeel, SongSection, SongSectionAutomation } from "./song-library";
+import { SONG_INSTRUMENTS, type Groove, type SongHitArticulation, type SongInstrument } from "./types";
+import type { DrumPart, DrumSong, SongArrangementAutomationPoint, SongClip, SongClipOverrides, SongFeel, SongPlaybackFeel, SongSection, SongSectionAutomation } from "./song-library";
 
 export type ArrangedHit = { beat: number; fraction: number; instrument: SongInstrument; accent: boolean; velocity: number; ghost: boolean; step: number; articulation?: SongHitArticulation; sticking?: "R" | "L" };
 export type ArrangementBar = {
@@ -10,6 +10,7 @@ export type ArrangementBar = {
   sectionName: string;
   sectionKind: SongSection["kind"];
   feel?: SongFeel;
+  playbackFeel?: SongPlaybackFeel;
   sectionRepeat: number;
   sectionBar: number;
   sectionBars: number;
@@ -38,8 +39,11 @@ export type ArrangementBar = {
   hits: ArrangedHit[];
 };
 
-export const BUILDER_VOICES: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4"];
-export const VOICE_LABEL: Record<SongInstrument, string> = { kick: "Kick", snare: "Snare", hihat: "Hi-hat", openhat: "Open hi-hat", ride: "Ride", rimshot: "Rimshot", tom: "Tom", crash: "Crash", cowbell: "Cowbell", shaker: "Shaker", tambourine: "Tambourine", custom1: "Custom lane 1", custom2: "Custom lane 2", custom3: "Custom lane 3", custom4: "Custom lane 4" };
+export const BUILDER_VOICES: SongInstrument[] = SONG_INSTRUMENTS;
+export const VOICE_LABEL: Record<SongInstrument, string> = Object.fromEntries([
+  ["kick","Kick"],["snare","Snare"],["hihat","Hi-hat"],["openhat","Open hi-hat"],["ride","Ride"],["rimshot","Rimshot"],["tom","Tom"],["crash","Crash"],["cowbell","Cowbell"],["shaker","Shaker"],["tambourine","Tambourine"],
+  ...Array.from({length:8},(_,index)=>[`custom${index+1}`,`Custom lane ${index+1}`])
+]) as Record<SongInstrument,string>;
 export function songVoiceLabel(song: Pick<DrumSong, "voiceLabels"> | undefined, voice: SongInstrument) { return song?.voiceLabels?.[voice]?.trim() || VOICE_LABEL[voice]; }
 
 export function automationScaleAtHit(bar: ArrangementBar, hit: ArrangedHit) {
@@ -209,9 +213,7 @@ export function varyDrumPart(source: DrumPart, variation: GrooveVariation): Drum
 }
 
 export function humanizeArrangementBars(bars: ArrangementBar[], amount: number, seed: number, velocityAmount = amount): ArrangementBar[] {
-  const strength = Math.max(0, Math.min(100, amount)) / 100;
-  const velocityStrength=Math.max(0,Math.min(100,velocityAmount))/100;
-  if (!strength && !velocityStrength) return bars;
+  if (!amount && !velocityAmount && !bars.some(bar => bar.playbackFeel?.humanizeAmount || bar.playbackFeel?.humanizeVelocityAmount || bar.clipOverrides?.humanizeAmount || bar.clipOverrides?.humanizeVelocityAmount)) return bars;
   const variation = (key: string) => {
     let hash = (seed | 0) ^ 0x811c9dc5;
     for (let index = 0; index < key.length; index += 1) hash = Math.imul(hash ^ key.charCodeAt(index), 0x01000193);
@@ -222,6 +224,9 @@ export function humanizeArrangementBars(bars: ArrangementBar[], amount: number, 
   return bars.map((bar) => ({
     ...bar,
     hits: bar.hits.map((hit) => {
+      const strength = Math.max(0, Math.min(100, bar.clipOverrides?.humanizeAmount ?? bar.playbackFeel?.humanizeAmount ?? amount)) / 100;
+      const velocityStrength = Math.max(0, Math.min(100, bar.clipOverrides?.humanizeVelocityAmount ?? bar.playbackFeel?.humanizeVelocityAmount ?? velocityAmount)) / 100;
+      if (!strength && !velocityStrength) return hit;
       const random = variation(`${bar.index}:${bar.partId}:${hit.step}:${hit.instrument}`);
       const timingRangeBeats = (60 / bar.bpm) * 0.18 * strength;
       const beat = Math.max(0, Math.min(Math.max(0, bar.beats - 0.001), hit.beat + random * timingRangeBeats));
@@ -305,6 +310,8 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               const performanceBeat = Math.max(0, Math.min(remaining - 0.001, localBeat + (hit.timingOffsetMs ?? 0) * bpm / 60000));
               return [{ beat: performanceBeat, fraction: localBeat / (pickup ? remaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, articulation: hit.articulation, sticking: hit.sticking }];
             });
+            const measureCues = section.rehearsalCues?.filter(cue => cue.measure === repeatBarCursor + 1) ?? [];
+            const cueText = measureCues.map(cue => `${cue.kind === "chord" ? "Chord" : cue.kind === "lyric" ? "Lyric" : "Band"}: ${cue.text}`).join(" · ");
             bars.push({
               index: bars.length,
               number: bars.length + 1,
@@ -312,6 +319,7 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               sectionName: section.name,
               sectionKind: section.kind,
               feel: section.feel,
+              playbackFeel: section.playbackFeel,
               sectionRepeat,
               sectionBar: repeatBarCursor,
               sectionBars: Math.max(1, sectionBars),
@@ -323,10 +331,10 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               clipRepeat: clipRepeat + 1,
               clipRepeats: repeats,
               clipOverrides: clip.overrides,
-              rehearsalCue: section.rehearsalCues?.find(cue => cue.measure === repeatBarCursor + 1)?.text,
+              rehearsalCue: cueText || undefined,
               partId: part.id,
               partName: part.name,
-            annotation: [section.notes,part.notes,section.rehearsalCues?.find(cue => cue.measure === repeatBarCursor + 1)?.text ? `Cue: ${section.rehearsalCues.find(cue => cue.measure === repeatBarCursor + 1)?.text}` : undefined].filter(Boolean).join(" · "),
+            annotation: [section.notes,part.notes,cueText ? `Cue: ${cueText}` : undefined].filter(Boolean).join(" · "),
             dynamics: part.dynamics,
               meter,
               bpm,

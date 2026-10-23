@@ -50,6 +50,7 @@ export function ProgressDashboard() {
   ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
 
   return <>
+    <p><Link className="button-secondary" href="/assessment">{t("Initial skill assessment and results")}</Link></p>
     <section className="stat-grid">
       <div className="stat"><strong>{progress.completedLessons.length}/12</strong><span>Lessons complete</span></div>
       <div className="stat"><strong>{progress.sessions.length + trainerRounds.length}</strong><span>Practice sessions</span></div>
@@ -59,7 +60,7 @@ export function ProgressDashboard() {
     <div className="section-heading"><div><span className="eyebrow">Learning path</span><h2>Level progress</h2></div></div>
     <section className="card-grid">{levels.map((level) => {
       const value = levelProgress(progress.completedLessons, level);
-      return <article className={"card level-" + level} key={level}><span className="level-mark">{t(level)}</span><h3>{formatNumber(value.done)} of {formatNumber(value.total)}</h3><div className="progress-track" aria-label={value.percent + "% complete"}><span style={{ width: value.percent + "%" }} /></div><p>{formatNumber(value.percent)}% of this level completed.</p></article>;
+      return <article className={"card level-" + level} key={level}><span className="level-mark">{t(level)}</span><h3>{formatNumber(value.done)} of {formatNumber(value.total)}</h3><div className="progress-track" role="progressbar" aria-label={value.percent + "% complete"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value.percent}><span style={{ width: value.percent + "%" }} /></div><p>{formatNumber(value.percent)}% of this level completed.</p></article>;
     })}</section>
     <div className="section-heading"><div><span className="eyebrow">Trainer insights</span><h2>What to practise next</h2></div><Link className="button" href="/trainer">Train now</Link></div>
     <section className="card-grid trainer-insights">

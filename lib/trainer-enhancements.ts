@@ -1,8 +1,9 @@
-import type { Groove, PracticePattern } from "./types";
+import type { Groove, Instrument, PracticePattern } from "./types";
 import { parseCustomGrooves } from "./custom-grooves";
 import type { TrainerFeel, TrainerLimbFocus } from "./trainer";
 import type { TrainerClickSound } from "./audio";
 import type { TrainerCueDensity, TrainerCueLead, TrainerCueMode } from "./trainer-cues";
+import { normalizeTrainerCueSequence, type TrainerCueSequence } from "./trainer-cue-sequences";
 
 export type TrainerRoutineStep = {
   patternId: string;
@@ -72,6 +73,8 @@ export type TrainerSetupTransfer = {
   swingRatio?: number; pocketMs?: number; learningMode?: 'normal' | 'listen-copy-solo' | 'build-limbs'; phraseBars?: 0 | 4 | 8 | 16; variationId?: string;
   dynamicsExercise?: "contrast" | "crescendo" | "evenness";
   cueMode: TrainerCueMode;
+  cueVoice?: Instrument;
+  cueSequence?: TrainerCueSequence;
   cueBeat: number;
   cueEveryBars?: TrainerCueDensity;
   cueLeadBeats?: TrainerCueLead;
@@ -134,6 +137,8 @@ export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<stri
     pathAccuracyTarget: value.pathAccuracyTarget ?? 85,
     pathTimingTarget: value.pathTimingTarget ?? 35,
     cueMode: value.cueMode ?? "off",
+    cueVoice: value.cueVoice ?? "hihat",
+    cueSequence: normalizeTrainerCueSequence(value.cueSequence ?? { name: "My cue sequence", cues: [{ beat: 1, action: "crash" }] }) ?? { name: "My cue sequence", cues: [{ beat: 1, action: "crash" }] },
     cueBeat: value.cueBeat ?? 1,
     cueEveryBars: value.cueEveryBars ?? 1,
     cueLeadBeats: value.cueLeadBeats ?? 1,
@@ -146,6 +151,7 @@ export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<stri
   const customPatterns = parseCustomGrooves(JSON.stringify(rawCustomPatterns));
   const validIds = new Set([...validPatternIds, ...customPatterns.map((pattern) => pattern.id)]);
   const routineValue = normalized.customRoutine;
+  const cueSequenceValid = value.cueSequence === undefined || Boolean(normalizeTrainerCueSequence(value.cueSequence));
   const routineValid = routineValue === undefined || Boolean(routineValue && typeof routineValue.name === "string" && routineValue.name.trim().length > 0 && routineValue.name.length <= 50 &&
     Array.isArray(routineValue.steps) && routineValue.steps.length <= 20 && typeof routineValue.gated === "boolean" &&
     [70, 80, 85, 90, 95].includes(Number(routineValue.accuracyTarget)) && [25, 35, 50, 75].includes(Number(routineValue.timingTarget)) &&
@@ -171,7 +177,9 @@ export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<stri
   const extendedValid = valid && ["straight", "shuffle", "laid-back", "shuffle-laid-back"].includes(String(normalized.feel ?? "straight")) &&
     ["all", "backbeat", "subdivisions", "sparse-bars", "progressive-silence"].includes(String(normalized.clickMode ?? "all")) &&
     ["all", "hands", "feet"].includes(String(normalized.limbFocus ?? "all")) &&
-    ["off", "fill", "crash", "loud", "soft", "random"].includes(String(normalized.cueMode)) &&
+    ["off", "fill", "crash", "loud", "soft", "dropout", "accent-shift", "custom", "random"].includes(String(normalized.cueMode)) &&
+    ["kick", "snare", "hihat", "tom", "crash"].includes(String(normalized.cueVoice)) &&
+    cueSequenceValid && Boolean(normalizeTrainerCueSequence(normalized.cueSequence)) &&
     Number.isInteger(normalized.cueBeat) && Number(normalized.cueBeat) >= 1 && Number(normalized.cueBeat) <= 16 &&
     [1, 2, 4].includes(Number(normalized.cueEveryBars)) && [1, 2].includes(Number(normalized.cueLeadBeats)) && typeof normalized.cueAdaptive === "boolean" &&
     Number.isFinite(normalized.trainerDrumLevel) && Number(normalized.trainerDrumLevel) >= 0 && Number(normalized.trainerDrumLevel) <= 100 &&
@@ -186,7 +194,10 @@ export const TRAINER_PRACTICE_PATHS = [
   { id: "backbeat", name: "Backbeat foundations", patternIds: ["quarter-pulse", "first-beat", "two-beat-rock", "straight-pop", "kick-pickup-intro"] },
   { id: "fills", name: "Fills: pulse to orchestration", patternIds: ["fill-quarter-note-snare", "fill-eighth-note-snare", "fill-beat-four-sixteenths", "fill-last-two-beats-sixteenths", "fill-linear-kick-snare-tom"] },
   { id: "odd-meter", name: "Odd meter: 5/4 to 9/8", patternIds: ["five-four-drive", "seven-eight-group", "five-four-two-three", "nine-eight-grouping"] },
-  { id: "dynamics", name: "Dynamics: accents and control", patternIds: ["two-bar-hat-dynamics", "disco-open-hat", "jazz-swing", "four-over-three-accent"] }
+  { id: "dynamics", name: "Dynamics: accents and control", patternIds: ["two-bar-hat-dynamics", "disco-open-hat", "jazz-swing", "four-over-three-accent"] },
+  { id: "ghost-notes", name: "Ghost notes: quiet taps and strong backbeats", patternIds: ["ghost-note-pocket", "rnb-sixteenth-pocket", "funk-linear-basics"] },
+  { id: "syncopation", name: "Syncopation: offbeat kicks and displaced accents", patternIds: ["rock-syncopation-step", "rock-syncopation-two", "syncopated-funk", "broken-beat"] },
+  { id: "independence", name: "Limb independence: separate parts, steady pulse", patternIds: ["two-beat-rock", "bossa-nova", "afrobeat-interlock", "funk-linear-basics"] }
 ] as const;
 
 function formatBeat(beat: number) {

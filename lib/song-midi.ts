@@ -10,7 +10,7 @@ export const GM_DRUM_NOTES: Partial<Record<number, SongInstrument>> = {
   53: "ride", 54: "tambourine", 55: "crash", 56: "cowbell", 57: "crash", 59: "ride", 82: "shaker",
 };
 export const MIDI_VOICES: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine"];
-export const DEFAULT_GM_NOTE: Record<SongInstrument, number> = { kick: 36, snare: 38, hihat: 42, openhat: 46, ride: 51, rimshot: 37, tom: 50, crash: 49, cowbell: 56, shaker: 82, tambourine: 54, custom1: 60, custom2: 61, custom3: 62, custom4: 63 };
+export const DEFAULT_GM_NOTE: Record<SongInstrument, number> = { kick: 36, snare: 38, hihat: 42, openhat: 46, ride: 51, rimshot: 37, tom: 50, crash: 49, cowbell: 56, shaker: 82, tambourine: 54, custom1: 60, custom2: 61, custom3: 62, custom4: 63, custom5: 64, custom6: 65, custom7: 66, custom8: 67 };
 export type MidiNoteEvent = { tick: number; note: number; velocity: number };
 export type MidiTrack = { name: string; notes: MidiNoteEvent[]; endTick: number; truncatedNotes?: number };
 export type ParsedDrumMidi = { division: number; bpm: number; meter: string; sourceBpm?: number; tempoClamped?: boolean; tracks: MidiTrack[] };

@@ -67,7 +67,7 @@ export function LessonCatalogue({ initialLessonId }: { initialLessonId?: string 
         const guide = lessonGuides[lesson.id];
         const target = lessonPracticeTargets[lesson.id];
         return <article id={`lesson-${lesson.id}`} className={`lesson level-${lesson.level}${expanded ? " lesson-expanded" : ""}`} key={lesson.id}>
-          <span className="lesson-order" aria-label={`Lesson ${lesson.order}`}>{String(lesson.order).padStart(2, "0")}</span>
+          <span className="lesson-order" aria-hidden="true">{String(lesson.order).padStart(2, "0")}</span>
           <div className="lesson-copy">
             <span className="level-mark">{lesson.level} · {lesson.duration} min</span>
             <h3>{t(`lesson.${lesson.id}.title`)}</h3>

@@ -1,17 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createDrumAudio, type DrumAudio, type TrainerClickSound } from "@/lib/audio";
 import { patterns } from "@/lib/curriculum";
 import { allSongs, readSongLibrary, recordSongScore, songPartPattern, writeSongLibrary, type Setlist } from "@/lib/song-library";
 import { stepDurationMs } from "@/lib/scoring";
 import { classifyDrumAudio, classifyDrumFeatures, createDrumOnsetState, drumSpectrumFeatures, estimateAudioVelocity, isFreshDrumOnset, rankDrumFeatureMatches } from "@/lib/trainer-audio";
-import { trainerStorageKey, expectedRoundHits, getTrainerDeviceProfile, midiNoteFromMessage, midiVelocityFromMessage, parseTrainerState, roundDurationMs, scoreTrainerHit, summarizeTrainerRound, type TrainerDeviceProfile, type TrainerFeel, type TrainerLimbFocus, type TrainerMode, type TrainerRating, type TrainerRound, type TrainerSource } from "@/lib/trainer";
+import { TRAINER_PREFERENCES_KEY, trainerStorageKey, expectedRoundHits, getTrainerDeviceProfile, midiNoteFromMessage, midiVelocityFromMessage, parseTrainerState, roundDurationMs, scoreTrainerHit, summarizeTrainerRound, type TrainerDeviceProfile, type TrainerFeel, type TrainerLimbFocus, type TrainerMode, type TrainerRating, type TrainerRound, type TrainerSource } from "@/lib/trainer";
 import { CUSTOM_GROOVES_EVENT, readCustomGrooves, writeCustomGrooves } from "@/lib/custom-grooves";
 import { canUseFillPractice, compatibleFillPatterns, createGrooveFillTransition } from "@/lib/fill-practice";
 import { createTrainerLoopPattern, createTrainerSetupTransfer, parseSavedTrainerRoutine, parseTrainerSetupTransfer, TRAINER_PRACTICE_PATHS, type TrainerRoutine, type TrainerRoutineStep, type TrainerSetupTransfer } from "@/lib/trainer-enhancements";
-import { articulationFeedback, comparableRounds, guideRoundHits, learningStage, musicalPhrase, nextCoaching, transitionFeedback, type LearningMode } from '@/lib/trainer-coaching';
+import { articulationFeedback, comparableRounds, focusedDrillProgression, guideRoundHits, learningStage, musicalPhrase, nextCoaching, transitionFeedback, type LearningMode } from '@/lib/trainer-coaching';
 import { TrainerRehearsal } from './TrainerRehearsal';
 import { TrainerPeerChallenge } from './TrainerPeerChallenge';
 import type { TrainerChallenge } from '@/lib/trainer-challenge';
@@ -23,20 +23,27 @@ import { AdaptivePracticeFeedback } from './AdaptivePracticeFeedback';
 import { TrainerTakeLibrary } from './TrainerTakeLibrary';
 import type { TrainerClip, TrainerDynamicsMarker } from '@/lib/trainer-take-library';
 import { TrainerRoutineShelf } from './TrainerRoutineShelf';
+import { TrainerSongFormBuilder } from './TrainerSongFormBuilder';
+import { TrainerCueSequenceEditor } from './TrainerCueSequenceEditor';
 import { TrainerRecordingReview } from './TrainerRecordingReview';
 import { TrainerFillBrowser } from './TrainerFillBrowser';
 import { TrainerMidiSetup } from './TrainerMidiSetup';
 import { TrainerLearningTools } from './TrainerLearningTools';
 import { TrainerTapTempo } from './TrainerTapTempo';
 import { TrainerDynamicsBreakdown, TrainerTimingBreakdown } from './TrainerTimingBreakdown';
+import { TrainerBarBreakdown } from './TrainerBarBreakdown';
+import { TrainerRoundExplanation } from './TrainerRoundExplanation';
 import { controlledGrooveVariations, getWeakSpotTempoPlan, timingZoneForHit } from '@/lib/trainer-next';
 import { applyDynamicsTargets, summarizeDynamics, type TrainerDynamicsExercise } from '@/lib/trainer-dynamics';
 import { shouldPlayTrainerClick, type TrainerClickMode } from '@/lib/trainer-metronome';
-import { createTrainerCuePattern, type TrainerCueDensity, type TrainerCueLead, type TrainerCueMode } from '@/lib/trainer-cues';
+import { createTrainerCuePattern, type TrainerCueDensity, type TrainerCueLead, type TrainerCueMode, type TrainerCueResult } from '@/lib/trainer-cues';
+import { normalizeTrainerCueSequence, type TrainerCueSequence } from '@/lib/trainer-cue-sequences';
 import { summarizeTrainerProgress, type TrainerProgressPoint } from '@/lib/trainer-progress';
 import { getTrainerGoalPatterns, type TrainerSessionFocus } from '@/lib/trainer-goals';
 import { summarizeTrainerLiveTiming } from '@/lib/trainer-live-coaching';
 import { summarizeTrainerPlacement } from '@/lib/trainer-placement';
+import { scheduleTrainerBackingWindow, type TrainerBackingStyle } from '@/lib/trainer-backing';
+import { summarizeTrainerTransitions } from '@/lib/trainer-bar-analysis';
 import type { Groove, Instrument, MidiArticulation, PatternHit, PracticePattern, RatedHit } from "@/lib/types";
 import { compatibleSpeechVoice, localizedSpokenCount } from "@/lib/locale-core";
 import { localizedPattern } from "@/lib/teaching-pattern-display";
@@ -59,7 +66,6 @@ const keys: Record<string, Instrument> = { Space: "kick", KeyF: "snare", KeyJ: "
 const REPETITIONS = [4, 8, 10, 16];
 const CALIBRATION_BEATS = 8;
 const CUSTOM_TRAINER_ROUTINE_KEY = "drum-hero:trainer-routine:v1";
-const TRAINER_PREFERENCES_KEY = "drum-hero:trainer-preferences:v1";
 const TRAINER_QUICK_START_KEY = "drum-hero:trainer-quick-start-dismissed:v1";
 const TRAINER_STYLE_PRESETS = [
   { id: "rock", label: "Rock", patternId: "first-beat", feel: "straight", clickMode: "backbeat" },
@@ -71,7 +77,7 @@ const TRAINER_STYLE_PRESETS = [
   { id: "punk", label: "Punk drive", patternId: "punk-drive", feel: "straight", clickMode: "backbeat" }
 ] as const;
 
-export function DrumTrainer({ initialPatternId }: { initialPatternId?: string }) {
+export function DrumTrainer({ initialPatternId, openDeviceSetup = false, initialAdaptation = "standard" }: { initialPatternId?: string; openDeviceSetup?: boolean; initialAdaptation?: "standard" | "seated" | "single-voice" }) {
   const { formatDate, locale, t } = useLocalization();
   const [libraryPatterns, setLibraryPatterns] = useState<PracticePattern[]>([]);
   const [customGrooves, setCustomGrooves] = useState<Groove[]>([]);
@@ -100,6 +106,8 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const [dynamicsPractice, setDynamicsPractice] = useState(false);
   const [dynamicsExercise, setDynamicsExercise] = useState<TrainerDynamicsExercise>("contrast");
   const [cueMode, setCueMode] = useState<TrainerCueMode>("off");
+  const [cueVoice, setCueVoice] = useState<Instrument>("hihat");
+  const [cueSequence, setCueSequence] = useState<TrainerCueSequence>({ name: "My cue sequence", cues: [{ beat: 1, action: "crash" }] });
   const [cueBeat, setCueBeat] = useState(1);
   const [cueEveryBars, setCueEveryBars] = useState<TrainerCueDensity>(1);
   const [cueLeadBeats, setCueLeadBeats] = useState<TrainerCueLead>(1);
@@ -109,6 +117,8 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const [trainerDrumLevel, setTrainerDrumLevel] = useState(100);
   const [trainerClickLevel, setTrainerClickLevel] = useState(100);
   const [clickSound, setClickSound] = useState<TrainerClickSound>("hat");
+  const [playAlongEnabled, setPlayAlongEnabled] = useState(false);
+  const [backingStyle, setBackingStyle] = useState<TrainerBackingStyle>("rock");
   const [trainerPreferencesLoaded, setTrainerPreferencesLoaded] = useState(false);
   const [guideHeadphonesConfirmed, setGuideHeadphonesConfirmed] = useState(false);
   const [preflightRequested, setPreflightRequested] = useState(false);
@@ -121,13 +131,14 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const [uncertainHits, setUncertainHits] = useState(0);
   const guideRef = useRef<Expected[]>([]);
   const guidePlayedRef = useRef(new Set<number>());
+  const activeCueResultRef = useRef<TrainerCueResult | null>(null);
   const scheduledClickRef = useRef(new Set<string>());
   const audioOnsetRef = useRef(createDrumOnsetState());
   const previewTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [feel, setFeel] = useState<TrainerFeel>("straight");
   const [clickMode, setClickMode] = useState<TrainerClickMode>("all");
   const [limbFocus, setLimbFocus] = useState<TrainerLimbFocus>("all");
-  const [adaptiveMode, setAdaptiveMode] = useState<"standard" | "seated" | "single-voice">("standard");
+  const [adaptiveMode, setAdaptiveMode] = useState<"standard" | "seated" | "single-voice">(initialAdaptation);
   const [adaptiveVoice, setAdaptiveVoice] = useState<Instrument>("snare");
   const [handPattern, setHandPattern] = useState<HandPattern>("alternating");
   const [leadHand, setLeadHand] = useState<"R" | "L">("R");
@@ -170,13 +181,15 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const fillCueStartStep = fillPractice && !loopEnabled && !phraseBars
     ? fillAfterBars * selectedPattern.beats * selectedPattern.subdivision / 4 / getPatternBarCount(selectedPattern)
     : undefined;
-  const cueResult = useMemo(() => createTrainerCuePattern(dynamicsPattern, cueMode, cueBeat, fillCueStartStep, cueSeed, cueEveryBars, cueLeadBeats), [cueBeat, cueEveryBars, cueLeadBeats, cueMode, cueSeed, dynamicsPattern, fillCueStartStep]);
+  const [repetitions, setRepetitions] = useState(10);
+  const [activeCueResult, setActiveCueResult] = useState<TrainerCueResult | null>(null);
+  const cueResult = useMemo(() => createTrainerCuePattern(dynamicsPattern, cueMode, cueBeat, fillCueStartStep, cueSeed, cueEveryBars, cueLeadBeats, repetitions, cueVoice, cueSequence.cues), [cueBeat, cueEveryBars, cueLeadBeats, cueMode, cueSeed, cueSequence.cues, cueVoice, dynamicsPattern, fillCueStartStep, repetitions]);
   const pattern = cueResult.pattern;
-  const hasDynamicsTargets = dynamicsPractice || cueResult.hasDynamicsTargets;
+  const hasDynamicsTargets = dynamicsPractice || Boolean(activeCueResult?.hasDynamicsTargets ?? cueResult.hasDynamicsTargets) || pattern.hits.some(hit => hit.velocityTarget !== undefined);
   const selectedBeatsPerBar = Math.max(1, Math.floor(selectedPattern.beats / getPatternBarCount(selectedPattern)));
   const showStickingCues = pattern.hits.some((hit) => hit.instrument !== "kick");
   const handCues = useMemo(() => getStickingCues(pattern.hits, handPattern, leadHand), [handPattern, leadHand, pattern.hits]);
-  const availableVoices = [...new Set(pattern.hits.map((hit) => hit.instrument))];
+  const availableVoices: Instrument[] = [...new Set([...pattern.hits.map((hit) => hit.instrument), ...(cueMode === "random" ? ["crash" as const] : []), ...(cueMode === "dropout" ? [cueVoice] : [])])];
   const [requestedBpm, setRequestedBpm] = useState(pattern.defaultBpm);
   const bpm = fillPractice && selectedFill
     ? Math.max(Math.max(selectedPattern.tempoRange[0], selectedFill.tempoRange[0]), Math.min(Math.min(selectedPattern.tempoRange[1], selectedFill.tempoRange[1]), requestedBpm))
@@ -216,7 +229,6 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const repetitionRef = useRef(0);
   const [step, setStep] = useState(-1);
   const [countIn, setCountIn] = useState(4);
-  const [repetitions, setRepetitions] = useState(10);
   const [countInBeats, setCountInBeats] = useState(4);
   const [tempoBuild, setTempoBuild] = useState(false);
   const [tempoLadder, setTempoLadder] = useState(false);
@@ -226,6 +238,10 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const [tempoLadderMessage, setTempoLadderMessage] = useState("");
   const [timedRemaining, setTimedRemaining] = useState(0);
   const [rehearsalSeconds, setRehearsalSeconds] = useState<number | null>(null);
+  const coachingDrillPendingRef = useRef(false);
+  const coachingDrillActiveRef = useRef(false);
+  const coachingDrillStartedRef = useRef(false);
+  const coachingSourceRoundIdRef = useRef<string | null>(null);
   const [challenge, setChallenge] = useState<TrainerChallenge | null>(null);
   const timedRoundRef = useRef<number | null>(null);
   const [practicePlan, setPracticePlan] = useState<PracticePlan | null>(null);
@@ -295,6 +311,10 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const noiseRmsRef = useRef(0);
   const noiseMeasurementRef = useRef<{ until: number; values: number[] } | null>(null);
   const expectedRef = useRef<Expected[]>([]), audioRef = useRef<DrumAudio | null>(null), kitRef = useRef<DrumKitCanvasHandle>(null);
+  const backingContextRef = useRef<AudioContext | null>(null);
+  const scheduledBackingRef = useRef<Set<number>>(new Set());
+  const activeBackingNodesRef = useRef<Set<AudioScheduledSourceNode>>(new Set());
+  const silenceBacking = useCallback(() => { activeBackingNodesRef.current.forEach(node => { try { node.stop(); } catch { /* already stopped */ } }); activeBackingNodesRef.current.clear(); }, []);
   const activeRoundPatternRef = useRef<PracticePattern | null>(null);
   const startRequestRef = useRef(0);
   const clippingStreakRef = useRef(0);
@@ -306,7 +326,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const analyserRef = useRef<AnalyserNode | null>(null), frameRef = useRef<number | null>(null), sourceRef = useRef(source);
   const recorderRef = useRef<MediaRecorder | null>(null), recordingStreamRef = useRef<MediaStream | null>(null);
   const ownsRecordingStreamRef = useRef(false), discardedRecordersRef = useRef(new WeakSet<MediaRecorder>());
-  const { progress, profileId, recordTrainerRound, setSound } = useProgress();
+  const { progress, hydrated: progressHydrated, profileId, recordTrainerRound, setSound, setPreferredBpm } = useProgress();
   const duration = roundDurationMs(pattern, bpm);
   const activeProfile = getTrainerDeviceProfile(saved, profileKey);
   const audioDynamicsVoice = source === "audio-timing" ? audioVoice : calibrationVoice;
@@ -320,16 +340,19 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   };
 
   useEffect(() => { savedRef.current = saved; }, [saved]);
+  useEffect(() => { if (trainerPreferencesLoaded && progressHydrated) setPreferredBpm(bpm); }, [bpm, progressHydrated, setPreferredBpm, trainerPreferencesLoaded]);
   useEffect(() => { repetitionsRef.current = repetitions; }, [repetitions]);
   useEffect(() => { countInBeatsRef.current = countInBeats; }, [countInBeats]);
   useEffect(() => { profileKeyRef.current = profileKey; latencyRef.current = activeProfile.latencyMs; }, [activeProfile.latencyMs, profileKey]);
   useEffect(() => {
+    if (!progressHydrated) return;
     const timer = window.setTimeout(() => {
       try {
         const value: unknown = JSON.parse(localStorage.getItem(TRAINER_PREFERENCES_KEY) ?? "null");
         if (value && typeof value === "object") {
           const prefs = value as Record<string, unknown>;
           if (Number.isFinite(prefs.bpm) && Number(prefs.bpm) >= 40 && Number(prefs.bpm) <= 220) setRequestedBpm(Number(prefs.bpm));
+          else setRequestedBpm(progress.settings.preferredBpm);
           if (!initialPatternId && typeof prefs.patternId === "string" && prefs.patternId.length <= 200) setPatternId(prefs.patternId);
           if (typeof prefs.variationId === "string" && prefs.variationId.length <= 80) setVariationId(prefs.variationId);
           if (prefs.trainerMode === "self" || prefs.trainerMode === "scored") setTrainerMode(prefs.trainerMode);
@@ -338,7 +361,10 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
           if (["all", "backbeat", "subdivisions", "sparse-bars", "progressive-silence"].includes(String(prefs.clickMode))) setClickMode(prefs.clickMode as TrainerClickMode);
           if (typeof prefs.dynamicsPractice === "boolean") setDynamicsPractice(prefs.dynamicsPractice);
           if (["contrast", "crescendo", "evenness"].includes(String(prefs.dynamicsExercise))) setDynamicsExercise(prefs.dynamicsExercise as TrainerDynamicsExercise);
-          if (["off", "fill", "crash", "loud", "soft", "random"].includes(String(prefs.cueMode))) setCueMode(prefs.cueMode as TrainerCueMode);
+          if (["off", "fill", "crash", "loud", "soft", "dropout", "accent-shift", "custom", "random"].includes(String(prefs.cueMode))) setCueMode(prefs.cueMode as TrainerCueMode);
+          if (["kick", "snare", "hihat", "tom", "crash"].includes(String(prefs.cueVoice))) setCueVoice(prefs.cueVoice as Instrument);
+          const savedCueSequence = normalizeTrainerCueSequence(prefs.cueSequence);
+          if (savedCueSequence) setCueSequence(savedCueSequence);
           if (Number.isInteger(prefs.cueBeat) && Number(prefs.cueBeat) >= 1 && Number(prefs.cueBeat) <= 16) setCueBeat(Number(prefs.cueBeat));
           if ([1, 2, 4].includes(Number(prefs.cueEveryBars))) setCueEveryBars(Number(prefs.cueEveryBars) as TrainerCueDensity);
           if ([1, 2].includes(Number(prefs.cueLeadBeats))) setCueLeadBeats(Number(prefs.cueLeadBeats) as TrainerCueLead);
@@ -370,12 +396,12 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       setTrainerPreferencesLoaded(true);
     }, 0);
     return () => clearTimeout(timer);
-  }, [initialPatternId]);
+  }, [initialPatternId, progress.settings.preferredBpm, progressHydrated]);
   useEffect(() => {
     if (!trainerPreferencesLoaded) return;
-    try { localStorage.setItem(TRAINER_PREFERENCES_KEY, JSON.stringify({ bpm: requestedBpm, patternId, variationId, trainerMode, source, feel, swingRatio, pocketMs, clickMode, repetitions, countInBeats, limbFocus, loopEnabled, loopUnit, loopStartBeat, loopEndBeat, loopStartBar, loopEndBar, phraseBars, learningMode, advancedOptionsOpen, guideHeadphonesConfirmed, profileKey, dynamicsPractice, dynamicsExercise, cueMode, cueBeat, cueEveryBars, cueLeadBeats, cueAdaptive, planWarmupCooldown, planAutoAdvance, planRestSeconds, trainerDrumLevel, trainerClickLevel, clickSound })); }
+    try { localStorage.setItem(TRAINER_PREFERENCES_KEY, JSON.stringify({ bpm: requestedBpm, patternId, variationId, trainerMode, source, feel, swingRatio, pocketMs, clickMode, repetitions, countInBeats, limbFocus, loopEnabled, loopUnit, loopStartBeat, loopEndBeat, loopStartBar, loopEndBar, phraseBars, learningMode, advancedOptionsOpen, guideHeadphonesConfirmed, profileKey, dynamicsPractice, dynamicsExercise, cueMode, cueVoice, cueBeat, cueEveryBars, cueLeadBeats, cueAdaptive, planWarmupCooldown, planAutoAdvance, planRestSeconds, trainerDrumLevel, trainerClickLevel, clickSound })); }
     catch { /* Preferences remain available for this visit when storage is full. */ }
-  }, [advancedOptionsOpen, clickMode, clickSound, countInBeats, cueAdaptive, cueBeat, cueEveryBars, cueLeadBeats, cueMode, dynamicsExercise, dynamicsPractice, feel, guideHeadphonesConfirmed, learningMode, limbFocus, loopEnabled, loopEndBar, loopEndBeat, loopStartBar, loopStartBeat, loopUnit, patternId, phraseBars, planAutoAdvance, planRestSeconds, planWarmupCooldown, pocketMs, profileKey, repetitions, requestedBpm, source, swingRatio, trainerClickLevel, trainerDrumLevel, trainerMode, trainerPreferencesLoaded, variationId]);
+  }, [advancedOptionsOpen, clickMode, clickSound, countInBeats, cueAdaptive, cueBeat, cueEveryBars, cueLeadBeats, cueMode, cueSequence, cueVoice, dynamicsExercise, dynamicsPractice, feel, guideHeadphonesConfirmed, learningMode, limbFocus, loopEnabled, loopEndBar, loopEndBeat, loopStartBar, loopStartBeat, loopUnit, patternId, phraseBars, planAutoAdvance, planRestSeconds, planWarmupCooldown, pocketMs, profileKey, repetitions, requestedBpm, source, swingRatio, trainerClickLevel, trainerDrumLevel, trainerMode, trainerPreferencesLoaded, variationId]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try { setQuickStartDismissed(localStorage.getItem(TRAINER_QUICK_START_KEY) === "1"); }
@@ -460,17 +486,30 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     setRecordingActive(false);
   }, []);
   const reset = useCallback(() => {
+    coachingDrillPendingRef.current = false;
+    if (coachingDrillActiveRef.current) {
+      coachingDrillActiveRef.current = false;
+      coachingDrillStartedRef.current = false;
+      coachingSourceRoundIdRef.current = null;
+      timedRoundRef.current = null;
+      setRehearsalSeconds(null);
+      setTimedRemaining(0);
+    }
     startRequestRef.current += 1;
     previewTimersRef.current.forEach(clearTimeout); previewTimersRef.current = [];
     guideRef.current = []; guidePlayedRef.current.clear();
     scheduledClickRef.current.clear();
+    scheduledBackingRef.current.clear();
+    silenceBacking();
     audioRef.current?.silence();
     if (recorderRef.current && recorderRef.current.state !== "inactive") stopPerformanceRecording(true);
     setPhase("idle"); setAutoAdvanceCountdown(null); setRepetition(0); repetitionRef.current = 0; setStep(-1); setCountIn(countInBeatsRef.current);
     ratingsRef.current = []; setRatings([]); hitsRef.current = []; setHits([]); setLastHit(null); setLastVelocity(null); setRound(null);
     expectedRef.current = []; lastStepRef.current = -1; lastCountBeatRef.current = -1;
     activeRoundPatternRef.current = null;
-  }, [stopPerformanceRecording]);
+    activeCueResultRef.current = null;
+    setActiveCueResult(null);
+  }, [silenceBacking, stopPerformanceRecording]);
   useEffect(() => {
     const stopForProfileChange = () => { reset(); stopAudioInput(); setPracticePlan(null); setActiveSetlistId(""); };
     window.addEventListener("drum-hero:learner-profile-change", stopForProfileChange);
@@ -487,7 +526,8 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       if (placementPattern) { result.patternId = placementPattern.id; result.patternName = placementPattern.name; }
     }
     if (timedRoundRef.current) result.durationSeconds = timedRoundRef.current;
-    if (hasFocusedTimingDrill && timingDrillFocus) result.focusedDrill = { instrument: timingDrillFocus.instrument, beat: timingDrillFocus.beat };
+    if (trainerMode === "scored" && playAlongEnabled) result.backingChallenge = backingStyle;
+    if (hasFocusedTimingDrill && timingDrillFocus) result.focusedDrill = { instrument: timingDrillFocus.instrument, beat: timingDrillFocus.beat, sourceRoundId: coachingSourceRoundIdRef.current ?? undefined, sourcePatternId: timingDrillFocus.sourcePatternId };
     result.feel = feel; result.limbFocus = limbFocus; result.adaptation = adaptiveMode; if (sourceRef.current.startsWith("audio-")) { result.uncertainDetections = uncertainHits; result.inputClipped = audioClipping; } result.inputProfile = profileKeyRef.current; if (sourceRef.current === "audio-timing") result.targetVoice = audioVoiceRef.current; result.swingRatio = swingRatio; result.pocketMs = pocketMs; if (learningMode !== 'normal') result.learningMode = learningMode;
     if (activeVariationId !== "base") result.variationId = activeVariationId;
     if (tempoLadder) {
@@ -522,11 +562,19 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     else setAutoAdvanceCountdown(null);
     actualRecordingMarkersRef.current = getActualHitMarkerTimes(hitsRef.current, countInBeatsRef.current, bpm);
     stopPerformanceRecording();
+    if (coachingDrillActiveRef.current) {
+      coachingDrillActiveRef.current = false;
+      coachingDrillStartedRef.current = false;
+      coachingSourceRoundIdRef.current = null;
+      timedRoundRef.current = null;
+      setRehearsalSeconds(null);
+      setTimedRemaining(0);
+    }
     setHits([...hitsRef.current]); setRound(result); setPhase("complete"); setRepetition(repetitionsRef.current);
     setSaved((state) => ({ ...state, rounds: [result, ...state.rounds].slice(0, 50) }));
     recordTrainerRound(result.playedAt.slice(0, 10));
     if (roundPattern.id.startsWith("song:") && adaptiveMode === "standard") { const [, songId, sectionId, partId] = roundPattern.id.split(":"); const score = result.result?.score ?? Math.round(result.ratings.reduce((sum, rating) => sum + (rating === "clean" ? 100 : rating === "needsWork" ? 50 : 0), 0) / Math.max(1, result.ratings.length)); writeSongLibrary(recordSongScore(readSongLibrary(), songId, sectionId, score, { partId, bpm, engine: "trainer", completePart: sourceRef.current !== "audio-timing" || new Set(roundPattern.hits.map((hit) => hit.instrument)).size === 1, inputMode: trainerMode === "self" ? "self" : sourceRef.current === "midi" ? "midi" : sourceRef.current.startsWith("audio") ? "audio" : sourceRef.current === "touch" ? "touch" : "keyboard" })); }
-  }, [activeVariationId, adaptiveMode, audioClipping, uncertainHits, availablePatterns, bpm, cueAdaptive, cueEveryBars, cueMode, feel, swingRatio, pocketMs, learningMode, hasFocusedTimingDrill, limbFocus, pattern, planAutoAdvance, planRestSeconds, practicePlan, pathAccuracyTarget, pathTimingTarget, recordTrainerRound, setBpm, stopPerformanceRecording, tempoBuild, tempoLadder, tempoLadderFailure, tempoLadderStep, tempoLadderTarget, timingDrillFocus, trainerMode]);
+  }, [activeVariationId, adaptiveMode, audioClipping, uncertainHits, availablePatterns, backingStyle, playAlongEnabled, bpm, cueAdaptive, cueEveryBars, cueMode, feel, swingRatio, pocketMs, learningMode, hasFocusedTimingDrill, limbFocus, pattern, planAutoAdvance, planRestSeconds, practicePlan, pathAccuracyTarget, pathTimingTarget, recordTrainerRound, setBpm, stopPerformanceRecording, tempoBuild, tempoLadder, tempoLadderFailure, tempoLadderStep, tempoLadderTarget, timingDrillFocus, trainerMode]);
   const tick = useCallback((now = performance.now()) => {
     if (phaseRef.current !== "count-in" && phaseRef.current !== "running" && phaseRef.current !== "calibrating") return;
     const beatMs = 60000 / bpm;
@@ -588,9 +636,12 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   }, [bpm, duration, finish, locale, pattern, spokenCount, trainerMode, updateProfile]);
   useEffect(() => { if (phase !== "count-in" && phase !== "running" && phase !== "calibrating") return; const id = window.setInterval(() => tick(), 20); return () => clearInterval(id); }, [phase, tick]);
   const scheduleAudioWindow = useCallback((now = performance.now()) => {
-    if ((!progress.settings.sound && phaseRef.current !== "calibrating") || !audioRef.current || !["count-in", "running", "calibrating"].includes(phaseRef.current)) return;
-    const audio = audioRef.current;
+    if (!["count-in", "running", "calibrating"].includes(phaseRef.current)) return;
     const end = now + 120;
+    const backingPattern = activeRoundPatternRef.current ?? pattern;
+    if (trainerMode === "scored" && playAlongEnabled && backingContextRef.current?.state === "running") scheduleTrainerBackingWindow(backingContextRef.current, backingPattern, backingStyle, bpm, startAtRef.current, now, 120, scheduledBackingRef.current, activeBackingNodesRef.current);
+    if ((!progress.settings.sound && phaseRef.current !== "calibrating") || !audioRef.current) return;
+    const audio = audioRef.current;
     const beatMs = 60000 / bpm;
     const scheduleClickOnce = (key: string, at: number, accent: boolean) => {
       if (at < now - 80 || at > end || scheduledClickRef.current.has(key)) return;
@@ -624,7 +675,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
         scheduleClickOnce(`grid:${repetitionIndex}:${nextStep}`, at, nextStep === 0);
       }
     }
-  }, [bpm, clickMode, duration, learningMode, pattern, progress.settings.sound, trainerMode]);
+  }, [backingStyle, bpm, clickMode, duration, learningMode, pattern, playAlongEnabled, progress.settings.sound, trainerMode]);
   useEffect(() => {
     if (phase !== "count-in" && phase !== "running" && phase !== "calibrating") return;
     const id = window.setInterval(() => scheduleAudioWindow(), 20);
@@ -655,6 +706,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
           if (clip.size > 0) {
             const clipPattern = activeRoundPatternRef.current ?? pattern;
             const clipDurationMs = roundDurationMs(clipPattern, bpm);
+            const cueSequence = activeCueResultRef.current?.repetitionPatterns;
             setRecordedClip({
               patternId: clipPattern.id,
               patternName: clipPattern.name,
@@ -664,9 +716,9 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
               url: URL.createObjectURL(clip),
               bookmarksMs: [],
               settings: { feel, swingRatio, pocketMs, learningMode, source: trainerMode === "self" ? "self" : source, inputProfile: profileKey, targetVoice: source === "audio-timing" ? audioVoice : undefined, beatsPerBar: clipPattern.beats / getPatternBarCount(clipPattern) },
-              expectedMarkersMs: getExpectedHitMarkerTimes(clipPattern, bpm, rehearsalSeconds ? Math.ceil(rehearsalSeconds * 1000 / clipDurationMs) : repetitions, countInBeats, feel, source === "audio-timing" ? audioVoice : undefined, { swingRatio, pocketMs, learningMode, includeFinalReturn: !rehearsalSeconds && (fillPractice || phraseBars > 0) && !loopEnabled }).filter(ms => !rehearsalSeconds || ms < (rehearsalSeconds + countInBeats * 60 / bpm) * 1000),
+              expectedMarkersMs: getExpectedHitMarkerTimes(clipPattern, bpm, rehearsalSeconds ? Math.ceil(rehearsalSeconds * 1000 / clipDurationMs) : repetitions, countInBeats, feel, source === "audio-timing" ? audioVoice : undefined, { swingRatio, pocketMs, learningMode, includeFinalReturn: !rehearsalSeconds && (fillPractice || phraseBars > 0) && !loopEnabled }, cueSequence).filter(ms => !rehearsalSeconds || ms < (rehearsalSeconds + countInBeats * 60 / bpm) * 1000),
               actualMarkersMs: actualRecordingMarkersRef.current,
-              expectedDynamics: getExpectedDynamicsMarkers(clipPattern, bpm, rehearsalSeconds ? Math.ceil(rehearsalSeconds * 1000 / clipDurationMs) : repetitions, countInBeats, feel, { swingRatio, pocketMs }).filter(marker => !rehearsalSeconds || marker.timeMs < (rehearsalSeconds + countInBeats * 60 / bpm) * 1000),
+              expectedDynamics: getExpectedDynamicsMarkers(clipPattern, bpm, rehearsalSeconds ? Math.ceil(rehearsalSeconds * 1000 / clipDurationMs) : repetitions, countInBeats, feel, { swingRatio, pocketMs }, cueSequence).filter(marker => !rehearsalSeconds || marker.timeMs < (rehearsalSeconds + countInBeats * 60 / bpm) * 1000),
               actualDynamics: getActualDynamicsMarkers(hitsRef.current, countInBeats, bpm),
             });
             if (isCurrentRecorder) setRecordingMessage("Recording ready. Play it back below to review your performance.");
@@ -681,14 +733,27 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       if (request === startRequestRef.current) setRecordingMessage("Microphone access was denied or recording could not start; the practice round will still run.");
     }
   };
-  const start = async () => {
+  const start = async (skipReset = false) => {
     const roundCueSeed = cueMode === "random" ? Math.floor(Math.random() * 0x7ffffffe) + 1 : cueSeed;
-    const roundPattern = cueMode === "random" ? createTrainerCuePattern(dynamicsPattern, "random", cueBeat, fillCueStartStep, roundCueSeed, cueEveryBars, cueLeadBeats).pattern : pattern;
+    const plannedDuration = roundDurationMs(dynamicsPattern, bpm);
+    const plannedRepetitions = rehearsalSeconds ? Math.ceil(rehearsalSeconds * 1000 / plannedDuration) : repetitions;
+    const roundCueResult = cueMode === "random"
+      ? createTrainerCuePattern(dynamicsPattern, "random", cueBeat, fillCueStartStep, roundCueSeed, cueEveryBars, cueLeadBeats, plannedRepetitions, cueVoice, cueSequence.cues)
+      : cueResult;
+    const roundPattern = cueMode === "random" ? roundCueResult.pattern : pattern;
     if (learningMode === 'build-limbs' && (!roundPattern.hits.some(hit => hit.instrument === 'kick') || !roundPattern.hits.some(hit => hit.instrument !== 'kick'))) { setAudioMessage('Choose a pattern with kick and hand voices for the limb-building sequence.'); return; }
     if (learningMode === 'listen-copy-solo') setSound(true);
-    reset(); if (cueMode === "random") setCueSeed(roundCueSeed); activeRoundPatternRef.current = roundPattern;
+    if (!skipReset) reset(); if (cueMode === "random") setCueSeed(roundCueSeed); activeRoundPatternRef.current = roundPattern; activeCueResultRef.current = roundCueResult; setActiveCueResult(roundCueResult);
     const roundDuration = roundDurationMs(roundPattern, bpm);
+    scheduledBackingRef.current.clear();
+    let backingReady: Promise<void> | null = null;
+    if (trainerMode === "scored" && playAlongEnabled && typeof window !== "undefined" && window.AudioContext) {
+      if (!backingContextRef.current || backingContextRef.current.state === "closed") backingContextRef.current = new window.AudioContext();
+      backingReady = backingContextRef.current.resume().catch(() => undefined);
+    }
     const request = startRequestRef.current; if (!audioRef.current) audioRef.current = createTrainerAudio();
+    if (backingReady) await backingReady;
+    if (startRequestRef.current !== request) return;
     const audio = audioRef.current;
     if (!audio) setAudioMessage("Web Audio is unavailable; visual timing remains active.");
     else if (progress.settings.sound || learningMode === "listen-copy-solo") {
@@ -699,7 +764,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       setAudioMessage(complete ? "Recorded drum sounds and metronome are ready." : "Some recorded samples failed to load; unavailable drum voices will be silent.");
     } else setAudioMessage("Sound is muted; visual timing remains active.");
     if (startRequestRef.current !== request) return;
-    if (recordAudio) await beginPerformanceRecording(request);
+    if (recordAudio) { setPhase("loading"); await beginPerformanceRecording(request); }
     if (startRequestRef.current !== request) return;
     const playingSeconds = rehearsalSeconds;
     const runRepetitions = playingSeconds ? Math.ceil(playingSeconds * 1000 / roundDuration) : repetitions;
@@ -709,18 +774,29 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     actualRecordingMarkersRef.current = [];
     startAtRef.current = startAt;
     const hasReturn = (fillPractice || phraseBars > 0) && !loopEnabled && !playingSeconds;
-    const expected: Expected[] = expectedRoundHits(roundPattern, bpm, startAt, runRepetitions, feel, { swingRatio, pocketMs })
+    const cuePatterns = roundCueResult.repetitionPatterns;
+    const expectedTargets = cuePatterns
+      ? cuePatterns.slice(0, runRepetitions).flatMap((cuePattern, index) => expectedRoundHits(cuePattern, bpm, startAt + index * roundDuration, 1, feel, { swingRatio, pocketMs }).map(hit => ({ ...hit, repetition: index })))
+      : expectedRoundHits(roundPattern, bpm, startAt, runRepetitions, feel, { swingRatio, pocketMs });
+    const expected: Expected[] = expectedTargets
       .map((hit) => ({ ...hit, ...(focusedStepOffset ? { step: hit.step + focusedStepOffset } : {}), feelZone: timingZoneForHit(roundPattern, hit.step, hit.instrument) }))
       .filter((hit) => (!playingSeconds || hit.at < startAt + playingSeconds * 1000) && (source !== "audio-timing" || hit.instrument === audioVoice));
     if (hasReturn) {
       const landingAt = startAt + runRepetitions * roundDuration;
-      expected.push(...expectedRoundHits(roundPattern, bpm, landingAt, 1, feel, { swingRatio, pocketMs })
+      const lastPattern = cuePatterns?.[runRepetitions - 1] ?? roundPattern;
+      expected.push(...expectedRoundHits(lastPattern, bpm, landingAt, 1, feel, { swingRatio, pocketMs })
         .filter((hit) => hit.step === 0 && (source !== "audio-timing" || hit.instrument === audioVoice))
         .map((hit) => ({ ...hit, repetition: runRepetitions - 1, transition: "landing" as const })));
     }
     expectedRef.current = expected;
-    const guide = guideRoundHits(roundPattern, bpm, startAt, runRepetitions, feel, { swingRatio, pocketMs }).filter(hit => !playingSeconds || hit.at < startAt + playingSeconds * 1000);
-    if (hasReturn) guide.push(...guideRoundHits(roundPattern, bpm, startAt + runRepetitions * roundDuration, 1, feel, { swingRatio, pocketMs }).filter(hit => hit.step === 0).map(hit => ({ ...hit, repetition: runRepetitions - 1 })));
+    const guideTargets = cuePatterns
+      ? cuePatterns.slice(0, runRepetitions).flatMap((cuePattern, index) => guideRoundHits(cuePattern, bpm, startAt + index * roundDuration, 1, feel, { swingRatio, pocketMs }).map(hit => ({ ...hit, repetition: index })))
+      : guideRoundHits(roundPattern, bpm, startAt, runRepetitions, feel, { swingRatio, pocketMs });
+    const guide = guideTargets.filter(hit => !playingSeconds || hit.at < startAt + playingSeconds * 1000);
+    if (hasReturn) {
+      const lastPattern = cuePatterns?.[runRepetitions - 1] ?? roundPattern;
+      guide.push(...guideRoundHits(lastPattern, bpm, startAt + runRepetitions * roundDuration, 1, feel, { swingRatio, pocketMs }).filter(hit => hit.step === 0).map(hit => ({ ...hit, repetition: runRepetitions - 1 })));
+    }
     guideRef.current = guide;
     guidePlayedRef.current.clear(); scheduledClickRef.current.clear();
     expectedRef.current = expectedRef.current.filter(hit => {
@@ -731,6 +807,17 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     setCountIn(countInBeats);
     setPhase("count-in");
   };
+  const launchCoachingDrill = useEffectEvent(() => start(true));
+  useEffect(() => {
+    if (coachingDrillPendingRef.current && (phase === "idle" || phase === "complete")) {
+      coachingDrillPendingRef.current = false;
+      coachingDrillActiveRef.current = true;
+      coachingDrillStartedRef.current = false;
+      void launchCoachingDrill();
+      return;
+    }
+    if (coachingDrillActiveRef.current && ["loading", "count-in", "running", "paused"].includes(phase)) coachingDrillStartedRef.current = true;
+  }, [phase]);
   const rate = (rating: TrainerRating, at: number) => {
     if (phaseRef.current !== "rating") return;
     ratingsRef.current = [...ratingsRef.current, rating]; setRatings(ratingsRef.current);
@@ -744,8 +831,8 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     guideRef.current = guideRoundHits(pattern, nextBpm, startAtRef.current, repetitions, feel, { swingRatio, pocketMs });
     lastStepRef.current = -1; setStep(0); setPhase("running");
   };
-  const pause = () => { if (phaseRef.current !== "running" && phaseRef.current !== "count-in") return; setPausedFrom(phaseRef.current); pauseAtRef.current = performance.now(); guideRef.current.forEach((target, index) => { if (target.at > pauseAtRef.current) guidePlayedRef.current.delete(index); }); scheduledClickRef.current.clear(); audioRef.current?.silence(); if (recorderRef.current?.state === "recording") recorderRef.current.pause(); setPhase("paused"); };
-  const resume = () => { if (phaseRef.current !== "paused") return; const shift = performance.now() - pauseAtRef.current; startAtRef.current += shift; expectedRef.current.forEach((target) => { target.at += shift; }); guideRef.current.forEach(target => { target.at += shift; }); scheduledClickRef.current.clear(); if (recorderRef.current?.state === "paused") recorderRef.current.resume(); setPhase(pausedFrom); };
+  const pause = () => { if (phaseRef.current !== "running" && phaseRef.current !== "count-in") return; setPausedFrom(phaseRef.current); pauseAtRef.current = performance.now(); guideRef.current.forEach((target, index) => { if (target.at > pauseAtRef.current) guidePlayedRef.current.delete(index); }); scheduledClickRef.current.clear(); scheduledBackingRef.current.clear(); silenceBacking(); audioRef.current?.silence(); if (recorderRef.current?.state === "recording") recorderRef.current.pause(); setPhase("paused"); };
+  const resume = () => { if (phaseRef.current !== "paused") return; const shift = performance.now() - pauseAtRef.current; startAtRef.current += shift; expectedRef.current.forEach((target) => { target.at += shift; }); guideRef.current.forEach(target => { target.at += shift; }); scheduledClickRef.current.clear(); scheduledBackingRef.current.clear(); if (recorderRef.current?.state === "paused") recorderRef.current.resume(); setPhase(pausedFrom); };
   const startLatencyCalibration = async () => {
     if (phaseRef.current !== "idle" && phaseRef.current !== "complete") return;
     if (!audioRef.current) audioRef.current = createTrainerAudio();
@@ -983,7 +1070,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     setAudioDynamicsCalibrationHits(0);
     setDeviceMessage(`Play five ${kind === "ghost" ? "very soft ghost-note" : "strong accent"} taps on the ${voice}; leave a short gap between hits.`);
   };
-  useEffect(() => () => { startRequestRef.current += 1; previewTimersRef.current.forEach(clearTimeout); stopPerformanceRecording(true); stopAudioInput(); disconnectMidi(); audioRef.current?.close(); }, [stopAudioInput, stopPerformanceRecording, disconnectMidi]);
+  useEffect(() => () => { startRequestRef.current += 1; previewTimersRef.current.forEach(clearTimeout); stopPerformanceRecording(true); stopAudioInput(); disconnectMidi(); silenceBacking(); audioRef.current?.close(); void backingContextRef.current?.close(); }, [silenceBacking, stopAudioInput, stopPerformanceRecording, disconnectMidi]);
   useEffect(() => { window.render_game_to_text = () => { const nextTarget = expectedRef.current.find((target) => !target.matched); return JSON.stringify({ mode: phaseRef.current, pattern: pattern.name, bpm, input: trainerMode === "self" ? "self" : sourceRef.current, repetition: repetitionRef.current + 1, total: repetitions, step, countIn, ratings: ratingsRef.current.length, hits: hitsRef.current.length, lastHit, nextTargetInMs: nextTarget ? Math.round(nextTarget.at - performance.now()) : null }); };
     window.advanceTime = (ms) => { const shift = Math.max(0, ms); startAtRef.current -= shift; expectedRef.current.forEach((target) => { target.at -= shift; }); tick(performance.now()); };
     return () => { delete window.render_game_to_text; delete window.advanceTime; };
@@ -1031,6 +1118,15 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     setPathAccuracyTarget(customRoutineAccuracyTarget); setPathTimingTarget(customRoutineTimingTarget);
     setTimingDrillFocus(null); setActiveSetlistId(""); applyRoutineStep(steps[0]); reset();
   };
+  const addSongForm = (form: Groove | null) => {
+    if (!form) { setSetupMessage("Choose two compatible 4/4 grooves and a fill that fits both parts."); return; }
+    if (customGrooves.length >= 100) { setSetupMessage("The custom groove library is full. Remove a saved groove before adding a song form."); return; }
+    const next = [...customGrooves, form];
+    const saved = writeCustomGrooves(next);
+    setCustomGrooves(next);
+    setPatternId(form.id); setVariationId("base"); setBpm(form.defaultBpm); setFillPractice(false); setPhraseBars(0); setLoopEnabled(false); setTimingDrillFocus(null); setCueMode("off"); setPracticePlan(null); setActiveSetlistId(""); setRepetitions(4); reset();
+    setSetupMessage(saved ? `Added ${form.name} to the local Trainer groove library. Play the full ${form.meter} form and review each bar in the recap.` : `Built ${form.name} for this visit, but browser storage could not save it.`);
+  };
   const loadSetlist = (id: string) => {
     setTimingDrillFocus(null); setPracticePlan(null);
     setActiveSetlistId(id); setSetlistIndex(0);
@@ -1060,7 +1156,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     const warmupStep: TrainerRoutineStep | null = warmupPattern ? { patternId: warmupPattern.id, bpm: Math.max(warmupPattern.tempoRange[0], Math.min(warmupPattern.tempoRange[1], 70)), repetitions: 4, fillPatternId: "", fillAfterBars: 1 } : null;
     const cooldownStep: TrainerRoutineStep | null = warmupPattern ? { ...warmupStep!, bpm: Math.max(warmupPattern.tempoRange[0], Math.min(warmupPattern.tempoRange[1], 60)) } : null;
     const steps = [...(warmupStep ? [warmupStep] : []), ...coreSteps, ...(cooldownStep ? [cooldownStep] : [])];
-    const titles: Record<TrainerSessionFocus, string> = { adaptive: "Adaptive focus session", backbeat: "Backbeat consistency session", fills: "Groove and fill session", coordination: "Hands and feet session", "odd-meter": "Odd-meter session" };
+    const titles: Record<TrainerSessionFocus, string> = { adaptive: "Adaptive focus session", backbeat: "Backbeat consistency session", fills: "Groove and fill session", coordination: "Hands and feet session", "odd-meter": "Odd-meter session", "ghost-notes": "Ghost-note control session", syncopation: "Syncopation session", dynamics: "Dynamics control session" };
     setAutoAdvanceCountdown(null);
     setPracticePlan({ patternIds: steps.map((step) => step.patternId), currentIndex: 0, minutes: planMinutes, name: titles[practiceGoal], customSteps: steps, warmupCooldown: Boolean(warmupStep) });
     setTimingDrillFocus(null); setActiveSetlistId(""); setPracticePathId("backbeat"); setPatternId(steps[0].patternId); setVariationId("base"); setBpm(steps[0].bpm); applyRoutineStep(steps[0]); setSetupMessage(""); reset();
@@ -1138,7 +1234,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       accuracyTarget: customRoutineAccuracyTarget,
       timingTarget: customRoutineTimingTarget
     };
-    const transfer: TrainerSetupTransfer = { version: 1, patternId: remapId(patternId), bpm, repetitions: repetitions as TrainerSetupTransfer["repetitions"], countInBeats: countInBeats as TrainerSetupTransfer["countInBeats"], trainerMode, source, audioVoice, tempoBuild, tempoLadder, tempoStep: tempoLadderStep, tempoTarget: tempoLadderTarget, tempoFailure: tempoLadderFailure, pathAccuracyTarget, pathTimingTarget, loopEnabled, loopStartBeat: activeLoopStartBeat, loopEndBeat: activeLoopEndBeat, fillPractice, fillPatternId: remapId(fillPatternId), fillAfterBars: fillAfterBars as TrainerSetupTransfer["fillAfterBars"], handPattern, leadHand, spokenCount, dynamicsPractice, dynamicsExercise, practicePathId, customPatterns: packaged.patterns, feel, clickMode, limbFocus, customRoutine, swingRatio, pocketMs, learningMode, phraseBars, variationId: activeVariationId, cueMode, cueBeat, cueEveryBars, cueLeadBeats, cueAdaptive, trainerDrumLevel, trainerClickLevel, clickSound };
+    const transfer: TrainerSetupTransfer = { version: 1, patternId: remapId(patternId), bpm, repetitions: repetitions as TrainerSetupTransfer["repetitions"], countInBeats: countInBeats as TrainerSetupTransfer["countInBeats"], trainerMode, source, audioVoice, tempoBuild, tempoLadder, tempoStep: tempoLadderStep, tempoTarget: tempoLadderTarget, tempoFailure: tempoLadderFailure, pathAccuracyTarget, pathTimingTarget, loopEnabled, loopStartBeat: activeLoopStartBeat, loopEndBeat: activeLoopEndBeat, fillPractice, fillPatternId: remapId(fillPatternId), fillAfterBars: fillAfterBars as TrainerSetupTransfer["fillAfterBars"], handPattern, leadHand, spokenCount, dynamicsPractice, dynamicsExercise, practicePathId, customPatterns: packaged.patterns, feel, clickMode, limbFocus, customRoutine, swingRatio, pocketMs, learningMode, phraseBars, variationId: activeVariationId, cueMode, cueVoice, cueSequence, cueBeat, cueEveryBars, cueLeadBeats, cueAdaptive, trainerDrumLevel, trainerClickLevel, clickSound };
     const blob = new Blob([createTrainerSetupTransfer(transfer)], { type: "application/json" });
     const url = URL.createObjectURL(blob), link = document.createElement("a");
     link.href = url; link.download = "drum-hero-trainer-setup.json"; document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -1175,7 +1271,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       setLoopEnabled(transfer.loopEnabled); setLoopUnit("beats"); setLoopStartBeat(transfer.loopStartBeat); setLoopEndBeat(transfer.loopEndBeat);
       const importFillPractice = (transfer.fillPractice || transfer.cueMode === "fill") && Boolean(nextFill);
       setFillPractice(importFillPractice); setFillPatternId(nextFill?.id ?? nextFills[0]?.id ?? ""); setFillAfterBars(transfer.fillAfterBars);
-      setCueMode(transfer.cueMode === "fill" && !nextFill ? "off" : transfer.cueMode); setCueBeat(transfer.cueBeat); setCueEveryBars(transfer.cueEveryBars ?? 1); setCueLeadBeats(transfer.cueLeadBeats ?? 1); setCueAdaptive(transfer.cueAdaptive ?? false); setCueAdaptiveMessage("");
+      setCueMode(transfer.cueMode === "fill" && !nextFill ? "off" : transfer.cueMode); setCueVoice(transfer.cueVoice ?? "hihat"); setCueSequence(transfer.cueSequence ?? { name: "My cue sequence", cues: [{ beat: 1, action: "crash" }] }); setCueBeat(transfer.cueBeat); setCueEveryBars(transfer.cueEveryBars ?? 1); setCueLeadBeats(transfer.cueLeadBeats ?? 1); setCueAdaptive(transfer.cueAdaptive ?? false); setCueAdaptiveMessage("");
       setTrainerDrumLevel(transfer.trainerDrumLevel); audioRef.current?.setMasterLevel(transfer.trainerDrumLevel / 100);
       setTrainerClickLevel(transfer.trainerClickLevel); audioRef.current?.setClickLevel(transfer.trainerClickLevel / 100);
       setClickSound(transfer.clickSound); audioRef.current?.setClickSound(transfer.clickSound);
@@ -1211,8 +1307,26 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     return similarity > 0.96;
   }));
   const confusingPair = audioMatches.length > 1 && audioMatches[0].similarity - audioMatches[1].similarity < 0.1 ? audioMatches.slice(0, 2) as [typeof audioMatches[number], typeof audioMatches[number]] : null;
-  const coaching = round && round.patternId === pattern.id ? nextCoaching(round, pattern) : null;
+  const coaching = round && round.patternId === pattern.id && round.mode === "scored" && !round.focusedDrill && !round.learningMode && (!round.limbFocus || round.limbFocus === "all") && (!round.adaptation || round.adaptation === "standard") && !round.inputClipped && !round.uncertainDetections ? nextCoaching(round, pattern) : null;
+  const coachingSourceRound = round?.focusedDrill?.sourceRoundId ? roundsWithCurrent.find(item => item.id === round.focusedDrill?.sourceRoundId) ?? null : null;
+  const focusProgression = round?.focusedDrill && coachingSourceRound && round.focusedDrill.sourcePatternId === phrase.id
+    ? focusedDrillProgression(coachingSourceRound, round, phrase)
+    : null;
+  const startFocusedDrill = (instrument: Instrument, beat: number, targetBpm: number, sourceRoundId: string, sourcePatternId: string) => {
+    const sourcePattern = sourcePatternId === phrase.id ? phrase : availablePatterns.find(item => item.id === sourcePatternId) ?? phrase;
+    const sourceBeat = Math.max(1, Math.min(sourcePattern.beats, beat));
+    setTimingDrillFocus({ sourcePatternId: sourcePattern.id, instrument, beat: sourceBeat, stepOffset: Math.floor((sourceBeat - 1) * sourcePattern.subdivision / 4) });
+    setLoopEnabled(false); setCueMode("off"); setCueAdaptive(false); setLearningMode("normal"); setLimbFocus("all"); setAdaptiveMode("standard");
+    setTempoBuild(false); setTempoLadder(false); setTempoLadderMessage(""); setBpm(Math.max(sourcePattern.tempoRange[0], Math.min(sourcePattern.tempoRange[1], targetBpm)));
+    setPracticePlan(null); setActiveSetlistId(""); reset(); setRehearsalSeconds(60); coachingSourceRoundIdRef.current = sourceRoundId; coachingDrillPendingRef.current = true;
+  };
+  const startCoachingDrill = () => {
+    if (!coaching || !round) return;
+    const sourceBeat = Math.max(1, Math.min(phrase.beats, coaching.beat + (loopEnabled ? activeLoopStartBeat - 1 : 0)));
+    startFocusedDrill(coaching.instrument, sourceBeat, coaching.bpm, round.id, phrase.id);
+  };
   const transition = round && round.patternId === pattern.id && fillPractice && !loopEnabled && !phraseBars ? transitionFeedback(round.hits ?? [], fillAfterBars * selectedPattern.beats * selectedPattern.subdivision / 4, Math.round(pattern.beats * pattern.subdivision / 4 / getPatternBarCount(pattern))) : null;
+  const formTransitions = round && round.patternId === pattern.id && pattern.trainerFillStepRanges?.length ? summarizeTrainerTransitions(round.hits ?? [], pattern) : [];
   const articulationNotes = articulationFeedback(round?.hits ?? []);
   const midiArticulationSummary = [...new Set((round?.hits ?? []).flatMap(hit => hit.midiArticulation ? [hit.midiArticulation] : []))].map(articulation => `${articulation.replaceAll("-", " ")}: ${(round?.hits ?? []).filter(hit => hit.midiArticulation === articulation).length}`).join(" · ");
   const referenceMatches = Boolean(recordedClip && referenceClip && sameTrainerClipSetup(recordedClip, referenceClip));
@@ -1260,11 +1374,17 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
   const visibleLoopEndBeat = Math.max(visibleLoopStartBeat, closestNumber(loopBeatChoices, loopEndBeat));
   const visibleLoopStartBar = Math.min(phraseBarCount, loopStartBar);
   const visibleLoopEndBar = Math.max(visibleLoopStartBar, Math.min(phraseBarCount, loopEndBar));
-  const visibleHits = pattern.hits.filter((hit) => hit.step === step);
-  const visibleCue = visibleHits.map((hit) => `${hit.instrument}${hit.articulation ? ` ${articulationAbbreviation(hit.articulation)}` : ""}${showStickingCues && hit.instrument !== "kick" && handCues.get(hit) ? ` ${handCues.get(hit)}` : ""}`).join(" + ");
-  const activeCueCallout = phase === "running" && cueResult.cueSteps.includes(step)
-    ? cueResult.callouts?.find((callout) => callout.step === step)?.label ?? cueResult.label
-    : "";
+  const currentCueResult = activeCueResult ?? cueResult;
+  const currentCuePattern = cueMode === "random" ? currentCueResult.repetitionPatterns?.[repetition] ?? pattern : pattern;
+  const currentHandCues = getStickingCues(currentCuePattern.hits, handPattern, leadHand);
+  const visibleHits = currentCuePattern.hits.filter((hit) => hit.step === step);
+  const visibleCue = visibleHits.map((hit) => `${hit.instrument}${hit.articulation ? ` ${articulationAbbreviation(hit.articulation)}` : ""}${showStickingCues && hit.instrument !== "kick" && currentHandCues.get(hit) ? ` ${currentHandCues.get(hit)}` : ""}`).join(" + ");
+  const activeCueCallout = phase === "running" && cueMode === "random"
+    ? currentCueResult.callouts?.find((callout) => callout.repetition === repetition && callout.step === step)?.label ?? ""
+    : phase === "running" && cueResult.cueSteps.includes(step)
+      ? cueResult.callouts?.find((callout) => callout.step === step)?.label ?? cueResult.label
+      : "";
+  const playAlongHref = buildPlayAlongHref(selectedPattern.name, bpm, backingStyle);
   const currentCount = trainerMode === "scored" ? hits.filter((hit) => hit.rating === "great" || hit.rating === "good").length : ratings.filter((rating) => rating === "clean").length;
   const midiMapKey = profileKey.startsWith("midi:") ? profileKey : (midiInputs[0] ? "midi:" + midiInputs[0].id : "midi:default");
   const midiProfile = getTrainerDeviceProfile(saved, midiMapKey);
@@ -1324,6 +1444,10 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     setBpm(Math.max(patterns.find((item) => item.id === "first-beat")?.tempoRange[0] ?? 40, Math.min(patterns.find((item) => item.id === "first-beat")?.tempoRange[1] ?? 120, 70)));
     setDynamicsPractice(false); setDynamicsExercise("contrast"); setDeviceMessage("Beginner setup ready. Press Start practice when you are ready; no drum kit is needed.");
   };
+  const jumpToTrainerSection = (id: string, openAdvanced = false) => {
+    if (openAdvanced) setAdvancedOptionsOpen(true);
+    window.setTimeout(() => document.querySelector(id)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  };
   const dismissQuickStart = () => {
     setQuickStartDismissed(true);
     try { localStorage.setItem(TRAINER_QUICK_START_KEY, "1"); } catch { /* The guide remains hidden for this visit. */ }
@@ -1339,6 +1463,12 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
     </nav>
     <section id="trainer-setup" className="card trainer-setup" aria-label={t("Trainer setup")}>
       <span className="eyebrow">Round setup</span><h2>Choose your focus.</h2>
+      <div className="trainer-start-choices" role="group" aria-label="Choose how to practise">
+        <button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => { applyBeginnerSetup(); jumpToTrainerSection("#trainer-start"); }}>Easy start<span>One relaxed groove, no kit required</span></button>
+        <button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => jumpToTrainerSection(".trainer-practice-plan", true)}>Follow a skill path<span>Build a checkpointed session</span></button>
+        <button type="button" className="button-secondary" onClick={() => jumpToTrainerSection("#trainer-device-readiness")}>Set up an electronic kit<span>Check input and timing</span></button>
+        <button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => jumpToTrainerSection("#trainer-advanced", true)}>More practice controls<span>Routines, cues, and options</span></button>
+      </div>
       {quickStartLoaded && !quickStartDismissed && <section className="trainer-quick-start" aria-label="Getting started guide"><div><span className="eyebrow">First time here?</span><h3>Start with one easy groove.</h3><p>Use a relaxed 70 BPM backbeat, four short passes, and the built-in sounds. You can practise without connecting a kit.</p></div><div className="transport"><button type="button" className="button-secondary" disabled={settingsLocked} onClick={applyBeginnerSetup}>Set up my first round</button><button type="button" className="button-secondary" onClick={dismissQuickStart}>Hide guide</button></div></section>}
       <div className="trainer-style-presets" aria-label="Quick style setups">
         <strong>Quick style setup</strong>
@@ -1354,6 +1484,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       <fieldset disabled={settingsLocked}><legend>Round method</legend><label><input type="radio" name="round-method" checked={trainerMode === "self"} onChange={() => { stopAudioInput(); disconnectMidi(); setTrainerMode("self"); setLearningMode("normal"); reset(); }} /> Self rate each repetition</label><label><input type="radio" name="round-method" checked={trainerMode === "scored"} onChange={() => { setTrainerMode("scored"); reset(); }} /> Score played hits</label></fieldset>
       {trainerMode === "scored" && <label>Scored input<select value={source} disabled={settingsLocked} onChange={(event) => { stopAudioInput(); disconnectMidi(); const next = event.target.value as TrainerSource; setSource(next); chooseProfile(next); reset(); }}><option value="keyboard">Keyboard</option><option value="touch">Touch pads</option><option value="midi">USB MIDI kit</option><option value="audio-timing">Audio: timing only</option><option value="audio-voices">Audio: calibrated voices</option></select></label>}
       <button id="trainer-start" type="button" className="button" disabled={settingsLocked} onClick={() => void start()}>Start practice</button>
+      <details className="trainer-coaching-tools"><summary>Coaching, routines, and saved takes</summary>
       <TrainerRehearsal challenge={challenge} playingRemaining={timedRemaining} steps={customRoutineSteps} patterns={availablePatterns} phase={phase} disabled={settingsLocked} onPrepare={(step, seconds) => { reset(); setPracticePlan(null); setActiveSetlistId(''); setTimingDrillFocus(null); setTempoBuild(false); setTempoLadder(false); setTrainerMode('scored'); setRehearsalSeconds(seconds); applyRoutineStep(step); }} onStart={() => void start()} onEnd={() => { setRehearsalSeconds(null); timedRoundRef.current = null; repetitionsRef.current = repetitions; }} onStop={() => { reset(); setRehearsalSeconds(null); timedRoundRef.current = null; repetitionsRef.current = repetitions; }} />
       <TrainerPeerChallenge pattern={selectedPattern} bpm={bpm} disabled={settingsLocked} onAccept={incoming => { setChallenge(incoming); setCustomGrooves(readCustomGrooves()); reset(); setPatternId(incoming.pattern.id); setVariationId("base"); setBpm(incoming.bpm); setFillPractice(false); setPhraseBars(0); setLoopEnabled(false); setTimingDrillFocus(null); setLimbFocus('all'); setLearningMode('normal'); setPracticePlan(null); setActiveSetlistId(''); setTrainerMode('scored'); }} />
       {challenge && <p className="trainer-challenge-goal" role="status">Challenge: {challenge.goal} · {challenge.targetAccuracy}% target · {challenge.durationSeconds} seconds suggested. Use Start accepted challenge in the timed rehearsal panel.</p>}
@@ -1361,8 +1492,8 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       <TrainerHandsFree onToggle={() => { if (phase === 'paused') resume(); else if (phase === 'running' || phase === 'count-in') pause(); else if (!settingsLocked) void start(); }} onRepeat={() => { if (rehearsalSeconds === null && !['loading', 'calibrating'].includes(phase)) void start(); }} onMark={() => { if (phase === 'rating') rate('needsWork', performance.now()); else setDeviceMessage('Needs work can be marked during a self-rating checkpoint.'); }} />
       <TrainerTakeLibrary latest={recordedClip} disabled={settingsLocked} onReference={take => setReferenceClip({ ...take, url: URL.createObjectURL(take.blob) })} />
       <TrainerLearningTools rounds={saved.rounds} pattern={pattern} patterns={availablePatterns} profileId={profileId} disabled={settingsLocked} onSelectPattern={id => { const next = availablePatterns.find(item => item.id === id); if (!next) return; setTimingDrillFocus(null); setPracticePlan(null); setActiveSetlistId(""); setPatternId(next.id); setVariationId("base"); setFillPractice(false); setFillPatternId(compatibleFillPatterns(next, availablePatterns)[0]?.id ?? ""); setPhraseBars(0); setLoopEnabled(false); setAdaptiveMode("standard"); setLimbFocus("all"); setLearningMode("normal"); setBpm(next.defaultBpm); reset(); }} onUseGoalTempo={value => { setBpm(value); setTempoBuild(false); setTempoLadder(false); reset(); }} onStartRetention={steps => { if (!steps.length) return; setPracticePlan({ patternIds: steps.map(item => item.patternId), currentIndex: 0, minutes: Math.max(4, steps.length * 2), name: "Retention remix", customSteps: steps }); setTimingDrillFocus(null); setActiveSetlistId(""); setVariationId("base"); setPhraseBars(0); setLoopEnabled(false); setAdaptiveMode("standard"); setLimbFocus("all"); setLearningMode("normal"); applyRoutineStep(steps[0]); reset(); }} />
-
-      <details className="trainer-advanced" open={advancedOptionsOpen} onToggle={event => setAdvancedOptionsOpen(event.currentTarget.open)}><summary>Practice options, routines, and advanced settings</summary>
+      </details>
+      <details id="trainer-advanced" className="trainer-advanced" open={advancedOptionsOpen} onToggle={event => setAdvancedOptionsOpen(event.currentTarget.open)}><summary>Practice options, routines, and advanced settings</summary>
       <fieldset disabled={settingsLocked}><legend>Learning sequence</legend><label>Round style<select value={learningMode} onChange={event => { setLearningMode(event.target.value as LearningMode); if (event.target.value !== 'normal') { setTrainerMode('scored'); setTempoBuild(false); setTempoLadder(false); setLimbFocus('all'); } reset(); }}><option value="normal">Standard round</option><option value="listen-copy-solo">Listen → Copy → Play alone</option><option value="build-limbs">Feet → Hands → Together</option></select></label><small>Listen is unscored; Copy adds the guide; Play alone removes it. Limb stages gradually combine the two parts. Use headphones with audio input to keep the guide out of the microphone.</small></fieldset>
       <fieldset disabled={settingsLocked}><legend>Musical phrase</legend><label>Arrangement length<select value={phraseBars} onChange={event => { setPhraseBars(Number(event.target.value) as typeof phraseBars); setLoopEnabled(false); setTimingDrillFocus(null); }}><option value={0}>Original pattern</option>{[4, 8, 16].map(bars => <option key={bars} value={bars}>{bars} bars</option>)}</select></label><small>Four-bar sections include a last-beat rest, a compatible fill when available, and alternating normal/accented sections.</small></fieldset>
       {canAddFillPractice && <fieldset disabled={settingsLocked}><legend>Groove into a fill</legend><label><input type="checkbox" checked={fillPractice} onChange={(event) => { setTimingDrillFocus(null); setFillPractice(event.target.checked); }} /> Add a fill to this groove round</label>{fillPractice && <><TrainerFillBrowser fills={fillChoices} selectedId={selectedFill?.id ?? ""} disabled={settingsLocked} onSelect={setFillPatternId} /><label>Play groove for<select value={fillAfterBars} onChange={(event) => setFillAfterBars(Number(event.target.value))}><option value={1}>1 bar, then fill</option><option value={2}>2 bars, then fill</option><option value={4}>4 bars, then fill</option></select></label><small>Each repetition is {fillAfterBars + 1} bars: groove, then fill and return to beat one.</small></>}</fieldset>}
@@ -1381,22 +1512,26 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       <fieldset disabled={settingsLocked} className="trainer-cue-practice">
         <legend>Cue response practice</legend>
         <label>Call for<select value={cueMode} onChange={event => { const next = event.target.value as TrainerCueMode; setCueMode(next); setCueAdaptiveMessage(""); if (next === "fill") { setFillPractice(true); if (!fillPatternId && fillChoices[0]) setFillPatternId(fillChoices[0].id); setPhraseBars(0); setLoopEnabled(false); } reset(); }}>
-          <option value="off">No cue</option><option value="fill" disabled={!canAddFillPractice}>Fill before the groove returns</option><option value="crash">Crash on a selected beat</option><option value="loud">Play louder from a selected beat</option><option value="soft">Play softer from a selected beat</option><option value="random">Random cue sequence each round</option>
+          <option value="off">No cue</option><option value="fill" disabled={!canAddFillPractice}>Fill before the groove returns</option><option value="crash">Crash on a selected beat</option><option value="loud">Play louder from a selected beat</option><option value="soft">Play softer from a selected beat</option><option value="dropout">Drop one drum voice</option><option value="accent-shift">Shift the accent</option><option value="custom">My saved cue sequence</option><option value="random">Random cue sequence each round</option>
         </select></label>
         {cueMode !== "off" && cueMode !== "fill" && cueMode !== "random" && <label>Cue beat<select value={Math.min(cueBeat, selectedBeatsPerBar)} onChange={event => { setCueBeat(Number(event.target.value)); reset(); }}>{Array.from({ length: selectedBeatsPerBar }, (_, index) => index + 1).map(beat => <option key={beat} value={beat}>Beat {beat}</option>)}</select></label>}
+        {cueMode === "dropout" && <label>Voice to drop<select value={cueVoice} onChange={event => { setCueVoice(event.target.value as Instrument); reset(); }}>{[...new Set([...dynamicsPattern.hits.map(hit => hit.instrument), cueVoice])].map(voice => <option key={voice} value={voice}>{voice}</option>)}</select></label>}
+        {cueMode === "custom" && <TrainerCueSequenceEditor value={cueSequence} beatsPerBar={selectedBeatsPerBar} disabled={settingsLocked} onChange={setCueSequence} />}
         {cueMode === "random" && <><div className="trainer-round-options"><label>Cue spacing<select value={cueEveryBars} onChange={event => { setCueEveryBars(Number(event.target.value) as TrainerCueDensity); setCueAdaptiveMessage(""); reset(); }}><option value={1}>Every bar</option><option value={2}>Every 2 bars</option><option value={4}>Every 4 bars</option></select></label><label>Response lead<select value={cueLeadBeats} onChange={event => { setCueLeadBeats(Number(event.target.value) as TrainerCueLead); reset(); }}><option value={1}>1 beat</option><option value={2}>2 beats</option></select></label></div><label><input type="checkbox" checked={cueAdaptive} onChange={event => { setCueAdaptive(event.target.checked); setCueAdaptiveMessage(""); }} /> Adjust cue frequency from my result</label></>}
-        <small>{cueMode === "fill" ? "A visual callout appears one beat before the selected fill. Its notes and return to the groove are scored." : cueMode === "crash" ? "Add a scored crash target at the chosen beat in every bar." : cueMode === "loud" || cueMode === "soft" ? "A callout changes the target at the chosen beat; MIDI or calibrated audio can score strike strength." : cueMode === "random" ? "Each round mixes crash, louder, and softer responses. Choose how often cues appear and how many beats you have to react." : "Choose a fill, crash, or dynamic change to practise reacting to a cue."}{cueResult.label && cueMode !== "off" && <span className="trainer-cue-preview">{cueResult.label}</span>}{cueMode === "random" && getPatternBarCount(dynamicsPattern) < cueEveryBars && <span className="trainer-cue-preview">This groove has {getPatternBarCount(dynamicsPattern)} {getPatternBarCount(dynamicsPattern) === 1 ? "bar" : "bars"}, so it cues once per phrase. Select a multi-bar pattern to space cues across its bars.</span>}</small>
+        <small>{cueMode === "fill" ? "A visual callout appears one beat before the selected fill. Its notes and return to the groove are scored." : cueMode === "crash" ? "Add a scored crash target at the chosen beat in every bar." : cueMode === "loud" || cueMode === "soft" ? "A callout changes the target at the chosen beat; MIDI or calibrated audio can score strike strength." : cueMode === "dropout" ? `A callout warns you one beat ahead; leave ${cueVoice} silent for the rest of that bar. Unplanned strikes count as extras.` : cueMode === "accent-shift" ? "Move the strong stroke to the selected beat and keep the other strokes soft; calibrated MIDI or audio can score the contrast." : cueMode === "custom" ? "Create or load a cue sequence, then save it on this device for later practice." : cueMode === "random" ? "Each round mixes crash, louder, softer, voice-drop, and accent-shift responses. Cues are spaced across all bars, including repeats of a single-bar groove." : "Choose a fill, crash, dynamic change, voice drop, or accent shift to practise reacting to a cue."}{cueResult.label && cueMode !== "off" && <span className="trainer-cue-preview">{cueResult.label}</span>}</small>
       </fieldset>
       <p className="trainer-note">{repetitions} repetitions · {countInBeats}-beat count-in · {Math.round(duration / 1000)} seconds per repetition. {trainerMode === "self" ? "Rate each pass before moving on." : "Great within 50 ms; Good within 100 ms."}</p>
       <label><input type="checkbox" checked={progress.settings.sound} onChange={(event) => setSound(event.target.checked)} /> Metronome and drum sound</label>
       <details className="trainer-audio-controls"><summary>Practice audio levels and click sound</summary><fieldset disabled={settingsLocked}><label>Drum kit level · {trainerDrumLevel}%<input type="range" min="0" max="100" step="1" value={trainerDrumLevel} onChange={(event) => { const value = Number(event.target.value); setTrainerDrumLevel(value); audioRef.current?.setMasterLevel(value / 100); }} /></label><label>Metronome and count-in level · {trainerClickLevel}%<input type="range" min="0" max="100" step="1" value={trainerClickLevel} onChange={(event) => { const value = Number(event.target.value); setTrainerClickLevel(value); audioRef.current?.setClickLevel(value / 100); }} /></label><label>Metronome sound<select value={clickSound} onChange={(event) => { const value = event.target.value as TrainerClickSound; setClickSound(value); audioRef.current?.setClickSound(value); }}><option value="hat">Hi-hat</option><option value="woodblock">Woodblock</option><option value="beep">Soft beep</option></select></label><small>These controls affect Trainer playback only. The metronome setting also controls count-in volume.</small></fieldset></details>
+      <fieldset className="trainer-playalong-challenge" disabled={settingsLocked} aria-describedby="trainer-playalong-help"><legend>Play-along challenge</legend><label><input type="checkbox" checked={playAlongEnabled} disabled={trainerMode !== "scored"} onChange={(event) => setPlayAlongEnabled(event.target.checked)} /> Add synchronized backing band to scored rounds</label><label>Backing style<select value={backingStyle} disabled={!playAlongEnabled || trainerMode !== "scored"} onChange={(event) => setBackingStyle(event.target.value as TrainerBackingStyle)}><option value="rock">Rock · bass, chords, shaker</option><option value="funk">Funk · syncopated bass, chords, shaker</option><option value="shuffle">Shuffle · swung bass, chords, ride</option></select></label><small id="trainer-playalong-help">Choose scored mode to enable this challenge. The backing follows this pattern, tempo, repeats, and count-in. Keep it at a comfortable level; use headphones to limit bleed into a microphone. Round scores include only your drum targets.</small><Link className="button-secondary" href={playAlongHref}>Set up a fuller backing arrangement in Play-Along Studio</Link></fieldset>
       <label><input type="checkbox" checked={recordAudio} disabled={settingsLocked} onChange={(event) => setRecordAudio(event.target.checked)} /> Record microphone audio for playback comparison</label>
       <small>Recording asks for microphone access when the round starts, stays in page memory, and is not uploaded. MIDI and keyboard hits are captured only if they make sound in the room.</small>
       {setlists.length > 0 && <div className="trainer-setlist"><span className="eyebrow">Setlist rehearsal</span><label>Follow a setlist<select value={activeSetlistId} disabled={settingsLocked} onChange={(event) => loadSetlist(event.target.value)}><option value="">Choose a setlist…</option>{setlists.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{activeSetlist && <p>{setlistPatterns.length ? activeSetlist.name + ": part " + Math.min(setlistIndex + 1, setlistPatterns.length) + " of " + setlistPatterns.length : "This setlist has no playable parts yet."}</p>}</div>}
       <div className="trainer-practice-plan"><span className="eyebrow">Guided skill path</span><label>Choose a path<select value={practicePathId} disabled={settingsLocked} onChange={(event) => setPracticePathId(event.target.value as typeof practicePathId)}>{TRAINER_PRACTICE_PATHS.map((path) => <option key={path.id} value={path.id}>{path.name}</option>)}</select></label><div className="trainer-round-options"><label>Accuracy goal<select value={pathAccuracyTarget} disabled={settingsLocked} onChange={(event) => setPathAccuracyTarget(Number(event.target.value) as 70 | 80 | 85 | 90 | 95)}>{[70, 80, 85, 90, 95].map((target) => <option key={target} value={target}>{target}%</option>)}</select></label><label>Timing goal<select value={pathTimingTarget} disabled={settingsLocked} onChange={(event) => setPathTimingTarget(Number(event.target.value) as 25 | 35 | 50 | 75)}>{[25, 35, 50, 75].map((target) => <option key={target} value={target}>{target} ms average</option>)}</select></label></div><p>Pass each checkpoint by meeting your accuracy goal and timing goal when hit timing is available. A missed checkpoint stays in the path until you repeat it.</p><button type="button" className="button-secondary" disabled={settingsLocked} onClick={startPracticePath}>Start skill path</button></div>
-      <div className="trainer-practice-plan"><span className="eyebrow">Goal-based session</span><label>Session focus<select value={practiceGoal} disabled={settingsLocked || Boolean(practicePlan)} onChange={event => setPracticeGoal(event.target.value as TrainerSessionFocus)}><option value="adaptive">Adaptive mix · weakest and least-practiced patterns</option><option value="backbeat">Steady backbeat</option><option value="fills">Groove-to-fill transitions</option><option value="coordination">Hands and feet coordination</option><option value="odd-meter">Odd meter</option></select></label><label>Plan length<select value={planMinutes} disabled={settingsLocked || Boolean(practicePlan)} onChange={(event) => setPlanMinutes(Number(event.target.value))}><option value={5}>About 5 minutes · {getGoalSessionSlotCount(availablePatterns, practiceGoal, 5, repetitions, countInBeats)} rounds</option><option value={10}>About 10 minutes · {getGoalSessionSlotCount(availablePatterns, practiceGoal, 10, repetitions, countInBeats)} rounds</option><option value={20}>About 20 minutes · {getGoalSessionSlotCount(availablePatterns, practiceGoal, 20, repetitions, countInBeats)} rounds</option></select></label><button type="button" className="button-secondary" disabled={settingsLocked} onClick={startPracticePlan}>{practicePlan ? "Restart session" : "Build my practice session"}</button>{practicePlan && <><p>{practicePlan.name ?? "Adaptive focus plan"} · About {practicePlan.minutes} minutes · Pattern {practicePlan.currentIndex + 1} of {practicePlan.patternIds.length}. {practicePlan.name?.startsWith("Adaptive") ? "Starts with your weakest recent patterns, then adds patterns you have practiced less often." : "Patterns and fills are ordered around your selected skill focus."} Fill sessions use four repetitions per pattern to leave time for the transition; other sessions use your selected repetition count.</p><button type="button" className="button-secondary" onClick={cancelPracticePlan}>End plan</button></>}</div>
+      <div className="trainer-practice-plan"><span className="eyebrow">Goal-based session</span><label>Session focus<select value={practiceGoal} disabled={settingsLocked || Boolean(practicePlan)} onChange={event => setPracticeGoal(event.target.value as TrainerSessionFocus)}><option value="adaptive">Adaptive mix · weakest and least-practiced patterns</option><option value="backbeat">Steady backbeat</option><option value="fills">Groove-to-fill transitions</option><option value="coordination">Hands and feet coordination</option><option value="odd-meter">Odd meter</option><option value="ghost-notes">Ghost-note control</option><option value="syncopation">Offbeat and syncopated grooves</option><option value="dynamics">Dynamics and accents</option></select></label><label>Plan length<select value={planMinutes} disabled={settingsLocked || Boolean(practicePlan)} onChange={(event) => setPlanMinutes(Number(event.target.value))}><option value={5}>About 5 minutes · {getGoalSessionSlotCount(availablePatterns, practiceGoal, 5, repetitions, countInBeats)} rounds</option><option value={10}>About 10 minutes · {getGoalSessionSlotCount(availablePatterns, practiceGoal, 10, repetitions, countInBeats)} rounds</option><option value={20}>About 20 minutes · {getGoalSessionSlotCount(availablePatterns, practiceGoal, 20, repetitions, countInBeats)} rounds</option></select></label><button type="button" className="button-secondary" disabled={settingsLocked} onClick={startPracticePlan}>{practicePlan ? "Restart session" : "Build my practice session"}</button>{practicePlan && <><p>{practicePlan.name ?? "Adaptive focus plan"} · About {practicePlan.minutes} minutes · Pattern {practicePlan.currentIndex + 1} of {practicePlan.patternIds.length}. {practicePlan.name?.startsWith("Adaptive") ? "Starts with your weakest recent patterns, then adds patterns you have practiced less often." : "Patterns and fills are ordered around your selected skill focus."} Fill sessions use four repetitions per pattern to leave time for the transition; other sessions use your selected repetition count.</p><button type="button" className="button-secondary" onClick={cancelPracticePlan}>End plan</button></>}</div>
       <div className="trainer-practice-plan trainer-session-tools"><span className="eyebrow">Session tools</span><button type="button" className="button-secondary" disabled={settingsLocked} onClick={startPlacementCheck}>Run 3-round placement check</button><label className="trainer-routine-gate"><input type="checkbox" checked={planWarmupCooldown} disabled={Boolean(practicePlan)} onChange={event => setPlanWarmupCooldown(event.target.checked)} /> Add a 4-repetition warm-up and cooldown to goal sessions</label><label className="trainer-routine-gate"><input type="checkbox" checked={planAutoAdvance} onChange={event => { setPlanAutoAdvance(event.target.checked); if (!event.target.checked) setAutoAdvanceCountdown(null); }} /> Auto-advance when each session round finishes</label>{planAutoAdvance && <label>Break between patterns<select value={planRestSeconds} onChange={event => setPlanRestSeconds(Number(event.target.value) as 0 | 5 | 10)}><option value={0}>No break</option><option value={5}>5 seconds</option><option value={10}>10 seconds</option></select></label>}<small>The placement check samples a steady pulse, a subdivision groove, and a fill transition when your library has a matching fill. Session warm-up and cooldown use an easy groove at a comfortable tempo.</small></div>
       <div className="trainer-practice-plan trainer-routine-builder"><span className="eyebrow">Build a personal routine</span><TrainerRoutineShelf current={{ name: customRoutineName, steps: customRoutineSteps, gated: customRoutineGated, accuracyTarget: customRoutineAccuracyTarget, timingTarget: customRoutineTimingTarget }} patterns={availablePatterns} disabled={settingsLocked} onLoad={loadRoutine} /><label>Routine name<input value={customRoutineName} maxLength={50} disabled={settingsLocked} onChange={(event) => setCustomRoutineName(event.target.value)} /></label><div className="trainer-round-options"><label>Accuracy checkpoint<select value={customRoutineAccuracyTarget} disabled={settingsLocked} onChange={(event) => setCustomRoutineAccuracyTarget(Number(event.target.value) as typeof customRoutineAccuracyTarget)}>{[70, 80, 85, 90, 95].map((target) => <option key={target} value={target}>{target}%</option>)}</select></label><label>Timing checkpoint<select value={customRoutineTimingTarget} disabled={settingsLocked} onChange={(event) => setCustomRoutineTimingTarget(Number(event.target.value) as typeof customRoutineTimingTarget)}>{[25, 35, 50, 75].map((target) => <option key={target} value={target}>{target} ms</option>)}</select></label></div><label className="trainer-routine-gate"><input type="checkbox" checked={customRoutineGated} disabled={settingsLocked} onChange={(event) => setCustomRoutineGated(event.target.checked)} /> Require a checkpoint before each next pattern</label><div className="transport"><button type="button" className="button-secondary" disabled={settingsLocked || customRoutineSteps.length >= 20} onClick={addCurrentToRoutine}>Add selected pattern</button><button type="button" className="button-secondary" disabled={settingsLocked || customRoutineSteps.length === 0} onClick={startCustomRoutine}>Start personal routine</button></div><ol className="trainer-routine-steps">{customRoutineSteps.map((step, index) => { const routinePattern = availablePatterns.find((item) => item.id === step.patternId); const routineFills = routinePattern ? compatibleFillPatterns(routinePattern, availablePatterns) : []; const routineFill = routineFills.find((item) => item.id === step.fillPatternId); const minTempo = routineFill && routinePattern ? Math.max(routinePattern.tempoRange[0], routineFill.tempoRange[0]) : routinePattern?.tempoRange[0] ?? 40; const maxTempo = routineFill && routinePattern ? Math.min(routinePattern.tempoRange[1], routineFill.tempoRange[1]) : routinePattern?.tempoRange[1] ?? 220; return <li key={`${step.patternId}-${index}`}><span className="trainer-routine-number">{index + 1}</span><label>Pattern<select value={step.patternId} disabled={settingsLocked} onChange={(event) => { const next = availablePatterns.find((item) => item.id === event.target.value); updateRoutineStep(index, { patternId: event.target.value, bpm: next?.defaultBpm ?? step.bpm, fillPatternId: "" }); }}>{!routinePattern && <option value={step.patternId}>Unavailable · {step.patternId}</option>}{availablePatterns.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.level}</option>)}</select></label><label>Tempo<input type="number" min={minTempo} max={maxTempo} value={Math.max(minTempo, Math.min(maxTempo, step.bpm))} disabled={settingsLocked} onChange={(event) => updateRoutineStep(index, { bpm: Number(event.target.value) })} /></label><label>Repetitions<select value={step.repetitions} disabled={settingsLocked} onChange={(event) => updateRoutineStep(index, { repetitions: Number(event.target.value) as TrainerRoutineStep["repetitions"] })}>{REPETITIONS.map((count) => <option key={count} value={count}>{count}</option>)}</select></label><label>Groove into fill<select value={step.fillPatternId} disabled={settingsLocked || !routineFills.length} onChange={(event) => updateRoutineStep(index, { fillPatternId: event.target.value })}><option value="">No fill</option>{routineFills.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{step.fillPatternId && <label>Bars before fill<select value={step.fillAfterBars} disabled={settingsLocked} onChange={(event) => updateRoutineStep(index, { fillAfterBars: Number(event.target.value) as TrainerRoutineStep["fillAfterBars"] })}>{[1, 2, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>}<div className="trainer-routine-order"><button type="button" className="button-secondary" aria-label={`Move routine pattern ${index + 1} up`} disabled={settingsLocked || index === 0} onClick={() => moveRoutineStep(index, -1)}>↑</button><button type="button" className="button-secondary" aria-label={`Move routine pattern ${index + 1} down`} disabled={settingsLocked || index === customRoutineSteps.length - 1} onClick={() => moveRoutineStep(index, 1)}>↓</button><button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => setCustomRoutineSteps((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></div></li>; })}</ol><small>Routines save on this device. Add grooves, fills, rudiments, or song parts; tempo and repetitions are set for each step.</small></div>
+      <TrainerSongFormBuilder patterns={availablePatterns} disabled={settingsLocked} onBuild={addSongForm} />
       <div className="trainer-practice-plan"><span className="eyebrow">Share a setup</span><p>Setup files include your current Trainer settings, saved routine, and any custom grooves or song parts they use.</p><div className="transport"><button type="button" className="button-secondary" onClick={exportSetup}>Export setup</button><label>Import setup<input ref={setupFileRef} type="file" accept="application/json,.json" disabled={settingsLocked} onChange={(event) => void importSetup(event.target.files?.[0])} /></label></div>{setupMessage && <p role="status">{setupMessage}</p>}</div>
       {recommendation && <div className="trainer-recommendation"><span className="eyebrow">{t("Suggested next")}</span><strong>{localizedPattern(recommendation.pattern, locale).name}</strong><p>{recommendation.reason}</p><button className="button-secondary" type="button" disabled={settingsLocked} onClick={() => { const target = availablePatterns.find((item) => item.id === recommendation.pattern.id) ?? selectedPattern; setTimingDrillFocus(null); setPracticePlan(null); setPatternId(target.id); setVariationId("base"); setFillPractice(false); setBpm(recommendation.bpm); reset(); }}>{t("Use {bpm} BPM", { bpm: recommendation.bpm })}</button></div>}
       {timingWeakSpot && <div className="trainer-recommendation"><span className="eyebrow">Targeted timing drill</span><strong>{timingWeakSpot.instrument} on beat {timingWeakSpot.beat}</strong><p>{timingWeakSpot.problems} late or missed hits across {timingWeakSpot.rounds} recent rounds{timingWeakSpot.averageOffsetMs === null ? "." : ` · average offset ${timingWeakSpot.averageOffsetMs > 0 ? "+" : ""}${timingWeakSpot.averageOffsetMs} ms.`}</p>{weakSpotTempo && <p>Per-spot tempo plan: {weakSpotTempo.progression.join(" → ")} BPM{weakSpotTempo.accuracy === null ? " · start gently and build in 2 BPM steps" : ` · ${weakSpotTempo.accuracy}% recent target accuracy`}{weakSpotTempo.typicalOffsetMs === null ? "" : ` · ${weakSpotTempo.typicalOffsetMs} ms typical timing distance`}. The ladder advances by 2 BPM after each round reaches 80% accuracy.</p>}<div className="transport"><button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => { setLimbFocus("all"); setTimingDrillFocus({ sourcePatternId: phrase.id, instrument: timingWeakSpot.instrument, beat: timingWeakSpot.beat, stepOffset: Math.floor((timingWeakSpot.beat - 1) * phrase.subdivision / 4) }); setPracticePlan(null); setActiveSetlistId(""); setLoopEnabled(false); reset(); }}>Drill only {timingWeakSpot.instrument} on beat {timingWeakSpot.beat}</button>{weakSpotTempo && <button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => { setLimbFocus("all"); setTimingDrillFocus({ sourcePatternId: phrase.id, instrument: timingWeakSpot.instrument, beat: timingWeakSpot.beat, stepOffset: Math.floor((timingWeakSpot.beat - 1) * phrase.subdivision / 4) }); setPracticePlan(null); setActiveSetlistId(""); setLoopEnabled(false); setTempoBuild(false); setTempoLadder(true); setTempoLadderStep(2); setTempoLadderTarget(80); setTempoLadderFailure("repeat"); setTempoLadderMessage(""); setRepetitions(8); setBpm(weakSpotTempo.startBpm); reset(); }}>Start 3-step BPM build</button>}<button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => { setLimbFocus("all"); setTimingDrillFocus(null); setPracticePlan(null); setActiveSetlistId(""); setLoopUnit("beats"); setLoopStartBeat(timingWeakSpot.beat); setLoopEndBeat(timingWeakSpot.beat); setLoopEnabled(true); reset(); }}>Loop the whole beat</button></div></div>}
@@ -1406,10 +1541,10 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
       <div className="trainer-stage" aria-live="polite">
         <div className="trainer-stage-top"><span className="eyebrow">{pattern.level} · {gridLabel}</span><span className={`mode-pill mode-${phase === "running" ? "playing" : phase}`}>{phase}</span></div>
         <h2>{pattern.id === selectedPattern.id && activeVariationId === "base" ? selectedDisplay.name : pattern.name}</h2><p>{pattern.id === selectedPattern.id && activeVariationId === "base" ? ("coaching" in selectedDisplay ? String(selectedDisplay.coaching) : "focus" in selectedDisplay ? String(selectedDisplay.focus) : selectedDisplay.description) : pattern.description}</p>{hasFocusedTimingDrill && timingDrillFocus && <p className="trainer-focus-status" role="status">Only {t(timingDrillFocus.instrument)} hits from beat {String(timingDrillFocus.beat)} are active. <button type="button" disabled={settingsLocked} onClick={() => setTimingDrillFocus(null)}>{t("End focused drill")}</button></p>}
-        <div className="trainer-count"><strong>{Math.min(repetition + 1, repetitions)}<small> / {repetitions}</small></strong><span>Repetition</span><strong>{currentCount}</strong><span>{trainerMode === "self" ? "Clean" : "Great + Good"}</span></div>
+        <div className="trainer-count"><strong>{rehearsalSeconds !== null ? timedRemaining : Math.min(repetition + 1, repetitions)}<small>{rehearsalSeconds !== null ? " sec" : ` / ${repetitions}`}</small></strong><span>{rehearsalSeconds !== null ? "Time left" : "Repetition"}</span><strong>{currentCount}</strong><span>{trainerMode === "self" ? "Clean" : "Great + Good"}</span></div>
         {(phase === "count-in" || phase === "calibrating") && <div className="trainer-countin" role="timer">{phase === "calibrating" ? "Latency calibration · " + latencyTaps + "/" + CALIBRATION_BEATS : "Count in"}<strong>{countIn}</strong></div>}
         <div className="trainer-grid" aria-label="Pattern steps with beat and subdivision counts">{Array.from({ length: totalSteps }, (_, index) => {
-          const cellHits = pattern.hits.filter(hit => hit.step === index);
+          const cellHits = currentCuePattern.hits.filter(hit => hit.step === index);
           const listenCell = learningMode !== "normal" && stage === "Listen" && cellHits.length > 0;
           const cellTargets = cellHits.filter(hit => stage !== "Listen" && (stage !== "Feet" || hit.instrument === "kick") && (stage !== "Hands" || hit.instrument !== "kick") && (trainerMode !== "scored" || source !== "audio-timing" || hit.instrument === audioVoice));
           const cellAttempted = hits.some(hit => hit.step === index + focusedStepOffset && hit.repetition === repetition && cellTargets.some(target => target.instrument === hit.instrument));
@@ -1417,12 +1552,12 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
           const inactiveCell = trainerMode === "scored" && !activeCell && cellHits.length > 0 && !listenCell;
           const cellMark = listenCell ? "listen" : activeCell ? cellAttempted ? "done" : "target" : inactiveCell ? "inactive" : "empty";
           const label = cellHits.length ? `${getStepCountLabel(hasFocusedTimingDrill ? phrase : pattern, index + focusedStepOffset)}: ${cellHits.map(hit => hit.instrument).join(", ")}${listenCell ? ", listen stage" : activeCell ? ", active target" : inactiveCell ? ", inactive in this stage" : ""}` : getStepCountLabel(hasFocusedTimingDrill ? phrase : pattern, index + focusedStepOffset);
-          return <div key={index} aria-label={label} data-target={cellMark} className={`${step === index ? "active" : ""} ${index % stepsPerBar === 0 ? "bar-start" : ""} ${inactiveCell ? "stage-inactive" : ""} ${listenCell ? "stage-listen" : ""} ${activeCell && cellTargets.length ? "stage-target" : ""}`}><span>{getStepCountLabel(hasFocusedTimingDrill ? phrase : pattern, index + focusedStepOffset)}</span><strong>{cellHits.map((hit) => `${hit.instrument}${hit.articulation ? ` ${articulationAbbreviation(hit.articulation)}` : ""}${showStickingCues && hit.instrument !== "kick" && handCues.get(hit) ? ` ${handCues.get(hit)}` : ""}${hasDynamicsTargets && typeof hit.velocityTarget === "number" ? ` T${hit.velocityTarget}` : ""}`).join(" + ") || "·"}</strong>{cellTargets.length > 0 && <small>{cellAttempted ? "played" : "target"}</small>}{listenCell && <small>listen</small>}</div>;
+          return <div key={index} aria-label={label} data-target={cellMark} className={`${step === index ? "active" : ""} ${index % stepsPerBar === 0 ? "bar-start" : ""} ${inactiveCell ? "stage-inactive" : ""} ${listenCell ? "stage-listen" : ""} ${activeCell && cellTargets.length ? "stage-target" : ""}`}><span>{getStepCountLabel(hasFocusedTimingDrill ? phrase : pattern, index + focusedStepOffset)}</span><strong>{cellHits.map((hit) => `${hit.instrument}${hit.articulation ? ` ${articulationAbbreviation(hit.articulation)}` : ""}${showStickingCues && hit.instrument !== "kick" && currentHandCues.get(hit) ? ` ${currentHandCues.get(hit)}` : ""}${hasDynamicsTargets && typeof hit.velocityTarget === "number" ? ` T${hit.velocityTarget}` : ""}`).join(" + ") || "·"}</strong>{cellTargets.length > 0 && <small>{cellAttempted ? "played" : "target"}</small>}{listenCell && <small>listen</small>}</div>;
         })}</div>
         {hasDynamicsTargets && <small className="trainer-dynamics-legend">T = target strike strength on a 0–127 scale. Use MIDI or calibrated audio input for strength scoring.</small>}
         {pattern.hits.some((hit) => hit.articulation) && <small className="trainer-dynamics-legend">fl = flam · dr = drag · z = buzz roll. Flam and drag grace strokes lead into the main stroke. Buzz targets use an onset and sustain window.</small>}
-        <p className="trainer-learning-stage" role="status">{stage}{learningMode !== "normal" ? ` · pass ${Math.min(repetition + 1, repetitions)}/${repetitions}` : ""}</p>{upcomingStage && <p className="trainer-stage-upcoming">Coming next: {upcomingStage}. Active targets are highlighted in the grid.</p>}{activeCueCallout && <p className="trainer-cue-response" role="status" aria-live="assertive">{activeCueCallout}</p>}<p className="trainer-cue" aria-live="off">{phase === "rating" ? "How did that repetition feel?" : phase === "complete" ? "Round complete" : phase === "idle" ? "Ready when you are" : phase === "calibrating" ? "Tap the beat with Space, Enter, or the button below" : visibleCue || "Keep the pulse"}</p>
-        <div className="transport"><button className="button" onClick={start} disabled={settingsLocked}>{phase === "complete" ? "New round" : "Start round"}</button><button className="button-secondary" onClick={pause} disabled={phase !== "running" && phase !== "count-in"}>Pause</button><button className="button-secondary" onClick={resume} disabled={phase !== "paused"}>Resume</button><button className="button-secondary" onClick={reset} disabled={phase === "idle"}>Reset</button></div>
+        <p className="trainer-learning-stage" role="status">{stage}{learningMode !== "normal" ? ` · pass ${Math.min(repetition + 1, repetitions)}/${repetitions}` : ""}</p>{upcomingStage && <p className="trainer-stage-upcoming">Coming next: {upcomingStage}. Active targets are highlighted in the grid.</p>}{activeCueCallout && <p className="trainer-cue-response" role="status" aria-live="polite" aria-atomic="true">{activeCueCallout}</p>}<p className="trainer-cue" aria-live="off">{phase === "rating" ? "How did that repetition feel?" : phase === "complete" ? "Round complete" : phase === "idle" ? "Ready when you are" : phase === "calibrating" ? "Tap the beat with Space, Enter, or the button below" : visibleCue || "Keep the pulse"}</p>
+        <div className="transport"><button className="button" onClick={() => void start()} disabled={settingsLocked}>{phase === "complete" ? "New round" : "Start round"}</button><button className="button-secondary" onClick={pause} disabled={phase !== "running" && phase !== "count-in"}>Pause</button><button className="button-secondary" onClick={resume} disabled={phase !== "paused"}>Resume</button><button className="button-secondary" onClick={reset} disabled={phase === "idle"}>Reset</button></div>
         {recoveryAvailable && <div className="trainer-recovery-controls" aria-label="Round recovery"><button type="button" onClick={restartSlower}>Restart 8% slower</button><button type="button" onClick={repeatCurrentBar}>Repeat current bar</button>{(loopEnabled || hasFocusedTimingDrill) && <button type="button" onClick={returnToFullPhrase}>Return to full phrase</button>}</div>}
         {phase === "calibrating" && <button type="button" className="button-secondary" onClick={() => receiveHit("snare", source)}>Tap with the beat</button>}
         <p className="audio-status" role="status">{audioMessage}</p>
@@ -1444,7 +1579,9 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
         {lastHit && <p className="trainer-last-hit" role="status">{lastHit.rating.toUpperCase()} · {lastHit.instrument}{lastHit.midiArticulation ? ` · ${lastHit.midiArticulation.replaceAll("-", " ")}` : ""}{lastHit.articulation ? ` · ${articulationAbbreviation(lastHit.articulation)} target` : ""}{lastHit.offsetMs === null ? "" : ` · ${lastHit.offsetMs > 0 ? "+" : ""}${lastHit.offsetMs} ms`}{lastVelocity === null ? "" : ` · ${source === "midi" ? "MIDI velocity" : source.startsWith("audio-") ? "estimated strength" : "strength"} ${lastVelocity}`}{lastHit.accentTarget ? " · accent target" : ""}</p>}
         {liveTimingCoach && <p className="trainer-live-coach" role="status" aria-live="polite">Timing coach · {liveTimingCoach.message}</p>}
         {phase === "complete" && cueAdaptiveMessage && <p className="trainer-live-coach" role="status">{cueAdaptiveMessage}</p>}
-        {round && <div className="trainer-result"><h3>Round recap</h3>{round.durationSeconds && <p>Timed practice · {round.durationSeconds} seconds of playing time.</p>}{challenge && round.patternId === challenge.pattern.id && round.durationSeconds === challenge.durationSeconds && round.result && !round.inputClipped && !round.uncertainDetections && <p>{round.result.accuracy >= challenge.targetAccuracy ? 'Challenge target met' : 'Keep practising toward the challenge target'} · {round.result.accuracy}% / {challenge.targetAccuracy}% using {round.source}.</p>}{Boolean(round.uncertainDetections || round.inputClipped) && <p role="status">Input quality affected this round: {round.uncertainDetections ?? 0} uncertain detections{round.inputClipped ? ", clipping detected" : ""}. Recheck calibration before comparing this score. This round is excluded from comparable trends.</p>}{coaching && <div className="trainer-next-action"><strong>Next practice focus</strong><p>{coaching.text}</p><button type="button" disabled={settingsLocked} onClick={() => { setLoopUnit('beats'); setTimingDrillFocus(null); setLoopStartBeat(coaching.beat + (loopEnabled ? activeLoopStartBeat - 1 : 0)); setLoopEndBeat(coaching.beat + (loopEnabled ? activeLoopStartBeat - 1 : 0)); setLoopEnabled(true); setLearningMode('normal'); setBpm(coaching.bpm); reset(); }}>Practise this beat</button></div>}{transition && <div className="trainer-transition-feedback"><h4>Groove → fill → return</h4><p>Groove: {transition.groove} · Fill: {transition.fill} · Return to beat one after the fill: {transition.landing}</p></div>}{articulationNotes.map(note => <p key={note}>{note}</p>)}{midiArticulationSummary && <p>MIDI articulation details: {midiArticulationSummary}.</p>}{round.hits?.some(hit => hit.articulation === 'buzz') && <p>Buzz gestures: {round.hits.filter(hit => hit.articulation === 'buzz' && (hit.sustainMs ?? 0) >= 60).length} sustained for at least 60 ms. Keep the buzz continuous through the 180 ms gesture window.</p>}{phase === "complete" && tempoLadderMessage && <p role="status">{tempoLadderMessage}</p>}{round.result ? <><p><strong>{round.result.score} score · {round.result.accuracy}% accuracy</strong><br />{round.result.great} Great · {round.result.good} Good · {round.result.miss} Miss · {round.result.extra} Extra</p>{limbFeedback && <div className="trainer-limb-feedback"><h4>Hands and feet</h4>{(["hands", "feet"] as const).map((limb) => { const item = limbFeedback[limb]; return <span key={limb}><strong>{limb === "hands" ? "Hands" : "Feet"}</strong> {item.onTime}/{item.total} on time{item.total ? ` · ${item.misses} missed` : ""}{item.extras ? ` · ${item.extras} extra` : ""}</span>; })}</div>}<TimingOffsetChart hits={round.hits ?? []} /><TrainerTimingBreakdown hits={round.hits ?? []} />{voiceTiming.length > 0 && <div className="trainer-voice-feedback"><h4>Timing by drum voice</h4>{voiceTiming.map((item) => <div className="trainer-voice-row" key={item.instrument}><strong>{item.instrument}</strong><div className="timing-offset-track" role="img" aria-label={`${item.instrument} average timing ${item.averageOffsetMs} milliseconds ${item.averageOffsetMs > 0 ? "late" : item.averageOffsetMs < 0 ? "early" : "on time"}`}><i style={{ left: `${Math.max(2, Math.min(98, 50 + item.averageOffsetMs / 2))}%` }} /></div><span>{item.averageOffsetMs > 0 ? "+" : ""}{item.averageOffsetMs} ms avg · {item.averageAbsoluteOffsetMs} ms typical distance · {item.great + item.good}/{item.total} on time{item.miss ? ` · ${item.miss} missed` : ""}</span></div>)}</div>}{(round.source === "midi" || round.source === "audio-timing" || round.source === "audio-voices") && velocityFeedback && <div className="trainer-dynamics-feedback"><h4>{dynamicsPractice ? "Dynamics target check" : "Strike-strength feedback"}</h4><p>Average {round.source.startsWith("audio-") ? "estimated strength" : "MIDI velocity"}: marked accents <strong>{velocityFeedback.accentAverage ?? "—"}</strong> · {dynamicsPractice ? "unaccented snare taps" : "other hits"} <strong>{velocityFeedback.otherAverage ?? "—"}</strong>.</p><p>{dynamicsPractice ? "Aim for accents at 85+ and ghost-note snare taps below 55." : "Aim for accents at 85+ and keep softer notes between 35 and 78."} {velocityFeedback.message}</p></div>}</> : <p><strong>{round.ratings.filter((rating) => rating === "clean").length} clean</strong> · {round.ratings.filter((rating) => rating === "needsWork").length} needs work · {round.ratings.filter((rating) => rating === "missed").length} missed</p>}</div>}
+        {round && <div className="trainer-result"><h3>Round recap</h3>{round.result && <TrainerRoundExplanation round={round} pattern={pattern} />}{round.durationSeconds && <p>Timed practice · {round.durationSeconds} seconds of playing time.</p>}{challenge && round.patternId === challenge.pattern.id && round.durationSeconds === challenge.durationSeconds && round.result && !round.inputClipped && !round.uncertainDetections && <p>{round.result.accuracy >= challenge.targetAccuracy ? 'Challenge target met' : 'Keep practising toward the challenge target'} · {round.result.accuracy}% / {challenge.targetAccuracy}% using {round.source}.</p>}{Boolean(round.uncertainDetections || round.inputClipped) && <p role="status">Input quality affected this round: {round.uncertainDetections ?? 0} uncertain detections{round.inputClipped ? ", clipping detected" : ""}. Recheck calibration before comparing this score. This round is excluded from comparable trends.</p>}{coaching && <div className="trainer-next-action"><strong>Next practice focus</strong><p>{coaching.text}</p><p>Isolate {coaching.instrument} on this beat and repeat it for one minute at {coaching.bpm} BPM.</p><button type="button" disabled={settingsLocked} onClick={startCoachingDrill}>Start a 60-second {coaching.instrument} drill</button></div>}{focusProgression && round.focusedDrill && coachingSourceRound && <div className="trainer-focus-progression" aria-live="polite"><h4>Focus drill progress</h4><p>Beat {round.focusedDrill.beat} accuracy: {focusProgression.baselineAccuracy}% in the source round → {focusProgression.drillAccuracy}% in the drill. Typical timing: {focusProgression.baselineTimingMs === null ? "not available" : `${focusProgression.baselineTimingMs} ms`} → {focusProgression.drillTimingMs === null ? "not available" : `${focusProgression.drillTimingMs} ms`}.</p><p>{focusProgression.message}</p><button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => startFocusedDrill(round.focusedDrill!.instrument, focusProgression.nextBeat, focusProgression.nextBpm, coachingSourceRound.id, round.focusedDrill!.sourcePatternId ?? phrase.id)}>{focusProgression.action === "next-beat" ? `Start 60-second beat ${focusProgression.nextBeat} drill` : `Repeat 60-second drill at ${focusProgression.nextBpm} BPM`}</button></div>}{transition && <div className="trainer-transition-feedback"><h4>Groove → fill → return</h4><p>Groove: {transition.groove} · Fill: {transition.fill} · Return to beat one after the fill: {transition.landing}</p></div>}{articulationNotes.map(note => <p key={note}>{note}</p>)}{midiArticulationSummary && <p>MIDI articulation details: {midiArticulationSummary}.</p>}{round.hits?.some(hit => hit.articulation === 'buzz') && <p>Buzz gestures: {round.hits.filter(hit => hit.articulation === 'buzz' && (hit.sustainMs ?? 0) >= 60).length} sustained for at least 60 ms. Keep the buzz continuous through the 180 ms gesture window.</p>}{phase === "complete" && tempoLadderMessage && <p role="status">{tempoLadderMessage}</p>}{round.result ? <><p><strong>{round.result.score} score · {round.result.accuracy}% accuracy</strong><br />{round.result.great} Great · {round.result.good} Good · {round.result.miss} Miss · {round.result.extra} Extra</p>{limbFeedback && <div className="trainer-limb-feedback"><h4>Hands and feet</h4>{(["hands", "feet"] as const).map((limb) => { const item = limbFeedback[limb]; return <span key={limb}><strong>{limb === "hands" ? "Hands" : "Feet"}</strong> {item.onTime}/{item.total} on time{item.total ? ` · ${item.misses} missed` : ""}{item.extras ? ` · ${item.extras} extra` : ""}</span>; })}</div>}<TimingOffsetChart hits={round.hits ?? []} /><TrainerTimingBreakdown hits={round.hits ?? []} /><TrainerBarBreakdown hits={round.hits ?? []} pattern={pattern} hasDynamicsTargets={hasDynamicsTargets} />{voiceTiming.length > 0 && <div className="trainer-voice-feedback"><h4>Timing by drum voice</h4>{voiceTiming.map((item) => <div className="trainer-voice-row" key={item.instrument}><strong>{item.instrument}</strong><div className="timing-offset-track" role="img" aria-label={`${item.instrument} average timing ${item.averageOffsetMs} milliseconds ${item.averageOffsetMs > 0 ? "late" : item.averageOffsetMs < 0 ? "early" : "on time"}`}><i style={{ left: `${Math.max(2, Math.min(98, 50 + item.averageOffsetMs / 2))}%` }} /></div><span>{item.averageOffsetMs > 0 ? "+" : ""}{item.averageOffsetMs} ms avg · {item.averageAbsoluteOffsetMs} ms typical distance · {item.great + item.good}/{item.total} on time{item.miss ? ` · ${item.miss} missed` : ""}</span></div>)}</div>}{(round.source === "midi" || round.source === "audio-timing" || round.source === "audio-voices") && velocityFeedback && <div className="trainer-dynamics-feedback"><h4>{dynamicsPractice ? "Dynamics target check" : "Strike-strength feedback"}</h4><p>Average {round.source.startsWith("audio-") ? "estimated strength" : "MIDI velocity"}: marked accents <strong>{velocityFeedback.accentAverage ?? "—"}</strong> · {dynamicsPractice ? "unaccented snare taps" : "other hits"} <strong>{velocityFeedback.otherAverage ?? "—"}</strong>.</p><p>{dynamicsPractice ? "Aim for accents at 85+ and ghost-note snare taps below 55." : "Aim for accents at 85+ and keep softer notes between 35 and 78."} {velocityFeedback.message}</p></div>}</> : <p><strong>{round.ratings.filter((rating) => rating === "clean").length} clean</strong> · {round.ratings.filter((rating) => rating === "needsWork").length} needs work · {round.ratings.filter((rating) => rating === "missed").length} missed</p>}</div>}
+        {round?.backingChallenge && <p className="trainer-session-status" role="status">Play-along challenge · {round.backingChallenge} backing was synchronized to this {round.bpm} BPM round. <Link href={buildPlayAlongHref(round.patternName, round.bpm, round.backingChallenge)}>Open the matching Play-Along Studio setup</Link>.</p>}
+        {formTransitions.length > 0 && <div className="trainer-transition-feedback"><h4>Song-form transitions</h4><p>Timing by bar is available below. These summaries compare the groove before each marked fill, the fill bar, and the landing groove after it.</p><ul>{formTransitions.map(item => <li key={item.fillBar}>Fill in bar {item.fillBar} · groove before: {item.grooveBefore} · fill: {item.fill} · landing: {item.landing}</li>)}</ul></div>}
         {practicePlan && <p className="trainer-session-status" role="status">{practicePlan.placementCheck ? `Placement check · ${practicePlan.placementLabels?.[practicePlan.currentIndex] ?? "Round"} · round ${practicePlan.currentIndex + 1} of ${practicePlan.patternIds.length}.` : practicePlan.warmupCooldown && practicePlan.currentIndex === 0 ? "Session warm-up · play this easy groove at a comfortable tempo." : practicePlan.warmupCooldown && practicePlan.currentIndex === practicePlan.patternIds.length - 1 ? "Session cooldown · return to this easy groove and finish relaxed." : "Guided session · follow the selected pattern and focus."}</p>}
         {phase === "complete" && autoAdvanceCountdown !== null && nextPlanPattern && <p className="trainer-session-status" role="status" aria-live="polite">Next pattern in {autoAdvanceCountdown} seconds: {nextPlanPattern.name}. <button type="button" className="button-secondary" onClick={() => { setAutoAdvanceCountdown(null); setPlanAutoAdvance(false); }}>Stop auto-advance</button></p>}
         {phase === "complete" && practicePlan?.placementCheck && placementSummary && !nextPlanPattern && <div className="trainer-placement-result" role="status"><h3>{placementSummary.title}</h3><p>Placement check average: {placementSummary.averageAccuracy}% across {placementSummary.completedRounds} short rounds.</p><p>{placementSummary.recommendation}</p></div>}
@@ -1465,7 +1602,7 @@ export function DrumTrainer({ initialPatternId }: { initialPatternId?: string })
         {trainerMode === "scored" && source.startsWith("audio-") && <div className="trainer-input-confidence"><strong>Input confidence</strong><p>{audioConfidence === null ? 'Strike the kit to check detection confidence.' : `${Math.round(audioConfidence * 100)}% latest voice similarity · ${uncertainHits} uncertain detections left unscored this round.`}</p><p>{Object.keys(activeProfile.audioTemplates).length}/5 voices calibrated. {templateValues.length < 2 ? "More voice samples are needed to assess calibration quality." : overlappingTemplates ? "Some voice samples are very similar; recalibrate those voices separately." : "Voice templates are distinct at the current similarity threshold."} {Object.values(activeProfile.audioTemplates).length >= 2 ? 'Compare each voice separately; overlapping sounds can reduce confidence.' : 'Calibrate at least two different voices before voice scoring.'}</p>{audioMatches.length > 0 && <small>Latest match ranking: {audioMatches.map(item => `${item.instrument} ${Math.round(item.similarity * 100)}%`).join(" · ")}</small>}{confusingPair && source === "audio-voices" && <div className="trainer-audio-confusion" role="status"><p>These sounds are close: {confusingPair[0].instrument} {Math.round(confusingPair[0].similarity * 100)}% and {confusingPair[1].instrument} {Math.round(confusingPair[1].similarity * 100)}%. Calibrate them separately with a clean pause between strikes.</p><button type="button" className="button-secondary" disabled={!audioConnected || audioCalibrationHits > 0 || audioDynamicsCalibrationHits > 0 || settingsLocked} onClick={() => beginAudioCalibration(confusingPair[1].instrument)}>Recalibrate {confusingPair[1].instrument}</button></div>}</div>}<p role="status">{deviceMessage}</p>
       </section>
     </section>
-    <TrainerDeviceReadiness profileKey={profileKey} latencyMs={activeProfile.latencyMs} rounds={saved.rounds} disabled={settingsLocked} onCalibrate={startLatencyCalibration} />
+    <TrainerDeviceReadiness profileKey={profileKey} latencyMs={activeProfile.latencyMs} rounds={saved.rounds} disabled={settingsLocked} onCalibrate={startLatencyCalibration} openAtStart={openDeviceSetup} />
     <section id="trainer-progress" className="card trainer-history"><span className="eyebrow">Your practice</span><h2>Recent rounds.</h2>{patternHistory.count > 0 && <div className="trainer-pattern-history"><strong>{localizedPattern(pattern, locale).name}</strong><span>{patternHistory.count} rounds · {patternHistory.averageAccuracy}% average result{patternHistory.bestTempo ? ` · ${patternHistory.bestTempo} BPM at 85%+ accuracy` : ""}</span>{patternHistory.averageOffsetMs !== null && <span>Average timing: {patternHistory.averageOffsetMs > 0 ? "+" : ""}{patternHistory.averageOffsetMs} ms {patternHistory.averageOffsetMs > 0 ? "late" : patternHistory.averageOffsetMs < 0 ? "early" : "on time"} · {patternHistory.averageAbsoluteOffsetMs} ms typical distance</span>}</div>}{saved.rounds.length ? <ol>{saved.rounds.slice(0, 8).map((item) => { const localizedName = t(`pattern.${item.patternId}.name`); return <li key={item.id}><strong>{localizedName === `pattern.${item.patternId}.name` ? item.patternName : localizedName}</strong><span>{item.bpm} BPM · {item.mode === "self" ? `${item.ratings.filter((rating) => rating === "clean").length}/${item.repetitions ?? 10} clean` : `${item.result?.accuracy ?? 0}% accuracy`} · {item.adaptation && item.adaptation !== "standard" ? "adapted · " : ""}{formatDate(new Date(item.playedAt))}</span></li>; })}</ol> : <p>Complete a round to see your practice history.</p>}</section>
     <section className="card trainer-history trainer-progress-trends" aria-label="Practice progress trends"><span className="eyebrow">Progress trends</span><h2>See progress across sessions.</h2>{trainerProgress.rounds.length ? <><p>{trainerProgress.matchingAttemptCount} comparable rounds from {saved.rounds.length} saved attempts. Trends compare the same pattern and setup across tempos; the charts use up to the latest {trainerProgress.rounds.length}. {trainerProgress.delta === null ? "Complete another comparable round to see how accuracy is moving." : `${trainerProgress.delta > 0 ? "+" : ""}${trainerProgress.delta} percentage points across the two halves of the recent accuracy trend.`}</p><p>Recent timing distance: {timingDistance ?? "—"} ms · timing variation: {timingSpread ?? "—"} ms. Lower values mean tighter and steadier timing.</p><TrainerProgressChart points={trainerProgress.points} /><TrainerProgressMetrics metrics={trainerProgress.metrics} /><div className="trainer-progress-voices"><strong>Hit accuracy by voice</strong>{trainerProgress.voices.map((item) => <span key={item.instrument}><b>{item.instrument}</b> {item.onTime}/{item.total} on time · {item.accuracy}%{item.averageOffsetMs === null ? "" : ` · ${item.averageOffsetMs > 0 ? "+" : ""}${item.averageOffsetMs} ms avg`}</span>)}</div></> : <p>Complete reliable, scored full-pattern rounds to see your accuracy, tempo, timing, dynamics, and fill-return trends.</p>}<details className="trainer-progress-explainer"><summary>What counts as a matching attempt?</summary><p>Rounds must use the selected pattern, input type and device profile, target voice, feel, and variation. Tempo can vary so the chart can show progression. Focused drills, one-limb or adapted rounds, learning stages, clipped audio, and uncertain audio detections stay out because they use different targets or less reliable input.</p><p>{trainerProgress.matchingAttemptCount} matching attempts are available; up to the latest 12 appear in each trend. Timing and dynamics need measured hits, and fill-return data appears after groove-to-fill practice.</p></details></section>
     <section className="card trainer-mastery" aria-label="Pattern mastery and review"><span className="eyebrow">Mastery & review</span><h2>Keep skills fresh.</h2><p>{masteryCounts.due} due for review · {masteryCounts.ready} ready · {masteryCounts.building} building · {masteryCounts.new} new. Adaptive plans put due patterns first.</p>{reviewSuggestions.length ? <ul>{reviewSuggestions.map((item) => <li key={item.pattern.id}><div><strong>{localizedPattern(item.pattern, locale).name}</strong><span>{item.status === "due" ? "Review due" : "Building"} · {item.averageAccuracy}% recent result{item.attempts ? ` · ${item.attempts} rounds` : ""}</span></div><button type="button" className="button-secondary" disabled={settingsLocked} onClick={() => { setTimingDrillFocus(null); setPracticePlan(null); setActiveSetlistId(""); setPatternId(item.pattern.id); setFillPractice(false); setLoopEnabled(false); setBpm(item.pattern.defaultBpm); reset(); }}>Review</button></li>)}</ul> : <p>Finish a few rounds to build your review schedule.</p>}</section>
@@ -1486,6 +1623,11 @@ function getPatternBarCount(pattern: PracticePattern) {
   if (pattern.id.startsWith('phrase:')) return Number(pattern.id.split(':').at(-1)) || 1;
   const explicitBars = "meter" in pattern && typeof pattern.meter === "string" ? pattern.meter.match(/^(\d+)\s+bars?\b/i) : null;
   return explicitBars ? Math.max(1, Number(explicitBars[1])) : 1;
+}
+
+function buildPlayAlongHref(name: string, bpm: number, style: TrainerBackingStyle) {
+  const params = new URLSearchParams({ trainerChallenge: "1", name: name.slice(0, 60), bpm: String(Math.max(55, Math.min(160, Math.round(bpm)))), style });
+  return `/play-alongs?${params.toString()}`;
 }
 
 function getStepCountParts(pattern: PracticePattern, step: number) {
@@ -1683,15 +1825,20 @@ function stablePatternHash(value: string) {
   return (hash >>> 0).toString(36);
 }
 
-function getExpectedHitMarkerTimes(pattern: PracticePattern, bpm: number, repetitions: number, countInBeats: number, feel: TrainerFeel = "straight", voice?: Instrument, options: { swingRatio?: number; pocketMs?: number; learningMode?: LearningMode; includeFinalReturn?: boolean } = {}) {
+function getExpectedHitMarkerTimes(pattern: PracticePattern, bpm: number, repetitions: number, countInBeats: number, feel: TrainerFeel = "straight", voice?: Instrument, options: { swingRatio?: number; pocketMs?: number; learningMode?: LearningMode; includeFinalReturn?: boolean } = {}, patternSequence?: PracticePattern[]) {
   const countInMs = countInBeats * 60000 / bpm;
-  const targets: Expected[] = expectedRoundHits(pattern, bpm, countInMs, repetitions, feel, options).filter((target) => {
+  const duration = roundDurationMs(pattern, bpm);
+  const sequence = patternSequence
+    ? Array.from({ length: repetitions }, (_, index) => expectedRoundHits(patternSequence[index] ?? pattern, bpm, countInMs + index * duration, 1, feel, options).map(target => ({ ...target, repetition: index }))).flat()
+    : expectedRoundHits(pattern, bpm, countInMs, repetitions, feel, options);
+  const targets: Expected[] = sequence.filter((target) => {
     const stage = learningStage(options.learningMode ?? 'normal', target.repetition, repetitions);
     return (!voice || target.instrument === voice) && stage !== 'Listen' && (stage !== 'Feet' || target.instrument === 'kick') && (stage !== 'Hands' || target.instrument !== 'kick');
   });
   if (options.includeFinalReturn) {
-    const finalAt = countInMs + repetitions * roundDurationMs(pattern, bpm);
-    targets.push(...expectedRoundHits(pattern, bpm, finalAt, 1, feel, options)
+    const finalAt = countInMs + repetitions * duration;
+    const lastPattern = patternSequence?.[repetitions - 1] ?? pattern;
+    targets.push(...expectedRoundHits(lastPattern, bpm, finalAt, 1, feel, options)
       .filter(target => target.step === 0 && (!voice || target.instrument === voice))
       .filter(target => { const stage = learningStage(options.learningMode ?? 'normal', repetitions - 1, repetitions); return stage !== 'Listen' && (stage !== 'Feet' || target.instrument === 'kick') && (stage !== 'Hands' || target.instrument !== 'kick'); })
       .map(target => ({ ...target, repetition: repetitions - 1, transition: 'landing' as const })));
@@ -1721,9 +1868,13 @@ function getActualHitMarkerTimes(hits: RatedHit[], countInBeats: number, bpm: nu
   return hits.flatMap((hit) => typeof hit.atMs === "number" ? [countInMs + hit.atMs] : []).sort((a, b) => a - b);
 }
 
-function getExpectedDynamicsMarkers(pattern: PracticePattern, bpm: number, repetitions: number, countInBeats: number, feel: TrainerFeel, options: { swingRatio?: number; pocketMs?: number }): TrainerDynamicsMarker[] {
+function getExpectedDynamicsMarkers(pattern: PracticePattern, bpm: number, repetitions: number, countInBeats: number, feel: TrainerFeel, options: { swingRatio?: number; pocketMs?: number }, patternSequence?: PracticePattern[]): TrainerDynamicsMarker[] {
   const startAt = countInBeats * 60000 / bpm;
-  return expectedRoundHits(pattern, bpm, startAt, repetitions, feel, options)
+  const duration = roundDurationMs(pattern, bpm);
+  const targets = patternSequence
+    ? Array.from({ length: repetitions }, (_, index) => expectedRoundHits(patternSequence[index] ?? pattern, bpm, startAt + index * duration, 1, feel, options)).flat()
+    : expectedRoundHits(pattern, bpm, startAt, repetitions, feel, options);
+  return targets
     .flatMap(target => typeof target.velocityTarget === "number" ? [{ timeMs: target.at, velocity: target.velocityTarget }] : []);
 }
 

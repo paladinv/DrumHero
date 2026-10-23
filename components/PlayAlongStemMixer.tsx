@@ -1,13 +1,17 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { deleteBuilderBackingFile, readBuilderBackings, saveBuilderBacking, type BuilderBacking } from '@/lib/song-builder-storage';
+import { deleteBuilderBackingFile, readBuilderBackings, replaceBuilderBackingFiles, saveBuilderBacking, type BuilderBacking } from '@/lib/song-builder-storage';
+import type { PortablePlayAlongStem } from '@/lib/playalong-package';
 import { useLocalization } from './LocalizationProvider';
 
 export type PlayAlongStemMixerHandle = {
   sync: (milliseconds: number, rate?: number) => void;
   pause: () => void;
   getTempo: () => number | undefined;
+  getStems: () => BuilderBacking[];
+  isRightsConfirmed: () => boolean;
+  replaceStems: (stems: PortablePlayAlongStem[], tempo?: number) => Promise<void>;
 };
 
 type Props = { songId: string; tempo: number };
@@ -102,6 +106,60 @@ export const PlayAlongStemMixer = forwardRef<PlayAlongStemMixerHandle, Props>(fu
   useImperativeHandle(ref, () => ({
     pause: () => Object.values(audioRefs.current).forEach((audio) => audio?.pause()),
     getTempo: () => tracks.length ? syncTempo : undefined,
+    getStems: () => tracksRef.current,
+    isRightsConfirmed: () => rightsConfirmed,
+    replaceStems: async (stems, tempo) => {
+      if (stems.length && !rightsConfirmed) throw new Error(t('Confirm that you own or have permission to use these audio files.'));
+      if (stems.length > MAX_STEMS) throw new Error(t('A Play-Along mix can contain up to {count} imported stems.', { count: MAX_STEMS }));
+      const incomingBytes = stems.reduce((sum, stem) => sum + stem.blob.size, 0);
+      if (stems.some((stem) => !stem.blob.type.startsWith('audio/') || stem.blob.size > MAX_TRACK_BYTES) || incomingBytes > MAX_TOTAL_BYTES) {
+        throw new Error(t('This Play-Along package exceeds the supported audio size limits.'));
+      }
+      setBusy(true);
+      let context: AudioContext | null = null;
+      const next: BuilderBacking[] = [];
+      try {
+        if (typeof window.AudioContext !== 'function') throw new Error(t('Web Audio is not available in this browser.'));
+        context = new AudioContext();
+        for (const stem of stems) {
+          setMessage(t('Preparing {name} locally…', { name: stem.name }));
+          const buffer = await context.decodeAudioData(await stem.blob.arrayBuffer());
+          if (stem.downbeat > buffer.duration) throw new Error(t('The first downbeat is outside the audio file for {name}.', { name: stem.name }));
+          next.push({
+            id: crypto.randomUUID(), songId, stemId: crypto.randomUUID(),
+            name: stem.name.slice(0, 120), blob: stem.blob, duration: buffer.duration,
+            peaks: audioPeaks(buffer.getChannelData(0)), downbeat: stem.downbeat,
+            volume: stem.volume, bpm: stem.bpm ?? tempo, source: stem.source, rights: stem.rights,
+          });
+        }
+        Object.values(audioRefs.current).forEach((audio) => audio?.pause());
+        for (const [id, timer] of Object.entries(saveTimers.current)) {
+          window.clearTimeout(timer);
+          delete saveTimers.current[id];
+        }
+        const previousIds = tracksRef.current.map((track) => track.id);
+        await replaceBuilderBackingFiles(previousIds, next);
+        previousIds.forEach((id) => {
+          URL.revokeObjectURL(urls.current[id]);
+          delete urls.current[id];
+          delete audioRefs.current[id];
+          unlockedIds.current.delete(id);
+        });
+        next.forEach((track) => { urls.current[track.id] = URL.createObjectURL(track.blob); });
+        tracksRef.current = next;
+        setTracks(next);
+        const nextTempo = tempo ?? next[0]?.bpm;
+        if (nextTempo) setSyncTempo(nextTempo);
+        setRightsConfirmed(false);
+        setMessage(t('Imported full Play-Along package with {count} stems.', { count: next.length }));
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : t('Could not import this Play-Along package.'));
+        throw error;
+      } finally {
+        await context?.close().catch(() => undefined);
+        setBusy(false);
+      }
+    },
     sync: (milliseconds, rate = 1) => {
       for (const track of tracks) {
         const audio = audioRefs.current[track.id];
@@ -122,7 +180,7 @@ export const PlayAlongStemMixer = forwardRef<PlayAlongStemMixerHandle, Props>(fu
         }
       }
     },
-  }), [songId, syncTempo, t, tracks]);
+  }), [rightsConfirmed, songId, syncTempo, t, tracks]);
 
   const importFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -158,6 +216,7 @@ export const PlayAlongStemMixer = forwardRef<PlayAlongStemMixerHandle, Props>(fu
       const next = [...tracksRef.current, ...added];
       tracksRef.current = next;
       setTracks(next);
+      setRightsConfirmed(false);
       setMessage(t('Imported {count} audio files. Audio and rights notes stay on this device.', { count: added.length }));
     } catch (error) {
       await Promise.all(added.map((track) => deleteBuilderBackingFile(track.id).catch(() => undefined)));

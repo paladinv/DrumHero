@@ -70,6 +70,39 @@ export function SongLibraryNotation({ song, sectionId, partId, activeBar, active
     window.speechSynthesis.speak(utterance);
   };
 
+  const printScore = () => {
+    const source = host.current?.querySelector("canvas");
+    if (!source) { setError("The score is still drawing. Try printing again in a moment."); return; }
+    const printRoot = document.createElement("main");
+    printRoot.className = "song-score-print-root";
+    const title = document.createElement("h1"); title.textContent = song.title;
+    const subtitle = document.createElement("p");
+    subtitle.textContent = song.artist + " · " + song.bpm + " BPM · " + song.meter + (sectionId ? " · " + (song.sections.find(section => section.id === sectionId)?.name ?? "Section") : "") + " · " + (view === "staff" ? "Drum staff" : "Drum tab");
+    printRoot.append(title, subtitle);
+    try {
+      const printedPages = pages.length ? pages : [bars];
+      printedPages.forEach((pageBars, pageIndex) => {
+        const page = document.createElement("section"); page.className = "song-score-print-page";
+        const pageTitle = document.createElement("h2"); pageTitle.textContent = "Page " + (pageIndex + 1);
+        const rendered = compactNotation(song, bars, view, pageIndex);
+        page.append(pageTitle, rendered.canvas);
+        const list = document.createElement("ol");
+        pageBars.forEach(bar => {
+          const row = document.createElement("li");
+          const hits = bar.hits.length ? bar.hits.map(hit => (song.voiceLabels?.[hit.instrument] ?? hit.instrument) + " on " + countPosition(bar, hit.beat) + (hit.accent ? ", accent" : "") + (hit.ghost ? ", ghost note" : "") + (hit.sticking ? ", " + hit.sticking + " hand" : "")).join("; ") : "rest for the whole bar";
+          row.textContent = "Bar " + bar.number + " · " + bar.sectionName + " · " + bar.bpm + " BPM · " + hits + ".";
+          list.append(row);
+        });
+        page.append(list); printRoot.append(page);
+      });
+    } catch { setError("Could not prepare the printable score. Try changing notation view or reload the arrangement."); return; }
+    document.body.append(printRoot);
+    document.body.classList.add("song-score-printing");
+    const cleanup = () => { printRoot.remove(); document.body.classList.remove("song-score-printing"); };
+    window.addEventListener("afterprint", cleanup, { once: true });
+    window.setTimeout(() => window.print(), 50);
+  };
+
   return <section ref={root} className={`song-notation${highContrast ? " is-high-contrast" : ""}`} style={{ background: "var(--surface, #fff)" }}>
     {!reading && <h3>Notation and sticking</h3>}
     <div className="song-actions">
@@ -77,6 +110,7 @@ export function SongLibraryNotation({ song, sectionId, partId, activeBar, active
       {activeBar !== undefined && <label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow playback</label>}
       <button type="button" aria-pressed={highContrast} onClick={() => setHighContrast(value => !value)}>{highContrast ? "Standard notation contrast" : "High contrast notation"}</button>
       <button type="button" onClick={speakPage}>{speaking ? "Stop spoken counts" : "Hear counted beats on this page"}</button>
+      <button type="button" onClick={printScore}>Print this score or save as PDF</button>
       <button type="button" onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else if (root.current?.requestFullscreen) void root.current.requestFullscreen().catch(() => setError("Fullscreen is unavailable. Use browser zoom for a larger view.")); else setError("Fullscreen is unavailable. Use browser zoom for a larger view."); }}>Fullscreen notation</button>
       <button type="button" aria-pressed={view === "staff"} onClick={() => setView("staff")}>Drum staff</button>
       <button type="button" aria-pressed={view === "tab"} onClick={() => setView("tab")}>Drum tab</button>

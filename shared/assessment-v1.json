@@ -1,0 +1,1008 @@
+{
+  "version": 2,
+  "rules": {
+    "score": 85,
+    "meanAbsoluteMs": 60,
+    "dynamicsAccuracy": 80,
+    "dynamicsContrast": 20
+  },
+  "probes": [
+    {
+      "id": "pulse-1",
+      "domain": "pulse",
+      "tier": 1,
+      "name": "Steady quarters",
+      "bpm": 60,
+      "subdivision": 4,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "snare",
+          "accent": false
+        }
+      ]
+    },
+    {
+      "id": "pulse-2",
+      "domain": "pulse",
+      "tier": 2,
+      "name": "Even eighths",
+      "bpm": 75,
+      "subdivision": 8,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 5,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 7,
+          "instrument": "snare",
+          "accent": false
+        }
+      ]
+    },
+    {
+      "id": "pulse-3",
+      "domain": "pulse",
+      "tier": 3,
+      "name": "Pulse through rests",
+      "bpm": 90,
+      "subdivision": 8,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 5,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "snare",
+          "accent": false
+        }
+      ],
+      "alternates": [
+        [
+          {
+            "step": 1,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 2,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 4,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 5,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 7,
+            "instrument": "snare",
+            "accent": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "subdivisions-1",
+      "domain": "subdivisions",
+      "tier": 1,
+      "name": "Eighth-note groups",
+      "bpm": 60,
+      "subdivision": 8,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 5,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "snare",
+          "accent": false
+        }
+      ],
+      "alternates": [
+        [
+          {
+            "step": 0,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 1,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 3,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 4,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 6,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 7,
+            "instrument": "snare",
+            "accent": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "subdivisions-2",
+      "domain": "subdivisions",
+      "tier": 2,
+      "name": "Sixteenth-note groups",
+      "bpm": 75,
+      "subdivision": 16,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 8,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 9,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 10,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 11,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 12,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 14,
+          "instrument": "snare",
+          "accent": false
+        }
+      ],
+      "alternates": [
+        [
+          {
+            "step": 0,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 2,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 3,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 4,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 6,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 7,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 8,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 10,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 11,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 12,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 14,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 15,
+            "instrument": "snare",
+            "accent": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "subdivisions-3",
+      "domain": "subdivisions",
+      "tier": 3,
+      "name": "Triplet groups",
+      "bpm": 90,
+      "subdivision": 12,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 5,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 7,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 8,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 9,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 10,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 11,
+          "instrument": "snare",
+          "accent": false
+        }
+      ]
+    },
+    {
+      "id": "coordination-1",
+      "domain": "coordination",
+      "tier": 1,
+      "name": "First backbeat",
+      "bpm": 60,
+      "subdivision": 8,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 0,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 5,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 7,
+          "instrument": "hihat",
+          "accent": false
+        }
+      ]
+    },
+    {
+      "id": "coordination-2",
+      "domain": "coordination",
+      "tier": 2,
+      "name": "Offbeat kicks",
+      "bpm": 75,
+      "subdivision": 8,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 0,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 5,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 7,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 7,
+          "instrument": "kick",
+          "accent": false
+        }
+      ],
+      "alternates": [
+        [
+          {
+            "step": 0,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 0,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 1,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 1,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 2,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 2,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 3,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 4,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 4,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 5,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 5,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 6,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 6,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 7,
+            "instrument": "hihat",
+            "accent": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "coordination-3",
+      "domain": "coordination",
+      "tier": 3,
+      "name": "Independent layers",
+      "bpm": 90,
+      "subdivision": 16,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 0,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 8,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 8,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 10,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 10,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 12,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 12,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 12,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 14,
+          "instrument": "hihat",
+          "accent": false
+        }
+      ],
+      "alternates": [
+        [
+          {
+            "step": 0,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 0,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 2,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 2,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 3,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 4,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 6,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 6,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 8,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 8,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 10,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 10,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 11,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 12,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 14,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 14,
+            "instrument": "snare",
+            "accent": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "dynamics-1",
+      "domain": "dynamics",
+      "tier": 1,
+      "name": "Soft strokes and accents",
+      "bpm": 75,
+      "subdivision": 4,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "snare",
+          "accent": true
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "snare",
+          "accent": true
+        }
+      ],
+      "alternates": [
+        [
+          {
+            "step": 0,
+            "instrument": "snare",
+            "accent": true
+          },
+          {
+            "step": 1,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 2,
+            "instrument": "snare",
+            "accent": true
+          },
+          {
+            "step": 3,
+            "instrument": "snare",
+            "accent": false
+          }
+        ]
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "listen-1",
+      "kind": "listening",
+      "prompt": "Listen. Which rhythm did you hear?",
+      "probeId": "pulse-1",
+      "choices": [
+        "Four even quarter notes",
+        "Eight even eighth notes",
+        "A triplet on every beat",
+        "Silence on beat one"
+      ],
+      "answer": 0
+    },
+    {
+      "id": "listen-2",
+      "kind": "listening",
+      "prompt": "Listen. Which rhythm did you hear?",
+      "probeId": "subdivisions-3",
+      "choices": [
+        "Two notes per beat",
+        "Three even notes per beat",
+        "Four notes per beat",
+        "One note per beat"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "read-1",
+      "kind": "reading",
+      "prompt": "How many evenly spaced notes are shown in this bar?",
+      "probeId": "pulse-2",
+      "choices": [
+        "Four",
+        "Six",
+        "Eight",
+        "Twelve"
+      ],
+      "answer": 2
+    },
+    {
+      "id": "read-2",
+      "kind": "reading",
+      "prompt": "Which counting fits the groups shown?",
+      "probeId": "subdivisions-3",
+      "choices": [
+        "1 & 2 &",
+        "1 e & a",
+        "1 trip let 2 trip let",
+        "Only the downbeats"
+      ],
+      "answer": 2
+    },
+    {
+      "id": "listen-3",
+      "kind": "listening",
+      "prompt": "How many snare notes are played in the bar?",
+      "probeId": "subdivisions-1",
+      "choices": [
+        "Four",
+        "Six",
+        "Eight",
+        "Twelve"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "listen-4",
+      "kind": "listening",
+      "prompt": "Which description fits the rhythm you heard?",
+      "probeId": "pulse-3",
+      "choices": [
+        "Four evenly spaced quarter notes",
+        "Eighth notes on every grid step",
+        "Five notes with rests between some beats",
+        "A triplet on every beat"
+      ],
+      "answer": 2
+    },
+    {
+      "id": "read-3",
+      "kind": "reading",
+      "prompt": "Which syllables count four evenly spaced notes within each beat?",
+      "probeId": "subdivisions-2",
+      "choices": [
+        "1 &",
+        "1 e & a",
+        "1 trip let",
+        "1 2 3 4"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "read-4",
+      "kind": "reading",
+      "prompt": "How many notes are shown in this bar?",
+      "probeId": "pulse-3",
+      "choices": [
+        "Four",
+        "Five",
+        "Six",
+        "Eight"
+      ],
+      "answer": 1
+    }
+  ],
+  "lessons": {
+    "pulse": "count-the-grid",
+    "reading": "count-the-grid",
+    "basicCoordination": "first-backbeat",
+    "subdivisions": "sixteenth-control",
+    "syncopation": "syncopated-pocket",
+    "coordination": "limb-independence",
+    "dynamics": "dynamic-arc"
+  },
+  "focusPatterns": {
+    "count-the-grid": "single-stroke",
+    "first-backbeat": "first-beat",
+    "sixteenth-control": "double-stroke",
+    "syncopated-pocket": "syncopated-funk",
+    "limb-independence": "quarter-kick-backbeat",
+    "dynamic-arc": "six-stroke"
+  }
+}

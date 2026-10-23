@@ -1,6 +1,45 @@
 import { cleanMeterLabel, grooveToPart, makeBlankPart, meterBeats } from "./song-builder";
 import type { Groove } from "./types";
 import type { DrumSong, SongSection } from "./song-library";
+import { normalizeSong } from "./song-library";
+
+export const SAVED_ARRANGEMENT_TEMPLATES_KEY = "drum-hero:song-builder-templates:v1";
+export type SavedArrangementTemplate = { id: string; name: string; meter: string; bpm: number; sections: SongSection[]; createdAt: string };
+
+export function normalizeSavedArrangementTemplates(input: unknown): SavedArrangementTemplate[] {
+  if (!Array.isArray(input)) return [];
+  return input.slice(-40).flatMap((raw): SavedArrangementTemplate[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const value = raw as Partial<SavedArrangementTemplate>;
+    if (typeof value.id !== "string" || typeof value.name !== "string" || !Array.isArray(value.sections)) return [];
+    const normalized = normalizeSong({ title: "Template", artist: "Drum Hero", bpm: value.bpm, meter: value.meter, sections: value.sections });
+    if (!normalized || !normalized.sections.length) return [];
+    return [{ id: value.id.slice(0, 100), name: value.name.trim().slice(0, 40), meter: cleanMeterLabel(value.meter || normalized.meter), bpm: Math.max(40, Math.min(200, Math.round(Number(value.bpm) || 80))), sections: normalized.sections, createdAt: typeof value.createdAt === "string" && !Number.isNaN(Date.parse(value.createdAt)) ? value.createdAt : new Date(0).toISOString() }].filter(template => !!template.name);
+  });
+}
+
+export function readSavedArrangementTemplates(): SavedArrangementTemplate[] {
+  if (typeof window === "undefined") return [];
+  try { return normalizeSavedArrangementTemplates(JSON.parse(window.localStorage.getItem(SAVED_ARRANGEMENT_TEMPLATES_KEY) || "[]")); } catch { return []; }
+}
+
+export function writeSavedArrangementTemplates(templates: SavedArrangementTemplate[]) {
+  if (typeof window === "undefined") return false;
+  try { window.localStorage.setItem(SAVED_ARRANGEMENT_TEMPLATES_KEY, JSON.stringify(normalizeSavedArrangementTemplates(templates))); return true; } catch { return false; }
+}
+
+export function instantiateSavedArrangementTemplate(template: SavedArrangementTemplate): SongSection[] {
+  const sectionIds = new Map(template.sections.map(section => [section.id, crypto.randomUUID()]));
+  return template.sections.map(section => {
+    const partIds = new Map(section.parts.map(part => [part.id, crypto.randomUUID()]));
+    return {
+      ...structuredClone(section), id: sectionIds.get(section.id)!,
+      parts: section.parts.map(part => ({ ...structuredClone(part), id: partIds.get(part.id)!, sourceId: undefined, linkedBaseId: part.linkedBaseId ? partIds.get(part.linkedBaseId) : undefined })),
+      clips: section.clips?.map(clip => ({ ...structuredClone(clip), id: crypto.randomUUID(), partId: partIds.get(clip.partId)!, repeatVariants: clip.repeatVariants?.flatMap(variant => partIds.has(variant.partId) ? [{ ...variant, partId: partIds.get(variant.partId)! }] : []) })),
+      rehearsalCues: section.rehearsalCues?.map(cue => ({ ...cue, id: crypto.randomUUID() }))
+    };
+  });
+}
 
 export type ArrangementTemplateId = "pop-form" | "verse-chorus" | "12-bar-blues" | "aaba-32" | "rock-anthem" | "funk-pocket" | "shuffle-blues";
 export const ARRANGEMENT_TEMPLATES: Array<{ id: ArrangementTemplateId; label: string; description: string }> = [

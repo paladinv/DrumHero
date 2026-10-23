@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		012539B413458CF3CA91AA28 /* PracticeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9081AA73CEF3876A1250C34F /* PracticeController.swift */; };
+		021485FFA02090CACE24AA11 /* assessment-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = 42585C509E61885E2F32C84B /* assessment-v1.json */; };
+		04554DAC188F9F165C705C92 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 7C80AF1C00D4F1C1750361CD /* InfoPlist.xcstrings */; };
 		08EF6FB571F617AA51C91AD9 /* ContentAndRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE6910310322362D474F1415 /* ContentAndRulesTests.swift */; };
 		146DB279ADAE9B472C860753 /* drum-content.json in Resources */ = {isa = PBXBuildFile; fileRef = DBD728EB85D6279843D3FC26 /* drum-content.json */; };
 		15AF08FAA0A4966D2161DF38 /* AppViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB51C26C37F04D2313C67EF /* AppViews.swift */; };
@@ -17,28 +19,40 @@
 		1E3EC8B645F519CB468CA9BF /* LanguageSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 633529DA00ED2DDA14E09B38 /* LanguageSettings.swift */; };
 		1E928BBF32D09B1DE199A587 /* DrumAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 986003818D51DEA41831B39B /* DrumAudioService.swift */; };
 		215A584DAAAC62E8EC1EBDC8 /* ProgressModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD534F67307FF03AC590BBE6 /* ProgressModels.swift */; };
+		225C1C4567E12E10FDE47819 /* SightReadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD6DE1474BE371846962DF83 /* SightReadingView.swift */; };
 		2C719A3D90A8BE5B88CCA2A1 /* hihat-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = C232EA11EFFCE0D8211227C0 /* hihat-3.wav */; };
+		31D5840139B404D4F903B35D /* sight-reading-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = 98EB443BEFD30001099600CE /* sight-reading-v1.json */; };
 		32C205E0C80428373F3527AF /* DrumHeroApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B9D8F7E9F2C94FACCD10CF /* DrumHeroApp.swift */; };
 		3B73F4BA441C0954B17A07F3 /* snare-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = 56485AEE933325BF1C6E641A /* snare-3.wav */; };
+		412B2300330A3185B5507A88 /* assessment-fixtures-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = 4AE8AF4469A420B912672495 /* assessment-fixtures-v1.json */; };
 		4A85491CB2E1F857EAE34499 /* kick-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = 963146A9B064DD6C66CE9DAB /* kick-2.wav */; };
 		59B9BC75EC47F32B9ADC3259 /* tom-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2645FFC3203E30AC17E5ACFA /* tom-1.wav */; };
 		5E1B86117209D386137606F3 /* MobileContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14796533397D80A0764D83F5 /* MobileContent.swift */; };
 		60583A13731231ECC6AE63C1 /* drum-content.json in Resources */ = {isa = PBXBuildFile; fileRef = DBD728EB85D6279843D3FC26 /* drum-content.json */; };
 		63A60DF3DA71D7DEC8E8533C /* kick-4.wav in Resources */ = {isa = PBXBuildFile; fileRef = 42333159AFB756BAE129EDC6 /* kick-4.wav */; };
+		68D9D931172370F82078564C /* AssessmentDailyPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = F557AA13AAA5E53405D4F316 /* AssessmentDailyPlan.swift */; };
 		7F9BCF0761EE365914549AE5 /* kick-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = BD33984B818527B09E1AE8FF /* kick-3.wav */; };
 		841F447B7C39E0E2779881B8 /* crash-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 213E58BBC84B425801048580 /* crash-1.wav */; };
+		87F50A5235CB518B316DCFCC /* AssessmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFED9018B2E7997CD6CDCFE9 /* AssessmentTests.swift */; };
+		891D8CD3E5D6940B49BFF4F7 /* SightReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = C904CB01AB709B3BF11A3084 /* SightReading.swift */; };
+		92907146E843F7CA27C5F5D6 /* MobileSongLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38B2EE6D9A8B970A74045D98 /* MobileSongLibrary.swift */; };
+		9590734AFF7D00EF0464F8B6 /* AssessmentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD8E5042C8A3D2C94A75E95F /* AssessmentController.swift */; };
 		95C560B53D52C159DA34E60C /* DrumHeroUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65488FD0266A262D217416E4 /* DrumHeroUITests.swift */; };
 		A3EE70B39E9D3569993F7138 /* scoring-fixtures.json in Resources */ = {isa = PBXBuildFile; fileRef = 2B781A129DD39ADB5E3CBFDF /* scoring-fixtures.json */; };
 		AFF6137BC80CA90B241535B8 /* hihat-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = EB718E07C041D33CF47F674B /* hihat-2.wav */; };
+		B3F139265D2A6A4BFF4B8C48 /* assessment-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = 42585C509E61885E2F32C84B /* assessment-v1.json */; };
 		BC225EA7E05D6087C3FD0C1A /* crash-4.wav in Resources */ = {isa = PBXBuildFile; fileRef = F98561CFA1432B632F382487 /* crash-4.wav */; };
 		CA5874693558DC1CBAD9DD81 /* kick-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 10951FB54832B2362A51ED78 /* kick-1.wav */; };
+		D0E5636A49D1BBC62F7186D9 /* InitialAssessmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F376B42CDF6C928432D55ECE /* InitialAssessmentView.swift */; };
 		D23A6DB10104F7143DF09F8D /* hihat-4.wav in Resources */ = {isa = PBXBuildFile; fileRef = ADA7E7983D6DAEE9F52F1ECA /* hihat-4.wav */; };
+		D7A16140F7D7DA6AFA5CBD98 /* MobileInputServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A530BC6893712B77AF48CC6 /* MobileInputServices.swift */; };
 		E4C20B42DF10AD1D782D4FFE /* PracticeRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC09AB9F564073DF75777E1 /* PracticeRules.swift */; };
 		E7E8E4C16A4E433FFD075D0A /* snare-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 2C6DA55C8C5885E6AEC7145B /* snare-1.wav */; };
 		EC151D23343A2B4B3DD771CE /* crash-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = 7837B2FF748E500D61CAC624 /* crash-3.wav */; };
 		ED462647C4DF6A09B6A1A1B1 /* tom-3.wav in Resources */ = {isa = PBXBuildFile; fileRef = C9438C4A1E0F0C77F4DF9293 /* tom-3.wav */; };
 		EE136FDF72DB13F49926B292 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = E51BE47FE2FFF3A7FFF7C981 /* Localizable.xcstrings */; };
 		F99C17938ECE0CAA2D81AE75 /* hihat-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = D41A0D0BB570C3439EE39E69 /* hihat-1.wav */; };
+		FC539B7D43EF60357A87904A /* InitialAssessment.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF94C266F8659C60FA5B4446 /* InitialAssessment.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,19 +82,28 @@
 		2B781A129DD39ADB5E3CBFDF /* scoring-fixtures.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "scoring-fixtures.json"; sourceTree = "<group>"; };
 		2C6DA55C8C5885E6AEC7145B /* snare-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "snare-1.wav"; sourceTree = "<group>"; };
 		32B9D8F7E9F2C94FACCD10CF /* DrumHeroApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumHeroApp.swift; sourceTree = "<group>"; };
+		38B2EE6D9A8B970A74045D98 /* MobileSongLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSongLibrary.swift; sourceTree = "<group>"; };
 		42333159AFB756BAE129EDC6 /* kick-4.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-4.wav"; sourceTree = "<group>"; };
+		42585C509E61885E2F32C84B /* assessment-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "assessment-v1.json"; sourceTree = "<group>"; };
+		4AE8AF4469A420B912672495 /* assessment-fixtures-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "assessment-fixtures-v1.json"; sourceTree = "<group>"; };
 		56485AEE933325BF1C6E641A /* snare-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "snare-3.wav"; sourceTree = "<group>"; };
+		5A530BC6893712B77AF48CC6 /* MobileInputServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileInputServices.swift; sourceTree = "<group>"; };
 		633529DA00ED2DDA14E09B38 /* LanguageSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageSettings.swift; sourceTree = "<group>"; };
 		65488FD0266A262D217416E4 /* DrumHeroUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumHeroUITests.swift; sourceTree = "<group>"; };
 		7837B2FF748E500D61CAC624 /* crash-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-3.wav"; sourceTree = "<group>"; };
 		7A9C0C4272CDD94C746096B1 /* DrumHero.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DrumHero.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C80AF1C00D4F1C1750361CD /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		9081AA73CEF3876A1250C34F /* PracticeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeController.swift; sourceTree = "<group>"; };
 		963146A9B064DD6C66CE9DAB /* kick-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-2.wav"; sourceTree = "<group>"; };
 		986003818D51DEA41831B39B /* DrumAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumAudioService.swift; sourceTree = "<group>"; };
+		98EB443BEFD30001099600CE /* sight-reading-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "sight-reading-v1.json"; sourceTree = "<group>"; };
 		9E311DC9729E35D37A8EA12F /* DrumHeroTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = DrumHeroTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AD6DE1474BE371846962DF83 /* SightReadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SightReadingView.swift; sourceTree = "<group>"; };
 		ADA7E7983D6DAEE9F52F1ECA /* hihat-4.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-4.wav"; sourceTree = "<group>"; };
+		AFED9018B2E7997CD6CDCFE9 /* AssessmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentTests.swift; sourceTree = "<group>"; };
 		BD33984B818527B09E1AE8FF /* kick-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-3.wav"; sourceTree = "<group>"; };
 		C232EA11EFFCE0D8211227C0 /* hihat-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-3.wav"; sourceTree = "<group>"; };
+		C904CB01AB709B3BF11A3084 /* SightReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SightReading.swift; sourceTree = "<group>"; };
 		C9438C4A1E0F0C77F4DF9293 /* tom-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "tom-3.wav"; sourceTree = "<group>"; };
 		CE6910310322362D474F1415 /* ContentAndRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentAndRulesTests.swift; sourceTree = "<group>"; };
 		D41A0D0BB570C3439EE39E69 /* hihat-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-1.wav"; sourceTree = "<group>"; };
@@ -90,9 +113,13 @@
 		E6D6C71C393C610A2281D1AA /* snare-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "snare-2.wav"; sourceTree = "<group>"; };
 		EB718E07C041D33CF47F674B /* hihat-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-2.wav"; sourceTree = "<group>"; };
 		ED9608DFA949B0247EB9807C /* crash-2.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-2.wav"; sourceTree = "<group>"; };
+		F376B42CDF6C928432D55ECE /* InitialAssessmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InitialAssessmentView.swift; sourceTree = "<group>"; };
+		F557AA13AAA5E53405D4F316 /* AssessmentDailyPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentDailyPlan.swift; sourceTree = "<group>"; };
 		F98561CFA1432B632F382487 /* crash-4.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "crash-4.wav"; sourceTree = "<group>"; };
 		FBC09AB9F564073DF75777E1 /* PracticeRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeRules.swift; sourceTree = "<group>"; };
 		FD534F67307FF03AC590BBE6 /* ProgressModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressModels.swift; sourceTree = "<group>"; };
+		FD8E5042C8A3D2C94A75E95F /* AssessmentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentController.swift; sourceTree = "<group>"; };
+		FF94C266F8659C60FA5B4446 /* InitialAssessment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InitialAssessment.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -124,7 +151,11 @@
 			isa = PBXGroup;
 			children = (
 				1CB51C26C37F04D2313C67EF /* AppViews.swift */,
+				F557AA13AAA5E53405D4F316 /* AssessmentDailyPlan.swift */,
+				F376B42CDF6C928432D55ECE /* InitialAssessmentView.swift */,
 				633529DA00ED2DDA14E09B38 /* LanguageSettings.swift */,
+				38B2EE6D9A8B970A74045D98 /* MobileSongLibrary.swift */,
+				AD6DE1474BE371846962DF83 /* SightReadingView.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -186,6 +217,9 @@
 		6FEB9C3267798E195F519317 /* shared */ = {
 			isa = PBXGroup;
 			children = (
+				4AE8AF4469A420B912672495 /* assessment-fixtures-v1.json */,
+				42585C509E61885E2F32C84B /* assessment-v1.json */,
+				98EB443BEFD30001099600CE /* sight-reading-v1.json */,
 				6A9AA52B8B86E0A449D889C0 /* mobile */,
 			);
 			path = shared;
@@ -207,7 +241,9 @@
 		85781D7CE197799309D43E7B /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				FD8E5042C8A3D2C94A75E95F /* AssessmentController.swift */,
 				986003818D51DEA41831B39B /* DrumAudioService.swift */,
+				5A530BC6893712B77AF48CC6 /* MobileInputServices.swift */,
 				9081AA73CEF3876A1250C34F /* PracticeController.swift */,
 			);
 			path = Services;
@@ -226,6 +262,7 @@
 		98FCFD3B8C2DD49BD424FDF9 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				7C80AF1C00D4F1C1750361CD /* InfoPlist.xcstrings */,
 				E51BE47FE2FFF3A7FFF7C981 /* Localizable.xcstrings */,
 			);
 			path = Resources;
@@ -258,8 +295,10 @@
 		C37B37BA26D1977DDA9832A6 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				FF94C266F8659C60FA5B4446 /* InitialAssessment.swift */,
 				14796533397D80A0764D83F5 /* MobileContent.swift */,
 				FBC09AB9F564073DF75777E1 /* PracticeRules.swift */,
+				C904CB01AB709B3BF11A3084 /* SightReading.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -275,6 +314,7 @@
 		F8F3372B38FAE1210F7E5F43 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				AFED9018B2E7997CD6CDCFE9 /* AssessmentTests.swift */,
 				CE6910310322362D474F1415 /* ContentAndRulesTests.swift */,
 				27FC21438D8054D2E1CCFF45 /* Fixtures */,
 			);
@@ -412,7 +452,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				04554DAC188F9F165C705C92 /* InfoPlist.xcstrings in Resources */,
 				EE136FDF72DB13F49926B292 /* Localizable.xcstrings in Resources */,
+				021485FFA02090CACE24AA11 /* assessment-v1.json in Resources */,
 				841F447B7C39E0E2779881B8 /* crash-1.wav in Resources */,
 				1612D75F4206F799F6DE7201 /* crash-2.wav in Resources */,
 				EC151D23343A2B4B3DD771CE /* crash-3.wav in Resources */,
@@ -439,8 +481,11 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				412B2300330A3185B5507A88 /* assessment-fixtures-v1.json in Resources */,
+				B3F139265D2A6A4BFF4B8C48 /* assessment-v1.json in Resources */,
 				60583A13731231ECC6AE63C1 /* drum-content.json in Resources */,
 				A3EE70B39E9D3569993F7138 /* scoring-fixtures.json in Resources */,
+				31D5840139B404D4F903B35D /* sight-reading-v1.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -451,6 +496,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				87F50A5235CB518B316DCFCC /* AssessmentTests.swift in Sources */,
 				08EF6FB571F617AA51C91AD9 /* ContentAndRulesTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -468,13 +514,21 @@
 			buildActionMask = 2147483647;
 			files = (
 				15AF08FAA0A4966D2161DF38 /* AppViews.swift in Sources */,
+				9590734AFF7D00EF0464F8B6 /* AssessmentController.swift in Sources */,
+				68D9D931172370F82078564C /* AssessmentDailyPlan.swift in Sources */,
 				1E928BBF32D09B1DE199A587 /* DrumAudioService.swift in Sources */,
 				32C205E0C80428373F3527AF /* DrumHeroApp.swift in Sources */,
+				FC539B7D43EF60357A87904A /* InitialAssessment.swift in Sources */,
+				D0E5636A49D1BBC62F7186D9 /* InitialAssessmentView.swift in Sources */,
 				1E3EC8B645F519CB468CA9BF /* LanguageSettings.swift in Sources */,
 				5E1B86117209D386137606F3 /* MobileContent.swift in Sources */,
+				D7A16140F7D7DA6AFA5CBD98 /* MobileInputServices.swift in Sources */,
+				92907146E843F7CA27C5F5D6 /* MobileSongLibrary.swift in Sources */,
 				012539B413458CF3CA91AA28 /* PracticeController.swift in Sources */,
 				E4C20B42DF10AD1D782D4FFE /* PracticeRules.swift in Sources */,
 				215A584DAAAC62E8EC1EBDC8 /* ProgressModels.swift in Sources */,
+				891D8CD3E5D6940B49BFF4F7 /* SightReading.swift in Sources */,
+				225C1C4567E12E10FDE47819 /* SightReadingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -666,6 +720,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Drum Hero";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Drum Hero analyzes microphone levels locally to score one selected drum voice. It does not record or save audio.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -705,6 +760,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Drum Hero";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Drum Hero analyzes microphone levels locally to score one selected drum voice. It does not record or save audio.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (

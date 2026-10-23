@@ -8,8 +8,16 @@ Song Builder saves personal arrangements in the on-device Song Library. Use the 
 - Arrangement templates provide pop, verse/chorus, rock anthem, funk pocket, shuffle blues, twelve-bar blues, and AABA forms. Starters follow the song meter and seed each section with a matching editable groove when one is available.
 - **Design a variation** provides density, complexity, and fill intensity controls. Generate and audition a preview, then insert an independent editable pattern. Source notes stay unchanged.
 - The fill assistant offers meter-matched library fills, previews them between the surrounding patterns, and adapts a copied fill's density and ending to the next downbeat. One-measure fill, break, pickup, or crash transitions can also be appended at section boundaries; source patterns stay unchanged.
-- Song Builder includes cowbell, shaker, tambourine, and four custom lanes. Import a sample for each lane, set its mix, MIDI note, and staff position, and rename it for the song; labels carry through the tab, accessible score, staff, and project backup.
+- Song Builder includes cowbell, shaker, tambourine, and up to eight custom lanes. Add or remove custom lanes per song, import a sample for each lane, set its mix, MIDI note, and staff position, and rename it; labels carry through the tab, accessible score, staff, and project backup.
+- The percussion staff can edit notes as well as preview them. Enable staff editing, choose a voice, then click a measure at the desired time; the measure and grid-step controls provide keyboard-accessible editing.
+- Reference cue lanes support chord symbols, lyric prompts, and band directions per measure. Cues repeat with their section and appear in playback, score annotations, and MIDI markers.
+- Arrangement form ideas preview AABA, verse–chorus, and ABAC sequences before appending independent copies. Choose a straight, swing, or shuffle feel for the preview.
+- Backing track matching offers pitch preservation and an arrangement beat-grid overlay. Tempo anchors still determine the timing map.
 - Grid hits support accents, ghosts, velocity, sticking, flams, drags, buzz rolls, measured rolls, foot splashes, and cymbal chokes. Closed hi-hat strikes stop ringing open hats.
+- The fill assistant ranks suggestions by bar length, note density, neighboring drum voices, and a crash on the next section's downbeat. It previews each suggestion in context before insertion.
+- Saved recording takes can be auditioned as Take A and Take B. Choose a source pass for each captured measure to create a new comp take; both source takes remain unchanged.
+- Grid zoom now also works in Touch focus, from compact cells to larger touch targets. While focus is outside an input, button, or grid cell, Space starts/pauses/resumes playback and period stops it. The playhead reports section, measure, and step to screen readers.
+- The guided tasks walk through shaping a section transition and preparing a print-ready chart, opening each relevant Song Builder workspace as you go.
 
 ## Arrangement and rehearsal
 
@@ -20,6 +28,8 @@ Use **Edit clip repeat** to choose which pass to edit. Make any pass an independ
 In Rehearse, set a measure range and enable Loop. Select a tempo increment, loops before each increase, and a target BPM. Playback shows the current tempo and loop. Save a **performance preset** to restore its tempo, mixer, playback options, count-in, loop range, and backing level later. Timing and velocity humanization are independent; **Preview feel before applying** auditions two measures with proposed swing and variation settings.
 
 Mixer levels, panning, mute, solo, kit selection, notation layout, practice progression, and feel are remembered per song. Section automation can shape overall and cymbal volume, mute voices, and draw an independent volume curve for each voice. Backing audio follows the arrangement during playback, seeking, and looping. Its waveform lets you drag the first downbeat and tempo markers, or click to place the selected measure marker.
+
+Saved kit presets can be auditioned A/B on the selected pattern without changing the active mix. Custom drum voices accept a primary sample plus an optional accent layer, selected at velocity 96 and above; the layer is included in project and device backups.
 
 ## Downloads and backups
 
@@ -50,6 +60,13 @@ Everything remains local to the browser unless the user downloads or otherwise s
 - **Versions and recovery** can compare the current song with a saved snapshot by note changes and render both as A/B audio using the current kit settings.
 - **Arrangement flow check** flags long silent runs, large hit-density changes between sections, and sharp tempo jumps for review. These prompts are advisory; intentional breaks and contrasts are valid.
 - Song-specific practice presets retain their section, part, measure range, tempo, count-in, repetitions, and tempo ladder. Generic practice presets start from the whole song; performance presets restore the rehearsal range and playback setup saved with them.
-- The cloud sync panel can show which members of a reviewed shared library are currently in the song and which section they selected. Presence is temporary and does not lock editing; simultaneous arrangement changes still use cloud revision conflict review.
+- The cloud sync panel can show which members of a reviewed shared library are currently in the song and which section they selected. Presence is temporary and does not lock editing; simultaneous arrangement changes still use cloud revision conflict review. Editors can press **Sync now** to upload immediately; the panel shows whether reviewed device edits are pending.
 - The arrangement timeline summarizes section duration, tempo ramps, meter changes, and per-voice hit density. Setlist performance can auto-play each entry with its configured count-in, while honoring any break that needs a manual ready action.
 - Song Library sorting includes tempo, song duration, and recently edited order alongside tags, meter, saved searches, collections, and practice/review sorting.
+
+
+## Reusable composition and sharing tools
+
+Song Builder supports personal arrangement templates saved on the device, with independent copies inserted into later songs. Pattern sources can be previewed after fitting them to the selected section meter; the preview preserves the source groove and can be auditioned before insertion. Section and clip playback feel controls can override song-level swing and humanization.
+
+The arrangement workspace includes bar-range A/B comparison and optional style-aware flow prompts for pop/rock, funk/hip-hop, jazz/blues, and metal/punk forms. These checks are advisory. Export presets save the notation view, page layout, scope, and PNG/PDF format. **Copy playback link** creates a read-only view with a synced notation cursor and built-in drum playback. The arrangement travels in the URL fragment; private notes, lyric cues, backing audio, and custom samples are excluded. Non-lyric rehearsal cues are retained.

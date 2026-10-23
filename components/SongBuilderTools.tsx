@@ -1,15 +1,44 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { DrumPart, DrumSong, SongArrangementAutomationPoint, SongSection, SongSectionAutomation } from '@/lib/song-library';
+import type { DrumPart, DrumSong, SongArrangementAutomationPoint, SongFeel, SongSection, SongSectionAutomation } from '@/lib/song-library';
 import type { SongInstrument } from '@/lib/types';
 import { normalizeSong } from '@/lib/song-library';
 import { ARRANGEMENT_CLIPBOARD_KEY, arrangementFlowHints, normalizeTempoAnchors, noteDiff, pasteSections, playabilityHints, suggestSticking, type ArrangementClipboard } from '@/lib/song-builder-tools';
 import { builderStorageInventory, deleteBuilderBackingFile, deleteBuilderTake, deleteBuilderVersion } from '@/lib/song-builder-storage';
 import type { ArrangementBar } from '@/lib/song-builder';
-import { sectionClips, songVoiceLabel, VOICE_LABEL } from '@/lib/song-builder';
+import { sectionClips, songVoiceLabel, varyDrumPart, VOICE_LABEL } from '@/lib/song-builder';
 import { drawNotationPage, paginateNotation, type NotationOptions, type NotationView } from '@/lib/song-builder-notation';
 import { morphDrumParts } from '@/lib/song-builder-creative';
+
+type TaskGuideWorkspace = "compose" | "arrange" | "rehearse" | "export";
+type TaskGuideStep = { title: string; detail: string; workspace: TaskGuideWorkspace; target: string };
+const taskGuides: Record<"transition" | "chart", { name: string; steps: TaskGuideStep[] }> = {
+  transition: { name: "Build a section transition", steps: [
+    { title: "Choose the section", detail: "Select the groove that leads into the change, then check the next section’s first pattern.", workspace: "compose", target: ".song-builder-grid" },
+    { title: "Shape the fill", detail: "Choose a meter-matched fill and set its length, density, and complexity.", workspace: "compose", target: ".song-builder-fill-assistant" },
+    { title: "Audition the transition", detail: "Play the surrounding groove, fill, and arrival together before inserting it.", workspace: "compose", target: ".song-builder-fill-assistant" },
+    { title: "Rehearse the landing", detail: "Loop the final measures and listen for a clear arrival on the next section’s downbeat.", workspace: "rehearse", target: ".song-builder-toolbar" }
+  ] },
+  chart: { name: "Prepare a print-ready chart", steps: [
+    { title: "Check the arrangement", detail: "Review section order, repeats, tempo changes, and rehearsal cues.", workspace: "arrange", target: ".song-builder-arrangement" },
+    { title: "Set the notation view", detail: "Choose drum tab or percussion staff, paper size, spacing, and section breaks.", workspace: "export", target: ".song-builder-notation" },
+    { title: "Review page previews", detail: "Check measure density and labels, then adjust measures per line or page breaks if needed.", workspace: "export", target: ".song-builder-export-pages" },
+    { title: "Download the chart", detail: "Export the full song or the selected section as PNG or PDF.", workspace: "export", target: ".song-builder-export-actions" }
+  ] }
+};
+
+export function SongBuilderTaskGuide({ onNavigate }: { onNavigate: (workspace: TaskGuideWorkspace, target: string) => void }) {
+  const [guide, setGuide] = useState<keyof typeof taskGuides | "">("");
+  const [stepIndex, setStepIndex] = useState(0);
+  const active = guide ? taskGuides[guide] : undefined;
+  const step = active?.steps[Math.min(stepIndex, active.steps.length - 1)];
+  return <section className="song-builder-task-guide" aria-label="Guided Song Builder tasks">
+    <div><strong>Guided tasks</strong><p>Follow a focused workflow for a transition or a print-ready chart.</p></div>
+    <div className="song-builder-actions"><button type="button" aria-pressed={guide === "transition"} onClick={() => { setGuide("transition"); setStepIndex(0); }}>Build a section transition</button><button type="button" aria-pressed={guide === "chart"} onClick={() => { setGuide("chart"); setStepIndex(0); }}>Prepare a print-ready chart</button>{guide && <button type="button" onClick={() => setGuide("")}>Close guide</button>}</div>
+    {active && step && <div className="song-builder-task-guide-step" aria-live="polite"><strong>{active.name} · Step {stepIndex + 1} of {active.steps.length}: {step.title}</strong><p>{step.detail}</p><div className="song-builder-actions"><button type="button" onClick={() => onNavigate(step.workspace, step.target)}>Open this area</button><button type="button" disabled={stepIndex === 0} onClick={() => setStepIndex(index => Math.max(0, index - 1))}>Back</button><button type="button" onClick={() => stepIndex + 1 === active.steps.length ? setGuide("") : setStepIndex(index => index + 1)}>{stepIndex + 1 === active.steps.length ? "Finish" : "Next step"}</button></div></div>}
+  </section>;
+}
 
 export function SongBuilderClipboard({song,section,onChange,onMessage}:{song:DrumSong;section?:SongSection;onChange:(song:DrumSong)=>void;onMessage:(message:string)=>void}){
   const [available,setAvailable]=useState(false);
@@ -42,10 +71,66 @@ export function SongBuilderPlayability({part,onChange}:{part:DrumPart;onChange:(
   return <details className="song-builder-extra"><summary>Drummer playability · {hints.length} hints</summary><p>Heuristics assume two hands. Dismiss intentional exceptions; these hints do not block playback or export.</p><button type="button" onClick={()=>onChange(suggestSticking(part))}>Suggest alternating sticking</button><button type="button" onClick={()=>onChange({...part,playabilityDismissed:[]})}>Show dismissed hints</button><ul>{hints.map(h=><li key={h.id}>Step {h.step+1}: {h.message} <button type="button" onClick={()=>onChange({...part,playabilityDismissed:[...dismissed,h.id]})}>Dismiss</button></li>)}</ul></details>;
 }
 
-export function SongBuilderArrangementFeedback({bars}:{bars:ArrangementBar[]}){
+export function SongBuilderArrangementFeedback({song,bars}:{song:DrumSong;bars:ArrangementBar[]}){
+  const [styleFocus,setStyleFocus]=useState<'auto'|'pop-rock'|'funk-hiphop'|'jazz-blues'|'metal-punk'>('auto');
   const hints=arrangementFlowHints(bars);
   if(!bars.length)return null;
-  return <details className="card song-builder-extra"><summary>Arrangement flow check · {hints.length} notes</summary><p>Checks for long silent passages, large density shifts between sections, and abrupt tempo changes. These are optional review prompts; intentional breaks and contrasts are valid arrangements.</p>{hints.length?<ul>{hints.map(hint=><li key={hint.id}>{hint.message}</li>)}</ul>:<p>No large flow changes detected by these simple checks.</p>}</details>;
+  const tags=`${song.title} ${song.tags.join(' ')} ${song.sections.map(section=>`${section.name} ${section.feel?.kind??''}`).join(' ')}`.toLowerCase();
+  const style=styleFocus==='auto'?/jazz|blues|shuffle/.test(tags)?'jazz-blues':/funk|hip.?hop|hiphop/.test(tags)?'funk-hiphop':/metal|punk/.test(tags)?'metal-punk':'pop-rock':styleFocus;
+  const bySection=song.sections.map(section=>({section,bars:bars.filter(bar=>bar.sectionId===section.id)}));
+  const styleHints:Array<{id:string;message:string}>=[];
+  if(style==='pop-rock'||style==='metal-punk'){
+    bySection.filter(item=>item.section.kind==='chorus'&&item.bars.length).forEach(item=>{
+      const index=bySection.indexOf(item),previousVerse=[...bySection.slice(0,index)].reverse().find(candidate=>candidate.section.kind==='verse'&&candidate.bars.length);
+      if(previousVerse){const verseDensity=previousVerse.bars.reduce((sum,bar)=>sum+bar.hits.length,0)/previousVerse.bars.length,chorusDensity=item.bars.reduce((sum,bar)=>sum+bar.hits.length,0)/item.bars.length;if(chorusDensity<=verseDensity)styleHints.push({id:`chorus-lift:${item.section.id}`,message:`${item.section.name}: consider a cymbal, kick, or density lift to distinguish the chorus from ${previousVerse.section.name}; the current average hit count does not rise.`});}
+      const first=item.bars[0];if(first&&!first.hits.some(hit=>['crash','ride','openhat'].includes(hit.instrument)))styleHints.push({id:`chorus-arrival:${item.section.id}`,message:`${item.section.name}: there is no cymbal hit on its first measure. Add one if you want a stronger band arrival.`});
+    });
+  }else if(style==='funk-hiphop'){
+    bySection.filter(item=>item.section.kind==='verse'&&item.bars.length).forEach(item=>{const index=bySection.indexOf(item),prior=[...bySection.slice(0,index)].reverse().find(candidate=>candidate.section.kind==='verse'&&candidate.bars.length);if(prior){const density=(rows:ArrangementBar[])=>rows.reduce((sum,bar)=>sum+bar.hits.length,0)/rows.length,base=density(prior.bars),current=density(item.bars);if(Math.abs(current-base)>Math.max(3,base*.4))styleHints.push({id:`pocket:${item.section.id}`,message:`${item.section.name}: its note density differs from ${prior.section.name} by more than 40%. Check whether the pocket change is intentional.`});}});
+  }else if(style==='jazz-blues'){
+    bySection.filter(item=>item.bars.length&&(item.section.feel?.kind==='swing'||item.section.feel?.kind==='shuffle'||style==='jazz-blues')).forEach(item=>{const timekeeping=item.bars.reduce((sum,bar)=>sum+bar.hits.filter(hit=>['ride','hihat','openhat'].includes(hit.instrument)).length,0),beats=item.bars.reduce((sum,bar)=>sum+bar.beats,0);if(timekeeping<beats*.5)styleHints.push({id:`timekeeping:${item.section.id}`,message:`${item.section.name}: fewer than half a ride/hi-hat timekeeping hits per beat on average. Add or keep a pulse if the section should feel flowing.`});});
+  }
+  const allHints=[...hints,...styleHints];
+  return <details className="card song-builder-extra"><summary>Arrangement flow check · {allHints.length} notes</summary><p>Checks for long silent passages, large density shifts between sections, and abrupt tempo changes, then adds optional style-aware prompts. These suggestions never block playback or export.</p><label>Style focus<select value={styleFocus} onChange={event=>setStyleFocus(event.target.value as typeof styleFocus)}><option value="auto">Auto · {style.replace('-', ' / ')}</option><option value="pop-rock">Pop / rock</option><option value="funk-hiphop">Funk / hip-hop</option><option value="jazz-blues">Jazz / blues</option><option value="metal-punk">Metal / punk</option></select></label>{allHints.length?<ul>{allHints.map(hint=><li key={hint.id}>{hint.message}</li>)}</ul>:<p>No large flow or selected-style changes detected by these simple checks.</p>}</details>;
+}
+
+export function SongBuilderArrangementSuggestions({song,onApply,onPreview,previewing}:{song:DrumSong;onApply:(song:DrumSong)=>void;onPreview:(sections:SongSection[])=>void;previewing:boolean}){
+  const [form,setForm]=useState<'aaba'|'verse-chorus'|'abac'>('verse-chorus');
+  const [sourceId,setSourceId]=useState('');
+  const [feel,setFeel]=useState<'keep'|'straight'|'swing'|'shuffle'>('keep');
+  const [preview,setPreview]=useState<SongSection[]|null>(null);
+  const source=song.sections.find(section=>section.id===sourceId)??song.sections.find(section=>section.kind==='verse')??song.sections[0];
+  const prepare=(section:SongSection,name:string,kind:SongSection['kind'],variant=false):SongSection=>{
+    const copy=structuredClone(section);
+    const partIds=new Map(section.parts.map(part=>[part.id,crypto.randomUUID()]));
+    copy.id=crypto.randomUUID();copy.name=name;copy.kind=kind;copy.repeats=1;copy.endingGroup=undefined;copy.endingPass=undefined;copy.endingRepeats=undefined;
+    copy.parts=section.parts.map(part=>{const next=variant?varyDrumPart(part,'half-time'):structuredClone(part);return {...next,id:partIds.get(part.id)!,sourceId:undefined,linkedBaseId:undefined,linkOverrides:undefined,linkRemoved:undefined};});
+    copy.clips=sectionClips(section).map(clip=>({...structuredClone(clip),id:crypto.randomUUID(),partId:partIds.get(clip.partId)!,repeatVariants:clip.repeatVariants?.filter(item=>partIds.has(item.partId)).map(item=>({...item,partId:partIds.get(item.partId)!}))}));
+    copy.rehearsalCues=section.rehearsalCues?.map(cue=>({...cue,id:crypto.randomUUID()}));
+    const selectedFeel:SongFeel|undefined=feel==='keep'?copy.feel:{kind:feel,amount:feel==='shuffle'?66.7:feel==='swing'?58:50};
+    copy.feel=selectedFeel;
+    return copy;
+  };
+  const generate=()=>{
+    if(!source)return;
+    const existingB=song.sections.find(section=>section.id!==source.id&&(section.kind==='chorus'||section.kind==='bridge'));
+    const sourceB=song.sections.find(section=>section.id!==source.id&&section.kind==='chorus')??existingB;
+    const sourceC=song.sections.find(section=>section.id!==source.id&&section.kind==='bridge')??song.sections.find(section=>section.id!==source.id&&section.kind==='outro');
+    const b=existingB??prepare(source,'B · contrasting half-time',form==='aaba'?'bridge':'chorus',true);
+    const c=sourceC??prepare(source,'C · lighter variation','other',true);
+    const sequence=form==='aaba'
+      ? [prepare(source,`A · ${source.name}`,source.kind),prepare(source,`A reprise · ${source.name}`,source.kind),prepare(b,`B · ${b.name}`,b.kind),prepare(source,`A return · ${source.name}`,source.kind)]
+      : form==='verse-chorus'
+        ? [prepare(source,`Verse · ${source.name}`,'verse'),prepare(sourceB??b,`Chorus · ${(sourceB??b).name}`,'chorus'),prepare(source,`Verse reprise · ${source.name}`,'verse'),prepare(sourceB??b,`Chorus return · ${(sourceB??b).name}`,'chorus')]
+        : [prepare(source,`A · ${source.name}`,source.kind),prepare(b,`B · ${b.name}`,b.kind),prepare(source,`A return · ${source.name}`,source.kind),prepare(c,`C · ${c.name}`,c.kind)];
+    setPreview(sequence);
+  };
+  const apply=()=>{
+    if(!preview)return;
+    try{if(song.sections.length+preview.length>32)throw new Error('This form needs more room. Remove a few sections first.');onApply({...song,sections:[...song.sections,...preview]});setPreview(null);}
+    catch(error){window.alert(error instanceof Error?error.message:'Could not add this arrangement form.');}
+  };
+  return <details className="card song-builder-extra"><summary>Arrangement form ideas</summary><p>Generate a complete section sequence from a groove you choose. Repeated sections get independent pattern copies.</p><div className="song-builder-tool-fields"><label>Starting groove<select value={source?.id??''} onChange={event=>{setSourceId(event.target.value);setPreview(null);}}>{song.sections.map(section=><option key={section.id} value={section.id}>{section.name} · {section.kind}</option>)}</select></label><label>Song form<select value={form} onChange={event=>{setForm(event.target.value as typeof form);setPreview(null);}}><option value="verse-chorus">Verse · chorus · verse · chorus</option><option value="aaba">AABA</option><option value="abac">ABAC</option></select></label><label>Feel for preview<select value={feel} onChange={event=>{setFeel(event.target.value as typeof feel);setPreview(null);}}><option value="keep">Keep each section feel</option><option value="straight">Straight</option><option value="swing">Swing</option><option value="shuffle">Shuffle</option></select></label></div><button type="button" disabled={!source} onClick={generate}>Generate form preview</button>{preview&&<section className="song-builder-arrangement-preview"><h3>Preview · {preview.length} new sections</h3><ol>{preview.map((section,index)=><li key={section.id}><strong>{section.name}</strong> · {section.parts.length} patterns · {section.parts.reduce((sum,part)=>sum+part.hits.length,0)} hits · {section.meter??song.meter} · {section.feel?.kind??'straight'}</li>)}</ol><button type="button" aria-pressed={previewing} onClick={()=>onPreview(preview)}>{previewing?'Stop audio preview':'Hear this form'}</button><button type="button" disabled={song.sections.length+preview.length>32} onClick={apply}>Append this form to the song</button><button type="button" onClick={()=>setPreview(null)}>Discard preview</button></section>}</details>;
 }
 
 export function SongBuilderAccessibleScore({bars,onSeek}:{bars:ArrangementBar[];onSeek:(bar:ArrangementBar)=>void}){

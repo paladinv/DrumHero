@@ -11,11 +11,11 @@ import { normalizePlayerSettings,normalizePresets,type PracticePreset } from "@/
 import { previousComparable } from "@/lib/song-library-improvements";
 import { songPartEvidenceFingerprint } from "@/lib/song-library";
 import type { DrumSong, SongLibraryState } from "@/lib/song-library";
-import type { SongInstrument } from "@/lib/types";
+import { SONG_INSTRUMENTS, type SongInstrument } from "@/lib/types";
 import type { SongRunResult } from "./SongSessionPlayer";
 const Player = dynamic(() => import("./SongSessionPlayer").then((module) => module.SongSessionPlayer), { loading: () => <p>Loading player…</p> });
 const RESUME_KEY = "drum-hero:song-queue-resume:v1";
-const LIMB_VOICES:SongInstrument[]=["kick","snare","hihat","openhat","ride","rimshot","tom","crash","cowbell","shaker","tambourine","custom1","custom2","custom3","custom4"];
+const LIMB_VOICES:SongInstrument[]=SONG_INSTRUMENTS;
 export function SongQueueRunner({state,songs,save,onResults,stage=false}:{state:SongLibraryState;songs:DrumSong[];save:(state:SongLibraryState)=>void;onResults:(results:SongRunResult[])=>void;stage?:boolean}){
  const plans=[...state.queues.map(plan=>({...plan,kind:'queue' as const})),...state.setlists.map(plan=>({...plan,kind:'setlist' as const}))];
  const [planId,setPlanId]=useState(''),[index,setIndex]=useState(0),[started,setStarted]=useState(false),[resume,setResume]=useState<{planId:string;index:number;signature:string}|null>(null),[message,setMessage]=useState(''),[breakReady,setBreakReady]=useState(''),[autoAdvance,setAutoAdvance]=useState(false);

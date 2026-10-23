@@ -29,6 +29,9 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
   const [transitionBars, setTransitionBars] = useState(2);
   const [transitionName, setTransitionName] = useState("");
   const [transitionMessage, setTransitionMessage] = useState("");
+  const [meterFilter, setMeterFilter] = useState("All");
+  const [tempoFilter, setTempoFilter] = useState("All");
+  const [focusFilter, setFocusFilter] = useState("All");
 
   useEffect(() => {
     const load = () => setCustomGrooves(readCustomGrooves());
@@ -43,12 +46,17 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
   const transitionFills = selectedTransitionGroove ? compatibleFillPatterns(selectedTransitionGroove, items) : [];
   const selectedTransitionFill = transitionFills.find((item) => item.id === transitionFillId) ?? transitionFills[0];
   const styles = useMemo(() => [...new Set(libraryItems.flatMap((item) => "style" in item ? [item.style] : []))].sort(), [libraryItems]);
+  const meters = useMemo(() => [...new Set(libraryItems.flatMap((item) => "style" in item ? [item.meter ?? `${item.beats}/4`] : []))].sort(), [libraryItems]);
+  const focuses = useMemo(() => [...new Set(libraryItems.flatMap((item) => "style" in item ? [item.focus] : []))].sort(), [libraryItems]);
   const [styleFilter, setStyleFilter] = useState("All");
   const filtered = useMemo(() => libraryItems.filter((item) =>
     (level === "All" || item.level === level) &&
     (styleFilter === "All" || ("style" in item && item.style === styleFilter)) &&
+    (meterFilter === "All" || ("style" in item && (item.meter ?? `${item.beats}/4`) === meterFilter)) &&
+    (focusFilter === "All" || ("style" in item && item.focus === focusFilter)) &&
+    (tempoFilter === "All" || ("style" in item && matchesTempoRange(item.tempoRange, tempoFilter))) &&
     (!query.trim() || `${item.name} ${item.description} ${"style" in item ? item.style + " " + item.focus : ""} ${localizedPattern(item, locale).name} ${localizedPattern(item, locale).description}`.toLowerCase().includes(query.trim().toLowerCase()))
-  ), [libraryItems, level, locale, query, styleFilter]);
+  ), [focusFilter, libraryItems, level, locale, meterFilter, query, styleFilter, tempoFilter]);
 
   const toggleCell = (step: number, instrument: Instrument) => setHits((current) => {
     const old = current.find((hit) => hit.step === step && hit.instrument === instrument);
@@ -81,7 +89,7 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
     const updated = [...customGrooves, next].slice(-100);
     if (!writeCustomGrooves(updated)) { setBuilderMessage("Could not save this groove in browser storage."); return; }
     setCustomGrooves(updated);
-    setLevel("All"); setStyleFilter("All"); setQuery(""); setName(""); setHits([]); setBuilderOpen(false); setBuilderMessage("");
+    setLevel("All"); setStyleFilter("All"); setMeterFilter("All"); setTempoFilter("All"); setFocusFilter("All"); setQuery(""); setName(""); setHits([]); setBuilderOpen(false); setBuilderMessage("");
   };
 
   const deleteCustomGroove = (id: string) => {
@@ -96,7 +104,7 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
     if (!transition) { setTransitionMessage("That groove and fill cannot be combined on the same timing grid."); return; }
     const updated = [...customGrooves, transition].slice(-100);
     if (!writeCustomGrooves(updated)) { setTransitionMessage("Could not save this transition in browser storage."); return; }
-    setCustomGrooves(updated); setLevel("All"); setStyleFilter("All"); setQuery(""); setTransitionName(""); setTransitionMessage("Saved. The transition is now available in the Trainer and Practice Pad.");
+    setCustomGrooves(updated); setLevel("All"); setStyleFilter("All"); setMeterFilter("All"); setTempoFilter("All"); setFocusFilter("All"); setQuery(""); setTransitionName(""); setTransitionMessage("Saved. The transition is now available in the Trainer and Practice Pad.");
   };
 
   return <>
@@ -105,7 +113,7 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
       <div className="groove-library-filters">
         <label>Search<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === "groove" ? "Try funk, shuffle, fill, odd meter…" : "Find a rudiment…"} /></label>
         <label>Level<select value={level} onChange={(event) => setLevel(event.target.value)}><option>All</option><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label>
-        {kind === "groove" && <label>Style<select value={styleFilter} onChange={(event) => setStyleFilter(event.target.value)}><option>All</option>{styles.map((item) => <option key={item}>{item}</option>)}</select></label>}
+        {kind === "groove" && <><label>{t("Style")}<select aria-label={t("Style")} value={styleFilter} onChange={(event) => setStyleFilter(event.target.value)}><option>All</option>{styles.map((item) => <option key={item}>{item}</option>)}</select></label><label>{t("Meter")}<select aria-label={t("Meter")} value={meterFilter} onChange={(event) => setMeterFilter(event.target.value)}><option>All</option>{meters.map((item) => <option key={item}>{item}</option>)}</select></label><label>{t("Tempo range")}<select aria-label={t("Tempo range")} value={tempoFilter} onChange={(event) => setTempoFilter(event.target.value)}><option value="All">All</option><option value="under-80">Under 80 BPM</option><option value="80-109">80–109 BPM</option><option value="110-139">110–139 BPM</option><option value="140-plus">140+ BPM</option></select></label><label>{t("Practice focus")}<select aria-label={t("Practice focus")} value={focusFilter} onChange={(event) => setFocusFilter(event.target.value)}><option>All</option>{focuses.map((item) => <option key={item}>{item}</option>)}</select></label></>}
         {kind === "groove" && <><button type="button" className="button" onClick={() => setBuilderOpen((open) => !open)}>{builderOpen ? "Close groove builder" : "Create a groove"}</button><button type="button" className="button-secondary" onClick={() => setTransitionBuilderOpen((open) => !open)}>{transitionBuilderOpen ? "Close transition builder" : "Build a groove + fill"}</button></>}
       </div>
     </section>
@@ -157,6 +165,17 @@ export function PatternLibrary({ items, kind }: { items: Array<Groove | Rudiment
         </>}
         <div className="transport"><Link className="button" href={`/trainer?pattern=${item.id}`}>Train {kind}</Link><Link className="button-secondary" href={`/practice?pattern=${item.id}`}>Practice Pad</Link>{isCustom && <button className="button-secondary" type="button" onClick={() => deleteCustomGroove(item.id)} aria-label={`Delete custom groove ${item.name}`}>Delete</button>}</div>
       </article>;
-    })}</section> : <div className="empty-state"><h3>No {kind} match that filter</h3><p>Change the search, level, or style to see more patterns.</p></div>}
+    })}</section> : <div className="empty-state"><h3>No {kind} match that filter</h3><p>Change the search, level, style, meter, tempo range, or practice focus to see more patterns.</p></div>}
   </>;
+}
+
+function matchesTempoRange(tempoRange: [number, number], filter: string) {
+  const bounds: Record<string, [number, number]> = {
+    "under-80": [40, 79],
+    "80-109": [80, 109],
+    "110-139": [110, 139],
+    "140-plus": [140, 300],
+  };
+  const selected = bounds[filter];
+  return selected ? tempoRange[0] <= selected[1] && tempoRange[1] >= selected[0] : true;
 }

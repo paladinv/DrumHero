@@ -6,6 +6,7 @@ import type { Catalog, LanguagePreference, Locale } from "@/lib/locale-core";
 import { loadCatalog } from "@/lib/catalog-loader";
 import { translateAppCopy } from "@/lib/app-copy";
 import { usePathname } from "next/navigation";
+import Link from "next/link";
 
 type LocalizationValue = {
   locale: Locale;
@@ -79,7 +80,7 @@ export function LocalizationProvider({ children, initialLocale, initialPreferenc
     document.documentElement.lang = locale;
     document.documentElement.dir = directionFor(locale);
     const titles: Record<string, string> = {
-      "/learn": "Learn", "/practice": "Practice Pad", "/trainer": "Trainer", "/rudiments": "Rudiments",
+      "/learn": "Learn", "/practice": "Practice Pad", "/trainer": "Trainer", "/ear-training": "Rhythm Ear Training", "/sight-reading": "Sight reading", "/rudiments": "Rudiments",
       "/grooves": "Grooves", "/kit": "Kit Guide", "/song-library": "Song Library", "/song-builder": "Song Builder",
       "/progress": "Progress", "/about": "About"
     };
@@ -106,7 +107,7 @@ export function SkipLink() {
 
 export function SiteFooter() {
   const { t } = useLocalization();
-  return <footer className="site-footer"><div><strong>Drum Hero</strong><span>{t("Practice deliberately. Play musically.")}</span></div><p>{t("Local practice works without an account.")} Audio input, recordings, and reference tracks stay on this device. Optional account sync uploads selected library data after you enable it.</p></footer>;
+  return <footer className="site-footer"><div><strong>Drum Hero</strong><span>{t("Practice deliberately. Play musically.")}</span><Link href="/about">{t("About Drum Hero")}</Link></div><p>{t("Local practice works without an account.")} Audio input, recordings, and reference tracks stay on this device. Optional account sync uploads selected library data after you enable it.</p></footer>;
 }
 
 export function useLocalization() {

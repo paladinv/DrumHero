@@ -11,16 +11,28 @@ export type TrainerRound = {
   durationSeconds?: number;
   id: string; patternId: string; patternName: string; bpm: number; playedAt: string;
   mode: TrainerMode; source: TrainerSource | "self"; ratings: TrainerRating[]; repetitions?: number;
-  result: SessionResult | null; hits?: RatedHit[]; focusedDrill?: { instrument: Instrument; beat: number };
+  result: SessionResult | null; hits?: RatedHit[]; focusedDrill?: { instrument: Instrument; beat: number; sourceRoundId?: string; sourcePatternId?: string };
   feel?: TrainerFeel; limbFocus?: TrainerLimbFocus; adaptation?: "standard" | "seated" | "single-voice"; swingRatio?: number; pocketMs?: number; learningMode?: string; inputProfile?: string; targetVoice?: Instrument; uncertainDetections?: number; inputClipped?: boolean;
   variationId?: string;
+  backingChallenge?: "rock" | "funk" | "shuffle";
 };
 export type AudioDynamicsCalibration = { noiseRms?: number; ghostRms?: number; accentRms?: number };
 export type TrainerDeviceProfile = { latencyMs: number; latencyCalibrated?: boolean; midiMap: Record<number, Instrument | null>; midiArticulations: Record<number, MidiArticulation | null>; audioTemplates: Partial<Record<Instrument, number[]>>; audioDynamics?: Partial<Record<Instrument, AudioDynamicsCalibration>> };
 export type TrainerState = { version: 2; rounds: TrainerRound[]; latencyMs: number; midiMap: Record<number, Instrument | null>; deviceProfiles: Record<string, TrainerDeviceProfile> };
 type PersistedTrainerState = Omit<Partial<TrainerState>, "version"> & { version?: number };
 export const TRAINER_KEY = "drum-hero:trainer:v1";
+export const TRAINER_PREFERENCES_KEY = "drum-hero:trainer-preferences:v1";
 export function trainerStorageKey(profileId = learnerProfileIdFromBrowser()): string { return learnerStorageKey(TRAINER_KEY, profileId); }
+export function updateTrainerPreferredBpm(bpm: number) {
+  if (typeof window === "undefined" || !Number.isFinite(bpm)) return;
+  try {
+    const raw = window.localStorage.getItem(TRAINER_PREFERENCES_KEY);
+    const value: unknown = raw ? JSON.parse(raw) : {};
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      window.localStorage.setItem(TRAINER_PREFERENCES_KEY, JSON.stringify({ ...value, bpm: Math.min(200, Math.max(40, Math.round(bpm))) }));
+    }
+  } catch { /* Keep the existing Trainer preferences if storage is unavailable or malformed. */ }
+}
 export const DEFAULT_MIDI_MAP: Record<number, Instrument> = {
   35: "kick", 36: "kick", 38: "snare", 40: "snare", 42: "hihat", 44: "hihat", 46: "hihat",
   41: "tom", 43: "tom", 45: "tom", 47: "tom", 48: "tom", 49: "crash", 55: "crash", 57: "crash"
@@ -69,7 +81,7 @@ export function parseTrainerState(raw: string | null): TrainerState {
           (round.mode !== "self" && round.mode !== "scored") || !Array.isArray(round.ratings) || round.ratings.length > 16 ||
           (round.durationSeconds !== undefined && ![30, 60, 120].includes(round.durationSeconds)) ||
           (round.repetitions !== undefined && (round.durationSeconds ? !Number.isInteger(round.repetitions) || round.repetitions < 1 || round.repetitions > 2000 : ![4, 8, 10, 16].includes(round.repetitions))) ||
-          (round.focusedDrill !== undefined && (!round.focusedDrill || !voices.includes(round.focusedDrill.instrument) || !Number.isInteger(round.focusedDrill.beat) || round.focusedDrill.beat < 1 || round.focusedDrill.beat > 64)) ||
+          (round.focusedDrill !== undefined && (!round.focusedDrill || !voices.includes(round.focusedDrill.instrument) || !Number.isInteger(round.focusedDrill.beat) || round.focusedDrill.beat < 1 || round.focusedDrill.beat > 64 || (round.focusedDrill.sourceRoundId !== undefined && (typeof round.focusedDrill.sourceRoundId !== "string" || round.focusedDrill.sourceRoundId.length > 100)) || (round.focusedDrill.sourcePatternId !== undefined && (typeof round.focusedDrill.sourcePatternId !== "string" || round.focusedDrill.sourcePatternId.length > 200)))) ||
           (round.uncertainDetections !== undefined && (!Number.isInteger(round.uncertainDetections) || round.uncertainDetections < 0 || round.uncertainDetections > 100000)) ||
           (round.inputClipped !== undefined && typeof round.inputClipped !== "boolean") ||
           (round.inputProfile !== undefined && (typeof round.inputProfile !== "string" || round.inputProfile.length > 200)) ||
@@ -81,6 +93,7 @@ export function parseTrainerState(raw: string | null): TrainerState {
           (round.limbFocus !== undefined && !["all", "hands", "feet"].includes(round.limbFocus)) ||
           (round.adaptation !== undefined && !["standard", "seated", "single-voice"].includes(round.adaptation)) ||
           (round.variationId !== undefined && (typeof round.variationId !== "string" || round.variationId.length > 80)) ||
+          (round.backingChallenge !== undefined && !["rock", "funk", "shuffle"].includes(round.backingChallenge)) ||
           !round.ratings.every((rating: TrainerRating) => ["clean", "needsWork", "missed"].includes(rating)) ||
           (round.result !== null && (!round.result || !Number.isFinite(round.result.score) || !Number.isFinite(round.result.accuracy)))) return false;
       if (round.hits === undefined) return true;

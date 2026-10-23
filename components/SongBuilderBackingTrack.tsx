@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import type { DrumPart } from "@/lib/song-library";
 import type { TempoAnchor } from "@/lib/song-builder-tools";
 import type { ArrangementBar } from "@/lib/song-builder";
+import { mappedSeconds } from "@/lib/song-builder-tools";
 import { deleteBuilderBacking, readBuilderBacking, saveBuilderBacking, type BuilderBacking } from "@/lib/song-builder-storage";
 import { analyzeBackingAudio, backingSuggestionsForPart, type BackingAudioAnalysis } from "@/lib/song-builder-audio-analysis";
 import { useLocalization } from "./LocalizationProvider";
@@ -22,10 +23,11 @@ type Props = {
   onApplyTempo: (bpm: number) => void;
   onApplyHits: (hits: DrumPart["hits"]) => void;
   onAnchorsChange: (anchors: TempoAnchor[]) => void;
+  songBpm: number;
 };
 
 export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(function SongBuilderBackingTrack(
-  { songId, targetPart, bars, anchors, onApplyTempo, onApplyHits, onAnchorsChange },
+  { songId, targetPart, bars, anchors, onApplyTempo, onApplyHits, onAnchorsChange, songBpm },
   ref,
 ) {
   const { t } = useLocalization();
@@ -43,6 +45,8 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
   const loadRequest = useRef(0);
   const dragRef = useRef<{ pointerId: number; kind: "downbeat" | "anchor"; beat?: number } | null>(null);
   const [anchorMeasure, setAnchorMeasure] = useState(1);
+  const [themeRevision, setThemeRevision] = useState(0);
+  const [showBeatGrid,setShowBeatGrid]=useState(true);
 
   useEffect(() => {
     let active = true;
@@ -70,28 +74,47 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
   }, [url]);
 
   useEffect(() => {
+    const redrawForTheme = () => setThemeRevision((revision) => revision + 1);
+    window.addEventListener("drum-hero:theme-change", redrawForTheme);
+    return () => window.removeEventListener("drum-hero:theme-change", redrawForTheme);
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = "#dfd8cd";
+    const colors = getComputedStyle(document.documentElement);
+    context.fillStyle = colors.getPropertyValue("--theme-wave-bg").trim() || "#dfd8cd";
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = "#454f48";
+    context.fillStyle = colors.getPropertyValue("--theme-wave-peak").trim() || "#454f48";
     track?.peaks.forEach((peak, index) => {
       const x = index / track.peaks.length * canvas.width;
       const height = Math.max(1, peak * (canvas.height - 10));
       context.fillRect(x, (canvas.height - height) / 2, Math.max(1, canvas.width / track.peaks.length), height);
     });
     if (track) {
+      if(showBeatGrid){
+        const gridColor=colors.getPropertyValue("--theme-wave-grid").trim()||"rgba(42,72,91,.42)";
+        const beatSeconds=(beat:number)=>anchors.length>=2?mappedSeconds(beat,anchors,songBpm):beat*60/(track.bpm??songBpm);
+        bars.forEach(bar=>{
+          const startBeat=bar.arrangementBeatStart??0;
+          for(let localBeat=0;localBeat<bar.beats-0.0001;localBeat+=1){
+            const markerX=(track.downbeat+beatSeconds(startBeat+localBeat))/track.duration*canvas.width;
+            if(markerX<0||markerX>canvas.width)continue;
+            context.strokeStyle=gridColor;context.lineWidth=localBeat===0?1.5:1;context.beginPath();context.moveTo(markerX,18);context.lineTo(markerX,canvas.height-3);context.stroke();
+          }
+        });
+      }
       const x = track.downbeat / track.duration * canvas.width;
-      context.strokeStyle = "#e85348";
+      context.strokeStyle = colors.getPropertyValue("--theme-wave-downbeat").trim() || "#e85348";
       context.beginPath();
       context.moveTo(x, 0);
       context.lineTo(x, canvas.height);
       context.stroke();
-      anchors.forEach(anchor=>{const markerX=(track.downbeat+anchor.seconds)/track.duration*canvas.width;if(markerX<0||markerX>canvas.width)return;context.strokeStyle="#397db8";context.beginPath();context.moveTo(markerX,0);context.lineTo(markerX,canvas.height);context.stroke();context.fillStyle="#235d8f";context.font="12px sans-serif";context.fillText(`M${Math.max(1,bars.findIndex(bar=>Math.abs((bar.arrangementBeatStart ?? 0)-anchor.beat)<0.001)+1)}`,Math.min(canvas.width-32,markerX+3),14);});
+      anchors.forEach(anchor=>{const markerX=(track.downbeat+anchor.seconds)/track.duration*canvas.width;if(markerX<0||markerX>canvas.width)return;context.strokeStyle=colors.getPropertyValue("--theme-wave-marker").trim()||"#397db8";context.beginPath();context.moveTo(markerX,0);context.lineTo(markerX,canvas.height);context.stroke();context.fillStyle=colors.getPropertyValue("--theme-wave-label").trim()||"#235d8f";context.font="12px sans-serif";context.fillText(`M${Math.max(1,bars.findIndex(bar=>Math.abs((bar.arrangementBeatStart ?? 0)-anchor.beat)<0.001)+1)}`,Math.min(canvas.width-32,markerX+3),14);});
     }
-  }, [track,anchors,bars]);
+  }, [track,anchors,bars,showBeatGrid,songBpm,themeRevision]);
 
   const canvasSecondsAt = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const bounds=event.currentTarget.getBoundingClientRect();
@@ -140,6 +163,7 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
         return;
       }
       audio.volume = track.volume;
+      audio.preservesPitch = track.preservePitch !== false;
       audio.playbackRate = Math.max(0.25, Math.min(4, rate));
       if (Math.abs(audio.currentTime - target) > 0.18) audio.currentTime = target;
       if (audio.paused && !playPending.current && playbackUnlocked.current) {
@@ -186,6 +210,7 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
         peaks,
         downbeat: 0,
         volume: 0.65,
+        preservePitch: true,
       };
       await saveBuilderBacking(next, true);
       if (request !== loadRequest.current) return;
@@ -239,7 +264,7 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
     {track && <>
       <strong>{track.name} · {Math.round(track.duration)} {t("seconds")}</strong>
       <label>{t("Tempo marker measure boundary")}<input type="number" min={1} max={bars.length+1} value={anchorMeasure} onChange={event=>setAnchorMeasure(Math.max(1,Math.min(bars.length+1,Number(event.target.value)||1)))}/></label><p>{t("Drag the red line to align the first downbeat. Drag a blue marker to adjust its tempo anchor, or click the waveform to place the selected measure marker.")}</p><canvas ref={canvasRef} width={1000} height={100} role="img" aria-label={t("Backing track waveform; red is the first downbeat and blue lines are tempo markers")} onPointerDown={beginWaveDrag} onPointerMove={moveWaveDrag} onPointerUp={endWaveDrag} onPointerCancel={endWaveDrag} />
-      <audio ref={audioRef} src={url} controls preload="auto" aria-label={t("Backing audio preview")} onPlay={() => {
+      <audio ref={audioRef} src={url} controls preload="auto" aria-label={t("Backing audio preview")} onLoadedMetadata={event=>{event.currentTarget.preservesPitch=track.preservePitch!==false;}} onPlay={() => {
         playbackUnlocked.current = true;
         unlockNotice.current = false;
         setMessage(t("Backing audio is ready for synchronized playback."));
@@ -251,6 +276,8 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
         }} /></label>
         <label>{t("First downbeat in audio · seconds")}<input type="number" min={-30} max={track.duration} step={0.01} value={track.downbeat} onChange={(event) => void change({ ...track, downbeat: Math.max(-30, Math.min(track.duration, Number(event.target.value) || 0)) })} /></label>
         <label>{t("Backing volume · {volume}%", { volume: Math.round(track.volume * 100) })}<input type="range" min={0} max={1} step={0.01} value={track.volume} onChange={(event) => void change({ ...track, volume: Number(event.target.value) })} /></label>
+        <label><input type="checkbox" checked={showBeatGrid} onChange={event=>setShowBeatGrid(event.target.checked)}/>{t("Show arrangement beat grid")}</label>
+        <label><input type="checkbox" checked={track.preservePitch !== false} onChange={event=>{const next={...track,preservePitch:event.target.checked};if(audioRef.current)audioRef.current.preservesPitch=event.target.checked;void change(next);}}/>{t("Preserve backing pitch while tempo matching")}</label>
         {analysis && <button type="button" onClick={() => void change({ ...track, bpm: analysis.bpm })}>{t("Use estimated {bpm} BPM for backing sync", { bpm: analysis.bpm })}</button>}
         <button type="button" onClick={() => {
           audioRef.current?.pause();

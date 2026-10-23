@@ -2,7 +2,11 @@ import { expect, test } from "@playwright/test";
 
 async function selectLanguage(page: import("@playwright/test").Page, locale: string) {
   const picker = page.locator(".language-picker select");
-  if (!(await picker.isVisible())) await page.locator(".menu-button").click();
+  if (!(await picker.isVisible())) {
+    const menu = page.locator(".menu-button");
+    if (await menu.isVisible() && await menu.getAttribute("aria-expanded") !== "true") await menu.click();
+    await page.locator(".site-settings > summary").click();
+  }
   await picker.selectOption(locale);
 }
 
@@ -31,10 +35,11 @@ test("localizes dashboard tool cards from the selected catalog", async ({ browse
   const context = await browser.newContext({ locale: "es-MX" });
   const page = await context.newPage();
   await page.goto("/");
-  const learnCard = page.getByRole("link", { name: /Ruta de aprendizaje/ });
-  await expect(learnCard).toContainText("Doce lecciones guiadas");
-  const trainerCard = page.locator('a.card-link[href="/trainer"]');
-  await expect(trainerCard).toContainText("rondas ajustables");
+  const learnShortcut = page.locator('a.dashboard-shortcut[href="/learn"]');
+  await expect(learnShortcut).toContainText("Ruta de aprendizaje");
+  const practiceGroup = page.locator(".site-nav-entry").filter({ has: page.locator('.site-nav-link[href="/practice"]') });
+  await practiceGroup.locator("summary").click();
+  await expect(page.getByRole("link", { name: "Entrenador", exact: true })).toBeVisible();
   await context.close();
 });
 

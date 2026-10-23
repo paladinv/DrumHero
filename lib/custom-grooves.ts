@@ -21,16 +21,18 @@ export function parseCustomGrooves(raw: string | null): Groove[] {
       if (!item || typeof item !== "object") return [];
       const candidate = item as Partial<Groove>;
       const cells = candidate.beats && candidate.subdivision ? candidate.beats * candidate.subdivision / 4 : 0;
+      const trainerFillStepRanges = candidate.trainerFillStepRanges;
+      const validFillRanges = trainerFillStepRanges === undefined || (Array.isArray(trainerFillStepRanges) && trainerFillStepRanges.length <= 16 && trainerFillStepRanges.every((range) => Array.isArray(range) && range.length === 2 && Number.isInteger(range[0]) && Number.isInteger(range[1]) && range[0] >= 0 && range[1] > range[0] && range[1] <= cells));
       if (typeof candidate.id !== "string" || !candidate.id.startsWith("custom-") || seen.has(candidate.id) ||
           typeof candidate.name !== "string" || !candidate.name.trim() || candidate.name.length > 60 ||
           typeof candidate.description !== "string" || typeof candidate.style !== "string" ||
           typeof candidate.focus !== "string" || ![4, 8, 12, 16].includes(candidate.subdivision ?? 0) ||
-          !Number.isFinite(candidate.beats) || candidate.beats! <= 0 || !Number.isInteger(cells) || cells > 128 ||
+          !Number.isFinite(candidate.beats) || candidate.beats! <= 0 || !Number.isInteger(cells) || cells > 512 ||
           !["Beginner", "Intermediate", "Advanced"].includes(candidate.level ?? "") ||
           !Number.isFinite(candidate.defaultBpm) || candidate.defaultBpm! < 40 || candidate.defaultBpm! > 200 ||
-          !Array.isArray(candidate.hits) || candidate.hits.length > 256) return [];
-      const hits = candidate.hits.filter((hit) => Boolean(hit && Number.isInteger(hit.step) && hit.step >= 0 && hit.step < cells && voices.includes(hit.instrument) && (hit.articulation === undefined || ["flam", "drag", "buzz"].includes(hit.articulation))))
-        .map((hit) => ({ step: hit.step, instrument: hit.instrument, accent: Boolean(hit.accent), ...(hit.articulation ? { articulation: hit.articulation } : {}) }));
+          !Array.isArray(candidate.hits) || candidate.hits.length > 256 || !validFillRanges) return [];
+      const hits = candidate.hits.filter((hit) => Boolean(hit && Number.isInteger(hit.step) && hit.step >= 0 && hit.step < cells && voices.includes(hit.instrument) && (hit.articulation === undefined || ["flam", "drag", "buzz"].includes(hit.articulation)) && (hit.velocityTarget === undefined || Number.isFinite(hit.velocityTarget) && hit.velocityTarget >= 1 && hit.velocityTarget <= 127)))
+        .map((hit) => ({ step: hit.step, instrument: hit.instrument, accent: Boolean(hit.accent), ...(hit.articulation ? { articulation: hit.articulation } : {}), ...(typeof hit.velocityTarget === "number" ? { velocityTarget: Math.round(hit.velocityTarget) } : {}) }));
       if (hits.length !== candidate.hits.length) return [];
       seen.add(candidate.id);
       const low = Math.max(40, Math.min(200, candidate.tempoRange?.[0] ?? candidate.defaultBpm! - 25));
@@ -49,6 +51,7 @@ export function parseCustomGrooves(raw: string | null): Groove[] {
         meter: candidate.meter?.slice(0, 20) ?? "4/4",
         feel: candidate.feel === "triplet" ? "triplet" : "straight",
         tags: Array.isArray(candidate.tags) ? candidate.tags.filter((tag): tag is string => typeof tag === "string").slice(0,12).map(tag=>tag.slice(0,40)) : [],
+        ...(Array.isArray(trainerFillStepRanges) ? { trainerFillStepRanges: trainerFillStepRanges.map(range => [range[0], range[1]] as [number, number]) } : {}),
         songPattern: candidate.songPattern && Array.isArray(candidate.songPattern.hits) && candidate.songPattern.hits.length <= 256 && candidate.songPattern.hits.every(hit => hit && Number.isInteger(hit.step) && hit.step >= 0 && hit.step < cells && ["kick","snare","hihat","openhat","ride","rimshot","tom","crash","cowbell","shaker","tambourine"].includes(hit.instrument)) ? { hits: candidate.songPattern.hits.map((hit): SongPartHit => ({ step:hit.step,instrument:hit.instrument,accent:hit.accent===true, velocity: typeof hit.velocity === "number" && Number.isFinite(hit.velocity) ? Math.max(1,Math.min(127,Math.round(hit.velocity))) : undefined,ghost:hit.ghost===true,sticking:hit.sticking==="R"||hit.sticking==="L"?hit.sticking:undefined,articulation:["normal","flam","drag","buzz","roll","choke","foot-splash"].includes(hit.articulation??"")?hit.articulation:undefined,timingOffsetMs:typeof hit.timingOffsetMs==="number"&&Number.isFinite(hit.timingOffsetMs)?Math.max(-1000,Math.min(1000,hit.timingOffsetMs)):undefined })) } : undefined,
         hits
       }];

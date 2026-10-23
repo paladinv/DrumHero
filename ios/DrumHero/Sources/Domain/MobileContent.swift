@@ -35,11 +35,15 @@ struct PatternHit: Codable, Hashable, Identifiable {
     var instrument: DrumVoice
     var accent = false
     var articulation: String?
+    var velocity: Int?
+    var ghost: Bool?
+    var sticking: String?
+    var timingOffsetMs: Double?
     var id: String { "\(step)-\(instrument.rawValue)-\(accent)" }
 }
 
 extension PatternHit {
-    private enum CodingKeys: String, CodingKey { case step, instrument, accent, articulation }
+    private enum CodingKeys: String, CodingKey { case step, instrument, accent, articulation, velocity, ghost, sticking, timingOffsetMs }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -47,6 +51,10 @@ extension PatternHit {
         instrument = try values.decode(DrumVoice.self, forKey: .instrument)
         accent = try values.decodeIfPresent(Bool.self, forKey: .accent) ?? false
         articulation = try values.decodeIfPresent(String.self, forKey: .articulation)
+        velocity = try values.decodeIfPresent(Int.self, forKey: .velocity)
+        ghost = try values.decodeIfPresent(Bool.self, forKey: .ghost)
+        sticking = try values.decodeIfPresent(String.self, forKey: .sticking)
+        timingOffsetMs = try values.decodeIfPresent(Double.self, forKey: .timingOffsetMs)
     }
 }
 
@@ -96,6 +104,9 @@ struct MobileSong: Codable, Identifiable, Hashable {
     var tags: [String]
     var notes: String
     var sections: [MobileSongSection]
+    var source: MobileSongSource?
+    var createdAt: String?
+    var updatedAt: String?
 }
 
 struct MobileSongSection: Codable, Identifiable, Hashable {
@@ -103,6 +114,8 @@ struct MobileSongSection: Codable, Identifiable, Hashable {
     var name: String
     var bpm: Int?
     var parts: [MobileSongPart]
+    var kind: String?
+    var notes: String?
 }
 
 struct MobileSongPart: Codable, Identifiable, Hashable {
@@ -134,6 +147,28 @@ struct MobileSongPart: Codable, Identifiable, Hashable {
             feel: nil
         )
     }
+}
+
+extension MobileSongPart {
+    private enum CodingKeys: String, CodingKey { case id, name, bpm, beats, subdivision, meter, hits }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        bpm = try values.decode(Int.self, forKey: .bpm)
+        beats = try values.decode(Double.self, forKey: .beats)
+        subdivision = try values.decode(Int.self, forKey: .subdivision)
+        meter = try values.decodeIfPresent(String.self, forKey: .meter) ?? "4/4"
+        hits = try values.decode([PatternHit].self, forKey: .hits)
+    }
+}
+
+struct MobileSongSource: Codable, Hashable {
+    var url: String?
+    var title: String?
+    var attribution: String?
+    var authorization: String?
 }
 
 struct MobileContentDocument: Codable {

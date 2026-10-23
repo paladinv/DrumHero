@@ -11,9 +11,13 @@ type SavedSongSearchItem = { id: string; title: string; artist: string; bpm: num
 const SONG_LIBRARY_STORAGE_KEY = "drum-hero:song-library:v1";
 
 const pages = [
+  ["/assessment", "Initial skill assessment", "placement starting point skills test results"],
   ["/", "Home", "dashboard practice plan recommended next"],
   ["/learn", "Learn", "curriculum lesson class"],
   ["/trainer", "Trainer", "timing midi microphone practice"],
+  ["/improvisation", "Improvisation", "trading fours creative musical prompts bass jam"],
+  ["/sight-reading", "Sight reading", "notation reading rhythm practice"],
+  ["/ear-training", "Ear Training", "rhythm listening memory hear identify reproduce"],
   ["/practice", "Practice Pad", "keyboard touch practice"],
   ["/rudiments", "Rudiments", "sticking technique hands"],
   ["/grooves", "Grooves", "fills rhythm patterns"],

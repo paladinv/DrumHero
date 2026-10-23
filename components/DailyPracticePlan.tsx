@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { patterns } from "@/lib/curriculum";
+import { assessmentContent, appliedAssessment, assessmentRecommendation, assessmentRecommendationReason, comparableAssessmentRound } from "@/lib/assessment";
+import { useAssessment } from "./useAssessment";
+import { lessons, patterns } from "@/lib/curriculum";
 import { readCustomGrooves } from "@/lib/custom-grooves";
 import { allSongs, readSongLibrary, songPartPattern, type DrumSong } from "@/lib/song-library";
 import { trainerStorageKey, parseTrainerState, type TrainerRound } from "@/lib/trainer";
@@ -31,20 +33,23 @@ function dueSongPattern(songs: DrumSong[], reviews: ReturnType<typeof readSongLi
   return song && section && part ? songPartPattern(song, section, part) : undefined;
 }
 
-function weakestPattern(rounds: TrainerRound[], choices: PracticePattern[]): PracticePattern | undefined {
-  const recent = rounds.filter((round) => round.mode === "scored" && round.result && (!round.adaptation || round.adaptation === "standard")).sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, 50);
+function weakestPattern(rounds: TrainerRound[], choices: PracticePattern[], allowAdapted = false): PracticePattern | undefined {
+  const recent = rounds.filter((round) => round.mode === "scored" && round.result && !round.uncertainDetections && !round.inputClipped && !round.focusedDrill && !round.learningMode && (allowAdapted || !round.adaptation || round.adaptation === "standard")).sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, 50);
   const grouped = new Map<string, TrainerRound[]>();
   for (const round of recent) grouped.set(round.patternId, [...(grouped.get(round.patternId) ?? []), round]);
-  const ranked = [...grouped.entries()].map(([id, roundsForPattern]) => {
+  const ranked = [...grouped.entries()].flatMap(([id, roundsForPattern]) => {
     const sample = roundsForPattern.slice(0, 5);
-    return { id, accuracy: sample.reduce((sum, round) => sum + (round.result?.accuracy ?? 0), 0) / sample.length, count: sample.length };
+    if (sample.length < 2) return [];
+    return [{ id, accuracy: sample.reduce((sum, round) => sum + (round.result?.accuracy ?? 0), 0) / sample.length, count: sample.length }];
   }).sort((a, b) => a.accuracy - b.accuracy || b.count - a.count);
   return choices.find((item) => item.id === ranked[0]?.id);
 }
 
 export function DailyPracticePlan() {
   const { progress, profileId } = useProgress();
-  const { locale } = useLocalization();
+  const { locale, t } = useLocalization();
+  const { store } = useAssessment(profileId);
+  const baseline = appliedAssessment(store);
   const [choices, setChoices] = useState<PracticePattern[]>(bundledOptions);
   const [items, setItems] = useState<PlanItem[]>([]);
 
@@ -57,23 +62,29 @@ export function DailyPracticePlan() {
       ];
       const library = readSongLibrary();
       const dueSong = dueSongPattern(allSongs(library), library.reviews, library.progress);
-      const weakest = weakestPattern(parseTrainerState(window.localStorage.getItem(trainerStorageKey(profileId))).rounds, localChoices);
-      const nextLesson = recommendNext(progress.completedLessons);
+      const rounds = parseTrainerState(window.localStorage.getItem(trainerStorageKey(profileId))).rounds;
+      const weakest = weakestPattern(baseline ? rounds.filter(r => comparableAssessmentRound(r, baseline)) : rounds, localChoices, !!baseline);
+      const nextLesson = lessons.find(l => l.id === (baseline ? assessmentRecommendation(baseline) : null)) ?? recommendNext(progress.completedLessons);
       const warmup = localChoices.find((item) => item.id === "quarter-pulse") ?? bundledOptions[0];
       const musical = dueSong ?? localChoices.find((item) => item.id === "motown-pocket") ?? bundledOptions[0];
-      const fallbackFocusId = nextLesson.practicePatternId ?? "first-beat";
+      const fallbackFocusId = assessmentContent.focusPatterns[nextLesson.id] ?? nextLesson.practicePatternId ?? "first-beat";
       const focus = weakest && weakest.id !== warmup.id && weakest.id !== musical.id
         ? weakest
         : localChoices.find((item) => item.id === fallbackFocusId) ?? localChoices.find((item) => item.id !== warmup.id && item.id !== musical.id) ?? bundledOptions[1];
+      const focusReason = weakest && weakest.id === focus.id
+        ? "Your lowest recent reliable scored pattern; take it slowly and build control."
+        : baseline
+          ? t(assessmentRecommendationReason(baseline))
+          : `Practice the exercise for “${nextLesson.title}”. Scored results will personalize this step.`;
       setChoices(localChoices);
       setItems([
         { kind: "warmup", title: planTitles.warmup, reason: "Settle into an even pulse for a few minutes.", pattern: warmup },
-        { kind: "focus", title: planTitles.focus, reason: weakest ? "Your lowest recent scored pattern; take it slowly and build control." : nextLesson.practicePatternId ? `Practice the exercise for “${nextLesson.title}”. Scored results will personalize this step.` : `Build a steady backbeat while you work through “${nextLesson.title}”.`, pattern: focus },
+        { kind: "focus", title: planTitles.focus, reason: focusReason, pattern: focus },
         { kind: "music", title: planTitles.music, reason: dueSong ? "This song section is due for review." : "Put the pulse into an original groove.", pattern: musical }
       ]);
     }, 0);
     return () => window.clearTimeout(task);
-  }, [profileId, progress.completedLessons]);
+  }, [profileId, progress.completedLessons, baseline, t]);
 
   const selectPattern = (kind: PlanKind, patternId: string) => {
     const pattern = choices.find((item) => item.id === patternId);
@@ -87,7 +98,7 @@ export function DailyPracticePlan() {
     </div>
     {items.length ? <ol className="daily-plan-items">
       {items.map((item, index) => {
-        const href = item.pattern.id.startsWith("song:") ? `/practice?pattern=${encodeURIComponent(item.pattern.id)}` : `/trainer?pattern=${encodeURIComponent(item.pattern.id)}`;
+        const href = item.pattern.id.startsWith("song:") ? `/practice?pattern=${encodeURIComponent(item.pattern.id)}` : `/trainer?pattern=${encodeURIComponent(item.pattern.id)}${baseline ? `&adaptation=${baseline.adaptation === "hands-only" ? "seated" : baseline.adaptation}` : ""}`;
         return <li key={item.kind}>
           <span className="daily-plan-number">{index + 1}</span>
           <div className="daily-plan-copy"><strong>{item.title} · {index === 0 ? "3 min" : index === 1 ? "5 min" : "4 min"}</strong><span>{item.reason}</span></div>

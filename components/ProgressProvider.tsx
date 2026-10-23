@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { addSession, defaultProgress, parseProgress, STORAGE_KEY } from "@/lib/progress";
+import { updateTrainerPreferredBpm } from "@/lib/trainer";
 import { ACTIVE_LEARNER_PROFILE_KEY, learnerProfileIdFromBrowser, learnerStorageKey, LEARNER_PROFILE_CHANGE_EVENT, LEARNER_PROFILES_KEY, readLearnerProfiles } from "@/lib/learner-profiles";
 import { LocalizationProvider } from "@/components/LocalizationProvider";
 import type { Catalog, LanguagePreference, Locale } from "@/lib/locale-core";
@@ -15,6 +16,7 @@ type ProgressContextValue = {
   recordSession: (result: SessionResult) => void;
   recordTrainerRound: (date: string) => void;
   setSound: (sound: boolean) => void;
+  setPreferredBpm: (bpm: number) => void;
   replaceProgress: (next: ProgressState) => void;
 };
 
@@ -55,8 +57,13 @@ export function ProgressProvider({ children, initialLocale, initialPreference, i
   const recordSession = useCallback((result: SessionResult) => setProgress((state) => addSession(state, result)), []);
   const recordTrainerRound = useCallback((date: string) => setProgress((state) => ({ ...state, practiceDates: [...new Set([...state.practiceDates, date])].sort() })), []);
   const setSound = useCallback((sound: boolean) => setProgress((state) => ({ ...state, settings: { ...state.settings, sound } })), []);
+  const setPreferredBpm = useCallback((bpm: number) => {
+    const preferredBpm = Math.min(200, Math.max(40, Math.round(bpm)));
+    updateTrainerPreferredBpm(preferredBpm);
+    setProgress((state) => state.settings.preferredBpm === preferredBpm ? state : { ...state, settings: { ...state.settings, preferredBpm } });
+  }, []);
   const replaceProgress = useCallback((next: ProgressState) => setProgress(parseProgress(JSON.stringify(next))), []);
-  const value = useMemo(() => ({ progress, profileId, hydrated, completeLesson, recordSession, recordTrainerRound, setSound, replaceProgress }), [progress, profileId, hydrated, completeLesson, recordSession, recordTrainerRound, setSound, replaceProgress]);
+  const value = useMemo(() => ({ progress, profileId, hydrated, completeLesson, recordSession, recordTrainerRound, setSound, setPreferredBpm, replaceProgress }), [progress, profileId, hydrated, completeLesson, recordSession, recordTrainerRound, setSound, setPreferredBpm, replaceProgress]);
   return <LocalizationProvider initialLocale={initialLocale} initialPreference={initialPreference} initialCatalog={initialCatalog}>
     <ProgressContext.Provider value={value}>{children}</ProgressContext.Provider>
   </LocalizationProvider>;

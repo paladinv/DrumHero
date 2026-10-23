@@ -51,7 +51,7 @@ export function AudioStorageManager() {
     ? t('Song Builder / Play-Along backing')
     : kind === 'trainer' ? t('Trainer recording') : t('Song Library recording');
 
-  return <details className="audio-storage-manager song-tool-panel" onToggle={(event) => { if (event.currentTarget.open) void refresh(); }}>
+  return <details id="local-audio-storage" className="audio-storage-manager song-tool-panel" onToggle={(event) => { if (event.currentTarget.open) void refresh(); }}>
     <summary>{t('Manage local audio storage')}</summary>
     <p>{(totalBytes / 1_048_576).toFixed(2)} MiB across {items.length} local audio items, including imported backing tracks. Sizes exclude database overhead, custom drum samples, and the offline page cache. Export originals before deleting them.</p>
     <div className="song-actions">

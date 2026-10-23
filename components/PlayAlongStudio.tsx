@@ -3,14 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { PlayAlongStemMixer, type PlayAlongStemMixerHandle } from "./PlayAlongStemMixer";
 import { useLocalization } from "./LocalizationProvider";
+import { createPlayAlongPackage, parsePlayAlongPackage, portableStemsFromBackings, type PlayAlongMix, type PlayAlongPart, type PlayAlongSection, type PlayAlongSectionChoice, type PlayAlongStyle } from "@/lib/playalong-package";
 
-type Style = "rock" | "funk" | "shuffle";
-type Section = "verse" | "chorus" | "bridge" | "break";
-type SectionChoice = Section | "full-form";
-type Mix = { synthesized: boolean; bass: boolean; harmony: boolean; shaker: boolean; click: boolean; fill: boolean };
-type ArrangementPart = { id: string; section: Section; bars: number; bpm?: number };
+type Style = PlayAlongStyle;
+type Section = PlayAlongSection;
+type SectionChoice = PlayAlongSectionChoice;
+type Mix = PlayAlongMix;
+type ArrangementPart = PlayAlongPart & { id: string };
 type SavedArrangement = { id: string; name: string; parts: ArrangementPart[] };
+type StarterArrangement = { id: string; name: string; style: Style; bpm: number; parts: Array<{ section: Section; bars: number }> };
 const ARRANGEMENT_KEY = "drum-hero:playalong-arrangements:v1";
+const ACTIVE_PROJECT_KEY = "drum-hero:playalong-project:v1";
 const styles: Array<{ id: Style; name: string; bpm: number; description: string }> = [
   { id: "rock", name: "Open rock", bpm: 96, description: "Steady bass pulse, bright offbeat chords, and an eighth-note shaker." },
   { id: "funk", name: "Pocket funk", bpm: 92, description: "Syncopated bass and clipped chord stabs leave room for the groove." },
@@ -18,6 +21,14 @@ const styles: Array<{ id: Style; name: string; bpm: number; description: string 
 ];
 const sections: Array<{ id: Section; name: string }> = [{ id: "verse", name: "Verse" }, { id: "chorus", name: "Chorus" }, { id: "bridge", name: "Bridge" }, { id: "break", name: "Break" }];
 const defaultForm: ArrangementPart[] = ["verse", "chorus", "verse", "bridge"].map((section, index) => ({ id: `default-${index}`, section: section as Section, bars: 4 }));
+const starterArrangements: StarterArrangement[] = [
+  { id: "rock-verse-chorus", name: "Open rock · verse and chorus", style: "rock", bpm: 96, parts: [{ section: "verse", bars: 4 }, { section: "chorus", bars: 4 }, { section: "verse", bars: 4 }, { section: "chorus", bars: 4 }, { section: "bridge", bars: 4 }, { section: "chorus", bars: 4 }] },
+  { id: "blues-12-bar", name: "Blues shuffle · 12 bars", style: "shuffle", bpm: 108, parts: [{ section: "verse", bars: 4 }, { section: "bridge", bars: 2 }, { section: "verse", bars: 2 }, { section: "bridge", bars: 2 }, { section: "chorus", bars: 2 }] },
+  { id: "funk-break", name: "Pocket funk · break and return", style: "funk", bpm: 92, parts: [{ section: "verse", bars: 4 }, { section: "chorus", bars: 4 }, { section: "break", bars: 2 }, { section: "chorus", bars: 4 }] },
+  { id: "half-time-rock", name: "Half-time rock · wide backbeat", style: "rock", bpm: 84, parts: [{ section: "verse", bars: 8 }, { section: "chorus", bars: 8 }, { section: "bridge", bars: 4 }, { section: "chorus", bars: 8 }] },
+  { id: "funk-extended-break", name: "Funk build · extended break", style: "funk", bpm: 104, parts: [{ section: "verse", bars: 4 }, { section: "chorus", bars: 4 }, { section: "bridge", bars: 4 }, { section: "break", bars: 4 }, { section: "chorus", bars: 4 }] },
+  { id: "slow-shuffle-form", name: "Slow shuffle · 12-bar practice form", style: "shuffle", bpm: 88, parts: [{ section: "verse", bars: 4 }, { section: "bridge", bars: 2 }, { section: "verse", bars: 2 }, { section: "bridge", bars: 2 }, { section: "chorus", bars: 2 }] },
+];
 
 function parseParts(value: unknown): ArrangementPart[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 8) return null;
@@ -42,6 +53,21 @@ function readSavedArrangements(raw: string | null): SavedArrangement[] {
       return [{ id: candidate.id.slice(0, 80), name: candidate.name.trim().slice(0, 60), parts }];
     });
   } catch { return []; }
+}
+
+function readActiveProject(raw: string | null) {
+  try {
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const form = parseParts(value.form);
+    const mix = value.mix as Partial<Mix> | undefined;
+    if (!form || typeof value.name !== "string" || !value.name.trim() || value.name.length > 60
+      || typeof value.style !== "string" || !styles.some((item) => item.id === value.style)
+      || typeof value.section !== "string" || (value.section !== "full-form" && !sections.some((item) => item.id === value.section))
+      || !Number.isInteger(value.bpm) || Number(value.bpm) < 55 || Number(value.bpm) > 160
+      || !mix || ["synthesized", "bass", "harmony", "shaker", "click", "fill"].some((key) => typeof mix[key as keyof Mix] !== "boolean")) return null;
+    return { name: value.name.trim(), style: value.style as Style, section: value.section as SectionChoice, bpm: Number(value.bpm), mix: mix as Mix, form };
+  } catch { return null; }
 }
 
 function tone(context: AudioContext, frequency: number, at: number, duration: number, volume: number, waveform: OscillatorType = "sine") {
@@ -125,10 +151,14 @@ export function PlayAlongStudio() {
   const [form, setForm] = useState<ArrangementPart[]>(defaultForm);
   const [savedArrangements, setSavedArrangements] = useState<SavedArrangement[]>([]);
   const [arrangementReady, setArrangementReady] = useState(false);
+  const [projectReady, setProjectReady] = useState(false);
   const [arrangementName, setArrangementName] = useState("My arrangement");
   const [savedArrangementId, setSavedArrangementId] = useState("");
+  const [starterArrangementId, setStarterArrangementId] = useState("");
   const [message, setMessage] = useState("Choose a style and press Play. These original backing parts are synthesized in your browser.");
+  const [trainerChallenge, setTrainerChallenge] = useState<{ name: string; bpm: number; style: Style } | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const packageImportRef = useRef<HTMLInputElement>(null);
   const [bpm, setBpm] = useState(96);
   const [mix, setMix] = useState<Mix>({ synthesized: true, bass: true, harmony: true, shaker: true, click: false, fill: true });
   const [playing, setPlaying] = useState(false);
@@ -140,20 +170,80 @@ export function PlayAlongStudio() {
   const startAtRef = useRef(0);
   const stepRef = useRef(0);
   const controlsRef = useRef({ style, section, bpm, mix, form });
-  controlsRef.current = { style, section, bpm, mix, form };
+  useEffect(() => { controlsRef.current = { style, section, bpm, mix, form }; }, [style, section, bpm, mix, form]);
   const currentStyle = styles.find((item) => item.id === style)!;
   const formBars = form.reduce((total, part) => total + part.bars, 0);
 
+  function applyStarterArrangement(id: string) {
+    const starter = starterArrangements.find((item) => item.id === id);
+    if (!starter) return;
+    setStyle(starter.style);
+    setBpm(starter.bpm);
+    setSection("full-form");
+    setForm(starter.parts.map((part) => ({ ...part, id: crypto.randomUUID() })));
+    setArrangementName(starter.name);
+    setSavedArrangementId("");
+    setMessage(t("Loaded {name}. Customize the form, then save or export it with your backing stems.", { name: starter.name }));
+  }
+
   useEffect(() => {
-    setSavedArrangements(readSavedArrangements(localStorage.getItem(ARRANGEMENT_KEY)));
-    setArrangementReady(true);
+    const timer = window.setTimeout(() => {
+      setSavedArrangements(readSavedArrangements(localStorage.getItem(ARRANGEMENT_KEY)));
+      const project = readActiveProject(localStorage.getItem(ACTIVE_PROJECT_KEY));
+      if (project) {
+        setStyle(project.style);
+        setSection(project.section);
+        setForm(project.form.map((part) => ({ ...part, id: crypto.randomUUID() })));
+        setArrangementName(project.name);
+        setBpm(project.bpm);
+        setMix(project.mix);
+      }
+      setArrangementReady(true);
+      setProjectReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
     if (!arrangementReady) return;
     try { localStorage.setItem(ARRANGEMENT_KEY, JSON.stringify(savedArrangements)); }
-    catch { setMessage("Saved arrangements could not be updated. Export the form before clearing browser storage."); }
+    catch { window.setTimeout(() => setMessage("Saved arrangements could not be updated. Export the form before clearing browser storage."), 0); }
   }, [arrangementReady, savedArrangements]);
+
+  useEffect(() => {
+    if (!projectReady) return;
+    try {
+      localStorage.setItem(ACTIVE_PROJECT_KEY, JSON.stringify({
+        name: arrangementName,
+        style,
+        section,
+        bpm,
+        mix,
+        form: form.map(({ section: partSection, bars, bpm: partBpm }) => ({ section: partSection, bars, ...(partBpm === undefined ? {} : { bpm: partBpm }) })),
+      }));
+    } catch { window.setTimeout(() => setMessage("Play-Along settings could not be saved. Export a full package to keep a copy."), 0); }
+  }, [arrangementName, bpm, form, mix, projectReady, section, style]);
+
+  useEffect(() => {
+    if (!projectReady) return;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("trainerChallenge") !== "1") return;
+      const challengeStyle = styles.find(item => item.id === params.get("style"))?.id;
+      const requestedBpm = Number(params.get("bpm"));
+      if (!challengeStyle || !Number.isFinite(requestedBpm)) return;
+      const challenge = { name: (params.get("name") ?? "Trainer groove").trim().slice(0, 60) || "Trainer groove", bpm: Math.max(55, Math.min(160, Math.round(requestedBpm))), style: challengeStyle };
+      setTrainerChallenge(challenge);
+      setStyle(challenge.style);
+      setBpm(challenge.bpm);
+      setSection("full-form");
+      setArrangementName(`${challenge.name} challenge`);
+      setSavedArrangementId("");
+      setMix({ synthesized: true, bass: true, harmony: true, shaker: true, click: false, fill: true });
+      setMessage("Press Play loop to start the synthesized backing for this challenge.");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [projectReady]);
 
   const updateForm = (next: ArrangementPart[]) => { setForm(next); setSavedArrangementId(""); };
 
@@ -179,10 +269,61 @@ export function PlayAlongStudio() {
       const parts = parseParts(value.parts);
       if (value.format !== "drum-hero-playalong-form-v1" || !parts) throw new Error("Choose a valid Drum Hero play-along form.");
       updateForm(parts.map((part) => ({ ...part, id: crypto.randomUUID() })));
+      setStarterArrangementId("");
       setSection("full-form"); setArrangementName(typeof value.name === "string" ? value.name.slice(0, 60) : "Imported arrangement");
       setMessage("Arrangement imported. Save it here or export it for another device.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not import this arrangement."); }
     finally { if (importRef.current) importRef.current.value = ""; }
+  };
+
+  const exportPackage = () => {
+    try {
+      const blob = createPlayAlongPackage({
+        name: arrangementName,
+        style,
+        section,
+        bpm,
+        stemTempo: backingTrackRef.current?.getTempo() ?? bpm,
+        mix,
+        form,
+        stems: portableStemsFromBackings(backingTrackRef.current?.getStems() ?? []),
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const safeName = arrangementName.trim().replace(/[^a-z0-9_-]/gi, "-").slice(0, 60) || "play-along";
+      anchor.href = url;
+      anchor.download = "drum-hero-" + safeName + ".drumhero";
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      setMessage(t("Full Play-Along package exported with arrangement, settings, stems, and attribution."));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("Could not export this Play-Along package."));
+    }
+  };
+
+  const importPackage = async (file?: File) => {
+    if (!file) return;
+    try {
+      const project = await parsePlayAlongPackage(file);
+      const mixer = backingTrackRef.current;
+      if (!mixer) throw new Error(t("Play-Along audio is still loading. Try again in a moment."));
+      if (project.stems.length && !mixer.isRightsConfirmed()) throw new Error(t("Confirm that you own or have permission to use these audio files."));
+      if (!window.confirm(t("Importing this package replaces the current Play-Along settings and imported stems on this device."))) return;
+      await mixer.replaceStems(project.stems, project.stemTempo);
+      setStyle(project.style);
+      setSection(project.section);
+      setForm(project.form.map((part) => ({ ...part, id: crypto.randomUUID() })));
+      setSavedArrangementId("");
+      setStarterArrangementId("");
+      setArrangementName(project.name);
+      setBpm(project.bpm);
+      setMix(project.mix);
+      setMessage(t("Play-Along package imported. Review the arrangement and attribution before sharing or using the audio."));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t("Could not import this Play-Along package."));
+    } finally {
+      if (packageImportRef.current) packageImportRef.current.value = "";
+    }
   };
 
   const stop = () => {
@@ -254,15 +395,21 @@ export function PlayAlongStudio() {
 
   return <section className="playalong-studio card" aria-labelledby="playalong-heading">
     <div className="playalong-live"><span className="eyebrow">{t("Playback style")}</span><h2 id="playalong-heading">{currentStyle.name}</h2><p>{mix.synthesized ? currentStyle.description : t("The style sets the count and timing; only the imported track and selected click play.")}</p><div className="playalong-position" aria-live="off"><strong>{String(bar).padStart(2, "0")}</strong><span>bar</span><strong>{beat}</strong><span>beat</span><span className={playing ? "mode-pill mode-playing" : "mode-pill mode-idle"}>{playing ? "playing" : "stopped"}</span></div></div>
+    {trainerChallenge && <p className="playalong-trainer-challenge" role="status">Trainer challenge loaded · {trainerChallenge.name} · {trainerChallenge.style} · {trainerChallenge.bpm} BPM. The studio’s synthesized backing is ready; start playback and match your drum part to its bar and beat position.</p>}
     <div className="playalong-controls">
       <label>Backing style<select value={style} disabled={playing} onChange={(event) => { const next = event.target.value as Style; setStyle(next); setBpm(styles.find((item) => item.id === next)!.bpm); }}>
         {styles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label>
       <label>Arrangement<select value={section} disabled={playing} onChange={(event) => setSection(event.target.value as SectionChoice)}><option value="full-form">Custom form · {formBars} bars</option>{sections.map((item) => <option key={item.id} value={item.id}>Loop {item.name.toLowerCase()}</option>)}</select></label>
-      {section === "full-form" && <fieldset className="playalong-form-builder" disabled={playing}><legend>Arrange sections</legend><p>Choose a section and length for each part. Forms repeat; fills mark the end of each part. Set a part tempo or use the main tempo.</p>{form.map((part, index) => <div className="playalong-form-part" key={part.id}><span>Part {index + 1}</span><label>Section<select value={part.section} onChange={(event) => updateForm(form.map((current, itemIndex) => itemIndex === index ? { ...current, section: event.target.value as Section } : current))}>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Bars<select value={part.bars} onChange={(event) => { const remaining = 64 - form.reduce((total, item, itemIndex) => total + (itemIndex === index ? 0 : item.bars), 0); const bars = Math.max(1, Math.min(remaining, Number(event.target.value))); updateForm(form.map((current, itemIndex) => itemIndex === index ? { ...current, bars } : current)); }}>{Array.from({ length: 16 }, (_, itemIndex) => itemIndex + 1).map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label>Tempo · BPM<input type="number" min="55" max="160" step="1" value={part.bpm ?? bpm} onChange={(event) => updateForm(form.map((current, itemIndex) => itemIndex === index ? { ...current, bpm: Math.max(55, Math.min(160, Number(event.target.value))) } : current))} /></label><button type="button" className="button-secondary" aria-label={`Use main tempo for part ${index + 1}`} disabled={part.bpm === undefined} onClick={() => updateForm(form.map((current, itemIndex) => itemIndex === index ? { ...current, bpm: undefined } : current))}>Use main tempo</button><button type="button" className="button-secondary" disabled={form.length <= 1} aria-label={`Remove part ${index + 1}`} onClick={() => updateForm(form.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></div>)}<div className="playalong-form-library"><label>Arrangement name<input maxLength={60} value={arrangementName} onChange={(event) => setArrangementName(event.target.value)} /></label><label>Saved forms<select value={savedArrangementId} onChange={(event) => { const saved = savedArrangements.find((item) => item.id === event.target.value); if (saved) { setForm(saved.parts.map((part) => ({ ...part }))); setSavedArrangementId(saved.id); setArrangementName(saved.name); } else setSavedArrangementId(""); }}><option value="">Choose saved form</option>{savedArrangements.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.parts.reduce((total, part) => total + part.bars, 0)} bars</option>)}</select></label></div><div className="song-actions"><button type="button" className="button-secondary" disabled={form.length >= 8 || formBars >= 64} onClick={() => updateForm([...form, { id: crypto.randomUUID(), section: "verse", bars: Math.min(4, 64 - formBars) }])}>Add section</button><button type="button" onClick={saveArrangement} disabled={!arrangementName.trim()}>Save form</button><button type="button" className="button-secondary" onClick={() => { setSavedArrangements((items) => items.filter((item) => item.id !== savedArrangementId)); setSavedArrangementId(""); setMessage("Saved arrangement removed from this device."); }} disabled={!savedArrangementId}>Delete saved form</button><button type="button" className="button-secondary" onClick={exportArrangement}>Export form</button><button type="button" className="button-secondary" onClick={() => importRef.current?.click()}>Import form</button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importArrangement(event.target.files?.[0])} /></div><small>{formBars} bars total · up to 8 parts and 64 bars · forms are stored on this device unless exported.</small></fieldset>}
+      {section === "full-form" && <fieldset className="playalong-form-builder" disabled={playing}><legend>Arrange sections</legend><p>Choose a section and length for each part. Forms repeat; fills mark the end of each part. Set a part tempo or use the main tempo.</p><label>{t("Starter arrangement")}<select value={starterArrangementId} onChange={(event) => { setStarterArrangementId(event.target.value); applyStarterArrangement(event.target.value); }}><option value="">{t("Choose an original starter form")}</option>{starterArrangements.map((item) => <option key={item.id} value={item.id}>{t(item.name)} · {item.parts.reduce((total, part) => total + part.bars, 0)} bars</option>)}</select></label><small>{t("Starter backing parts are synthesized in Drum Hero. Imported stems still need their own rights and attribution notes.")}</small>{form.map((part, index) => <div className="playalong-form-part" key={part.id}><span>Part {index + 1}</span><label>Section<select value={part.section} onChange={(event) => updateForm(form.map((current, itemIndex) => itemIndex === index ? { ...current, section: event.target.value as Section } : current))}>{sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Bars<select value={part.bars} onChange={(event) => { const remaining = 64 - form.reduce((total, item, itemIndex) => total + (itemIndex === index ? 0 : item.bars), 0); const bars = Math.max(1, Math.min(remaining, Number(event.target.value))); updateForm(form.map((current, itemIndex) => itemIndex === index ? { ...current, bars } : current)); }}>{Array.from({ length: 16 }, (_, itemIndex) => itemIndex + 1).map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label>Tempo · BPM<input type="number" min="55" max="160" step="1" value={part.bpm ?? bpm} onChange={(event) => updateForm(form.map((current, itemIndex) => itemIndex === index ? { ...current, bpm: Math.max(55, Math.min(160, Number(event.target.value))) } : current))} /></label><button type="button" className="button-secondary" aria-label={`Use main tempo for part ${index + 1}`} disabled={part.bpm === undefined} onClick={() => updateForm(form.map((current, itemIndex) => itemIndex === index ? { ...current, bpm: undefined } : current))}>Use main tempo</button><button type="button" className="button-secondary" disabled={form.length <= 1} aria-label={`Remove part ${index + 1}`} onClick={() => updateForm(form.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></div>)}<div className="playalong-form-library"><label>Arrangement name<input maxLength={60} value={arrangementName} onChange={(event) => setArrangementName(event.target.value)} /></label><label>Saved forms<select value={savedArrangementId} onChange={(event) => { const saved = savedArrangements.find((item) => item.id === event.target.value); if (saved) { setForm(saved.parts.map((part) => ({ ...part }))); setSavedArrangementId(saved.id); setStarterArrangementId(""); setArrangementName(saved.name); } else setSavedArrangementId(""); }}><option value="">Choose saved form</option>{savedArrangements.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.parts.reduce((total, part) => total + part.bars, 0)} bars</option>)}</select></label></div><div className="song-actions"><button type="button" className="button-secondary" disabled={form.length >= 8 || formBars >= 64} onClick={() => updateForm([...form, { id: crypto.randomUUID(), section: "verse", bars: Math.min(4, 64 - formBars) }])}>Add section</button><button type="button" onClick={saveArrangement} disabled={!arrangementName.trim()}>Save form</button><button type="button" className="button-secondary" onClick={() => { setSavedArrangements((items) => items.filter((item) => item.id !== savedArrangementId)); setSavedArrangementId(""); setMessage("Saved arrangement removed from this device."); }} disabled={!savedArrangementId}>Delete saved form</button><button type="button" className="button-secondary" onClick={exportArrangement}>Export form</button><button type="button" className="button-secondary" onClick={() => importRef.current?.click()}>Import form</button><input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importArrangement(event.target.files?.[0])} /></div><small>{formBars} bars total · up to 8 parts and 64 bars · forms are stored on this device unless exported.</small></fieldset>}
       <label>Tempo · {bpm} BPM<input type="range" min="55" max="160" step="1" value={bpm} disabled={playing} onChange={(event) => setBpm(Number(event.target.value))} /></label>
       <fieldset disabled={playing}><legend>Mix</legend><label><input type="checkbox" checked={mix.synthesized} onChange={(event) => setMix({ ...mix, synthesized: event.target.checked })} /> {t("Synthesized backing parts")}</label>{(["bass", "harmony", "shaker", "fill", "click"] as const).map((stem) => <label key={stem}><input type="checkbox" checked={mix[stem]} onChange={(event) => setMix({ ...mix, [stem]: event.target.checked })} /> {stem === "harmony" ? "Chord accompaniment" : stem === "shaker" ? "Shaker / ride" : stem === "click" ? "Metronome click" : stem === "fill" ? "Section-end fills" : "Bass"}</label>)}<small>{t("Turn synthesized parts off to use an imported backing track on its own; the click remains separate.")}</small></fieldset>
       <PlayAlongStemMixer ref={backingTrackRef} key={PLAYALONG_BACKING_ID} songId={PLAYALONG_BACKING_ID} tempo={bpm} />
+      <div className="song-actions">
+        <button type="button" className="button-secondary" onClick={exportPackage}>{t("Export full Play-Along package")}</button>
+        <button type="button" className="button-secondary" disabled={playing} onClick={() => packageImportRef.current?.click()}>{t("Import full Play-Along package")}</button>
+        <input ref={packageImportRef} type="file" accept=".drumhero,application/vnd.drumhero.playalong" hidden onChange={(event) => void importPackage(event.currentTarget.files?.[0])} />
+      </div>
       <div className="transport"><button type="button" className="button" onClick={() => void start()} disabled={playing}>Play loop</button><button type="button" className="button-secondary" onClick={stop} disabled={!playing}>Stop</button></div>
       <p role="status">{message}</p>
       <small>Tempo and section changes apply when playback restarts. Headphones can help keep the backing parts out of a nearby microphone.</small>

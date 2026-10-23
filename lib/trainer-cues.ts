@@ -1,9 +1,10 @@
-import type { PracticePattern } from "./types";
+import type { Instrument, PracticePattern } from "./types";
+import type { TrainerCueInstruction } from "./trainer-cue-sequences";
 
-export type TrainerCueMode = "off" | "fill" | "crash" | "loud" | "soft" | "random";
+export type TrainerCueMode = "off" | "fill" | "crash" | "loud" | "soft" | "dropout" | "accent-shift" | "custom" | "random";
 export type TrainerCueDensity = 1 | 2 | 4;
 export type TrainerCueLead = 1 | 2;
-export type TrainerCueCallout = { step: number; label: string };
+export type TrainerCueCallout = { step: number; label: string; repetition?: number; bar?: number };
 
 export type TrainerCueResult = {
   pattern: PracticePattern;
@@ -11,6 +12,7 @@ export type TrainerCueResult = {
   label: string;
   hasDynamicsTargets: boolean;
   callouts?: TrainerCueCallout[];
+  repetitionPatterns?: PracticePattern[];
 };
 
 export function createTrainerCuePattern(
@@ -21,6 +23,9 @@ export function createTrainerCuePattern(
   seed = 1,
   cueEveryBars: TrainerCueDensity = 1,
   cueLeadBeats: TrainerCueLead = 1,
+  repetitions = 1,
+  cueVoice: Instrument = "hihat",
+  customCues: TrainerCueInstruction[] = [],
 ): TrainerCueResult {
   if (mode === "off") return { pattern, cueSteps: [], label: "", hasDynamicsTargets: false };
 
@@ -58,6 +63,120 @@ export function createTrainerCuePattern(
     };
   }
 
+  if (mode === "dropout") {
+    const totalSteps = Math.round(pattern.beats * stepsPerBeat);
+    const callouts: TrainerCueCallout[] = [];
+    const removedSteps = new Set<number>();
+    for (let bar = 0; bar < barCount; bar += 1) {
+      const barStart = bar * stepsPerBar;
+      const responseStep = barStart + cueOffset;
+      const barEnd = barStart + stepsPerBar;
+      const targets = pattern.hits.filter(hit => hit.instrument === cueVoice && hit.step >= responseStep && hit.step < barEnd);
+      if (!targets.length) continue;
+      targets.forEach(hit => removedSteps.add(hit.step));
+      const cueStep = responseStep > barStart ? responseStep - stepsPerBeat : barStart - stepsPerBeat;
+      callouts.push({ step: cueStep < 0 ? Math.max(0, totalSteps - stepsPerBeat) : cueStep, bar: bar + 1, label: `Next: drop ${cueVoice} from beat ${safeBeat}.` });
+    }
+    return {
+      pattern: {
+        ...pattern,
+        id: `trainer-cue:dropout:${pattern.id}`,
+        name: `${pattern.name} · ${cueVoice} dropout`,
+        hits: pattern.hits.filter(hit => !removedSteps.has(hit.step) || hit.instrument !== cueVoice),
+      },
+      cueSteps: callouts.map(callout => callout.step),
+      callouts,
+      label: callouts.length ? `DROP OUT · leave ${cueVoice} silent from beat ${safeBeat} to the end of each bar.` : `No ${cueVoice} targets occur from beat ${safeBeat} onward in this phrase. Choose another voice or beat.`,
+      hasDynamicsTargets: false,
+    };
+  }
+
+  if (mode === "accent-shift") {
+    const callouts: TrainerCueCallout[] = [];
+    const hits = pattern.hits.map(hit => {
+      const beatInBar = Math.floor((hit.step % stepsPerBar) / stepsPerBeat) + 1;
+      const accented = beatInBar === safeBeat;
+      return { ...hit, accent: accented, velocityTarget: accented ? 105 : 45 };
+    });
+    for (let bar = 0; bar < barCount; bar += 1) {
+      const barStart = bar * stepsPerBar;
+      const responseStep = barStart + cueOffset;
+      if (!hits.some(hit => hit.step >= responseStep && hit.step < responseStep + stepsPerBeat)) continue;
+      const cueStep = responseStep > barStart ? responseStep - stepsPerBeat : barStart - stepsPerBeat;
+      callouts.push({ step: cueStep < 0 ? Math.max(0, pattern.beats * stepsPerBeat - stepsPerBeat) : cueStep, bar: bar + 1, label: `Next: move the accent to beat ${safeBeat}.` });
+    }
+    return {
+      pattern: { ...pattern, id: `trainer-cue:accent-shift:${pattern.id}`, name: `${pattern.name} · accent shift`, hits },
+      cueSteps: callouts.map(callout => callout.step),
+      callouts,
+      label: `ACCENT SHIFT · emphasize hits on beat ${safeBeat}; keep the other strokes soft.`,
+      hasDynamicsTargets: true,
+    };
+  }
+
+  if (mode === "custom") {
+    const hits = pattern.hits.map(hit => ({ ...hit }));
+    const callouts: TrainerCueCallout[] = [];
+    const cueNames: string[] = [];
+    for (let bar = 0; bar < barCount; bar += 1) {
+      const barStart = bar * stepsPerBar;
+      const barEnd = barStart + stepsPerBar;
+      for (const cue of customCues) {
+        const safeCueBeat = Math.max(1, Math.min(Math.floor(stepsPerBar / stepsPerBeat), Math.floor(cue.beat)));
+        const responseStep = barStart + (safeCueBeat - 1) * stepsPerBeat;
+        const leadSteps = Math.min(Math.max(1, cueLeadBeats), Math.max(1, Math.floor(stepsPerBar / stepsPerBeat) - 1)) * stepsPerBeat;
+        const cueStep = responseStep - leadSteps;
+        const calloutStep = cueStep < barStart ? (barStart > 0 ? barStart - stepsPerBeat : Math.max(0, pattern.beats * stepsPerBeat - stepsPerBeat)) : cueStep;
+        if (cue.action === "crash") {
+          const existing = hits.find(hit => hit.step === responseStep && hit.instrument === "crash");
+          if (existing) existing.accent = true;
+          else hits.push({ step: responseStep, instrument: "crash", accent: true });
+          callouts.push({ step: calloutStep, bar: bar + 1, label: `Next: crash on beat ${safeCueBeat}.` });
+        } else if (cue.action === "dropout") {
+          const voice = cue.voice ?? cueVoice;
+          const targets = hits.filter(hit => hit.instrument === voice && hit.step >= responseStep && hit.step < barEnd);
+          hits.splice(0, hits.length, ...hits.filter(hit => !(hit.instrument === voice && hit.step >= responseStep && hit.step < barEnd)));
+          callouts.push({ step: calloutStep, bar: bar + 1, label: targets.length ? `Next: drop ${voice} from beat ${safeCueBeat}.` : `No ${voice} hits to drop after beat ${safeCueBeat} in this bar.` });
+        } else if (cue.action === "accent-shift") {
+          for (let index = 0; index < hits.length; index += 1) {
+            const hit = hits[index];
+            if (hit.step >= barStart && hit.step < barEnd) {
+              const accented = hit.step >= responseStep && hit.step < responseStep + stepsPerBeat;
+              hits[index] = { ...hit, accent: accented, velocityTarget: accented ? 105 : 45 };
+            }
+          }
+          callouts.push({ step: calloutStep, bar: bar + 1, label: `Next: move the accent to beat ${safeCueBeat}.` });
+        } else {
+          const loud = cue.action === "loud";
+          for (let index = 0; index < hits.length; index += 1) {
+            const hit = hits[index];
+            if (hit.step < barStart || hit.step >= barEnd) continue;
+            const changed = hit.step >= responseStep;
+            hits[index] = { ...hit, ...(changed && loud ? { accent: true } : {}), velocityTarget: changed ? (loud ? 105 : 35) : (loud ? 55 : 78) };
+          }
+          callouts.push({ step: calloutStep, bar: bar + 1, label: `Next: play ${loud ? "louder" : "softer"} from beat ${safeCueBeat}.` });
+        }
+        cueNames.push(`${cue.action} on ${safeCueBeat}`);
+      }
+    }
+    const encodedId = encodeURIComponent(pattern.id);
+    const groupedCallouts = new Map<string, TrainerCueCallout>();
+    for (const callout of callouts) {
+      const key = `${callout.bar}:${callout.step}`;
+      const existing = groupedCallouts.get(key);
+      if (existing) existing.label = `${existing.label.replace(/^Next: /, "")}; ${callout.label.replace(/^Next: /, "")}`;
+      else groupedCallouts.set(key, { ...callout });
+    }
+    const uniqueCallouts = [...groupedCallouts.values()].map(callout => ({ ...callout, label: `Next: ${callout.label.replace(/^Next: /, "")}` }));
+    return {
+      pattern: { ...pattern, id: `trainer-cue:custom:${encodedId}`, name: `${pattern.name} · custom cue`, hits: hits.sort((a, b) => a.step - b.step) },
+      cueSteps: uniqueCallouts.map(callout => callout.step),
+      callouts: uniqueCallouts,
+      label: customCues.length ? `Custom sequence · ${cueNames.join(" → ")}. Responses repeat in each bar.` : "Add at least one response to your custom cue sequence.",
+      hasDynamicsTargets: customCues.some(cue => cue.action === "loud" || cue.action === "soft" || cue.action === "accent-shift"),
+    };
+  }
+
   if (mode === "random") {
     let state = seed >>> 0 || 1;
     const random = () => {
@@ -65,43 +184,74 @@ export function createTrainerCuePattern(
       return state / 4294967296;
     };
     const callouts: TrainerCueCallout[] = [];
-    const hits = [...pattern.hits.map(hit => ({ ...hit }))];
     let hasDynamicsTargets = false;
     const beatsPerBar = Math.max(1, Math.floor(stepsPerBar / stepsPerBeat));
     const requestedDensity: TrainerCueDensity = [1, 2, 4].includes(cueEveryBars) ? cueEveryBars : 1;
-    const safeDensity = Math.min(requestedDensity, barCount);
+    const safeDensity = requestedDensity;
     const safeLead = Math.min(Math.max(1, cueLeadBeats), Math.max(1, beatsPerBar - 1));
-    for (let bar = 0; bar < barCount; bar += safeDensity) {
-      const firstResponseBeat = Math.min(beatsPerBar, safeLead + 1);
-      const responseBeat = firstResponseBeat + Math.floor(random() * Math.max(1, beatsPerBar - firstResponseBeat + 1));
-      const responseStep = bar * stepsPerBar + (responseBeat - 1) * stepsPerBeat;
-      const cueStep = Math.max(bar * stepsPerBar, responseStep - safeLead * stepsPerBeat);
-      let response = Math.floor(random() * 3);
-      const barEnd = (bar + 1) * stepsPerBar;
-      if (response !== 0 && !hits.some(hit => hit.step >= responseStep && hit.step < barEnd)) response = 0;
-      if (response === 0) {
-        const crash = hits.find(hit => hit.step === responseStep && hit.instrument === "crash");
-        if (crash) crash.accent = true;
-        else hits.push({ step: responseStep, instrument: "crash", accent: true });
-        callouts.push({ step: cueStep, label: `Next: crash on beat ${responseBeat}.` });
-      } else {
-        const loud = response === 1;
-        hasDynamicsTargets = true;
-        for (let index = 0; index < hits.length; index += 1) {
-          const hit = hits[index];
-          if (hit.step < bar * stepsPerBar || hit.step >= (bar + 1) * stepsPerBar) continue;
-          const changed = hit.step >= responseStep;
-          hits[index] = { ...hit, ...(changed && loud ? { accent: true } : {}), velocityTarget: changed ? (loud ? 105 : 35) : (loud ? 55 : 78) };
+    const safeRepetitions = Math.max(1, Math.min(2000, Math.floor(repetitions) || 1));
+    const sequenceId = `trainer-cue:random:${encodeURIComponent(pattern.id)}:${seed >>> 0}`;
+    const repetitionPatterns = Array.from({ length: safeRepetitions }, () => ({
+      ...pattern,
+      id: sequenceId,
+      name: `${pattern.name} · random cues`,
+      hits: pattern.hits.map(hit => ({ ...hit })),
+    }));
+    for (let repetition = 0; repetition < safeRepetitions; repetition += 1) {
+      for (let bar = 0; bar < barCount; bar += 1) {
+        const absoluteBar = repetition * barCount + bar;
+        if (absoluteBar % safeDensity !== 0) continue;
+        const firstResponseBeat = Math.min(beatsPerBar, safeLead + 1);
+        const responseBeat = firstResponseBeat + Math.floor(random() * Math.max(1, beatsPerBar - firstResponseBeat + 1));
+        const barStart = bar * stepsPerBar;
+        const responseStep = barStart + (responseBeat - 1) * stepsPerBeat;
+        const cueStep = Math.max(barStart, responseStep - safeLead * stepsPerBeat);
+        const currentPattern = repetitionPatterns[repetition];
+        let response = Math.floor(random() * 5);
+        const barEnd = (bar + 1) * stepsPerBar;
+        const responseHits = currentPattern.hits.filter(hit => hit.step >= responseStep && hit.step < barEnd);
+        if (response !== 0 && !responseHits.length) response = 0;
+        if (response === 3 && !new Set(responseHits.map(hit => hit.instrument)).size) response = 0;
+        if (response === 4 && !responseHits.some(hit => hit.step < responseStep + stepsPerBeat)) response = 0;
+        if (response === 0) {
+          const crash = currentPattern.hits.find(hit => hit.step === responseStep && hit.instrument === "crash");
+          if (crash) crash.accent = true;
+          else currentPattern.hits.push({ step: responseStep, instrument: "crash", accent: true });
+          callouts.push({ step: cueStep, repetition, bar: absoluteBar + 1, label: `Next: crash on beat ${responseBeat}.` });
+        } else if (response === 3) {
+          const responseVoices = [...new Set(responseHits.map(hit => hit.instrument))];
+          const droppedVoice = responseVoices[Math.floor(random() * responseVoices.length)];
+          currentPattern.hits = currentPattern.hits.filter(hit => !(hit.instrument === droppedVoice && hit.step >= responseStep && hit.step < barEnd));
+          callouts.push({ step: cueStep, repetition, bar: absoluteBar + 1, label: `Next: drop ${droppedVoice} from beat ${responseBeat}.` });
+        } else if (response === 4) {
+          hasDynamicsTargets = true;
+          for (let index = 0; index < currentPattern.hits.length; index += 1) {
+            const hit = currentPattern.hits[index];
+            if (hit.step < barStart || hit.step >= barEnd) continue;
+            const accented = hit.step >= responseStep && hit.step < responseStep + stepsPerBeat;
+            currentPattern.hits[index] = { ...hit, accent: accented, velocityTarget: accented ? 105 : 45 };
+          }
+          callouts.push({ step: cueStep, repetition, bar: absoluteBar + 1, label: `Next: move the accent to beat ${responseBeat}.` });
+        } else {
+          const loud = response === 1;
+          hasDynamicsTargets = true;
+          for (let index = 0; index < currentPattern.hits.length; index += 1) {
+            const hit = currentPattern.hits[index];
+            if (hit.step < barStart || hit.step >= barEnd) continue;
+            const changed = hit.step >= responseStep;
+            currentPattern.hits[index] = { ...hit, ...(changed && loud ? { accent: true } : {}), velocityTarget: changed ? (loud ? 105 : 35) : (loud ? 55 : 78) };
+          }
+          callouts.push({ step: cueStep, repetition, bar: absoluteBar + 1, label: `Next: play ${loud ? "louder" : "softer"} from beat ${responseBeat}.` });
         }
-        callouts.push({ step: cueStep, label: `Next: play ${loud ? "louder" : "softer"} from beat ${responseBeat}.` });
       }
     }
-    const encodedId = encodeURIComponent(pattern.id);
+    repetitionPatterns.forEach(item => item.hits.sort((a, b) => a.step - b.step));
     return {
-      pattern: { ...pattern, id: `trainer-cue:random:${encodedId}:${seed >>> 0}`, name: `${pattern.name} · random cues`, hits: hits.sort((a, b) => a.step - b.step) },
+      pattern: repetitionPatterns[0],
       cueSteps: callouts.map(callout => callout.step),
       callouts,
-      label: `Random cue sequence · respond ${safeLead} beat${safeLead === 1 ? "" : "s"} after each callout, every ${safeDensity} bar${safeDensity === 1 ? "" : "s"} in this phrase.`,
+      repetitionPatterns,
+      label: `Random cue sequence · crash, dynamics, dropout, or accent shift; respond ${safeLead} beat${safeLead === 1 ? "" : "s"} after each callout, every ${safeDensity} bar${safeDensity === 1 ? "" : "s"} across the round (${callouts.length} cue${callouts.length === 1 ? "" : "s"}).`,
       hasDynamicsTargets,
     };
   }

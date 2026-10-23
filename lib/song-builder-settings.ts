@@ -1,16 +1,18 @@
 import { DEFAULT_DRUM_MIX, type DrumMixSettings } from "./audio";
 import type { NotationOptions } from "./song-builder-notation";
-import type { SongInstrument } from "./types";
+import { SONG_INSTRUMENTS as ALL_SONG_INSTRUMENTS, type SongInstrument } from "./types";
 
 export const SONG_BUILDER_SETTINGS_KEY = "drum-hero:song-builder-settings:v1";
-export const SONG_INSTRUMENTS: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4"];
-export const DEFAULT_MIDI_NOTES: Record<SongInstrument, number> = {
-  kick: 36, rimshot: 37, snare: 38, hihat: 42, openhat: 46, tom: 50, crash: 49, ride: 51, cowbell: 56, shaker: 82, tambourine: 54, custom1: 60, custom2: 61, custom3: 62, custom4: 63
-};
+export const SONG_INSTRUMENTS: SongInstrument[] = ALL_SONG_INSTRUMENTS;
+export const DEFAULT_MIDI_NOTES: Record<SongInstrument, number> = Object.fromEntries([
+  ["kick",36],["rimshot",37],["snare",38],["hihat",42],["openhat",46],["tom",50],["crash",49],["ride",51],["cowbell",56],["shaker",82],["tambourine",54],
+  ...Array.from({length:8},(_,index)=>[`custom${index+1}`,60+index])
+]) as Record<SongInstrument, number>;
 
 export type SongBuilderKitPreset = { id: string; name: string; mix: DrumMixSettings };
 export type SongBuilderPerformancePreset = { id: string; name: string; bpm: number; mix: DrumMixSettings; playDrums: boolean; metronome: boolean; loop: boolean; countInBeats: number; metronomeSubdivision: number; rangeStart: number; rangeEnd: number; fractionalLoop?: boolean; loopStart?: number; loopEnd?: number; backingVolume?: number };
 export type SongBuilderNotationSettings = NotationOptions;
+export type SongBuilderExportPreset = { id: string; name: string; view: "tab" | "staff"; format: "png" | "pdf"; scope: "song" | "section"; paperSize: "letter" | "a4"; orientation: "portrait" | "landscape"; barsPerPage: 4 | 6 | 8; barsPerLine: 1 | 2 | 3 | 4; sectionLineBreaks: boolean };
 export type SongBuilderSettings = {
   mix: DrumMixSettings;
   midiNotes: Record<SongInstrument, number>;
@@ -25,6 +27,7 @@ export type SongBuilderSettings = {
   midiLatencyMs: number;
   kitPresets: SongBuilderKitPreset[];
   performancePresets: SongBuilderPerformancePreset[];
+  exportPresets: SongBuilderExportPreset[];
   midiSeparateTracks: boolean;
   notation: SongBuilderNotationSettings;
 };
@@ -43,8 +46,9 @@ export const DEFAULT_SONG_BUILDER_SETTINGS: SongBuilderSettings = {
   midiLatencyMs: 0,
   kitPresets: [],
   performancePresets: [],
+  exportPresets: [],
   midiSeparateTracks: true,
-  notation: { barsPerPage: 6, barsPerLine: 2, sectionLineBreaks: false, pageBreakBeforeSections: [], cymbalNoteheads: "cross", showSticking: true, showArticulationMarks: true, staffPositions: { kick: 3, snare: -1, rimshot: -1, tom: -2, hihat: -5, openhat: -5, ride: -4, crash: -6, cowbell: -3, shaker: -7, tambourine: -6, custom1: 0, custom2: 1, custom3: -1, custom4: 2 }, beamGrouping: "auto" }
+  notation: { barsPerPage: 6, barsPerLine: 2, sectionLineBreaks: false, pageBreakBeforeSections: [], cymbalNoteheads: "cross", showSticking: true, showArticulationMarks: true, staffPositions: { kick: 3, snare: -1, rimshot: -1, tom: -2, hihat: -5, openhat: -5, ride: -4, crash: -6, cowbell: -3, shaker: -7, tambourine: -6, custom1: 0, custom2: 1, custom3: -1, custom4: 2, custom5: 0, custom6: 1, custom7: -1, custom8: 2 }, beamGrouping: "auto" }
 };
 
 const boundedNumber = (value: unknown, fallback: number, min: number, max: number) =>
@@ -81,6 +85,12 @@ export function normalizeSongBuilderSettings(input: unknown): SongBuilderSetting
     if (!name) return [];
     return [{ id: preset.id.slice(0, 100), name, bpm: Math.round(boundedNumber(preset.bpm, 80, 40, 200)), mix: normalizeDrumMix(preset.mix), playDrums: preset.playDrums !== false, metronome: preset.metronome === true, loop: preset.loop === true, countInBeats: Math.round(boundedNumber(preset.countInBeats, 4, 0, 8)), metronomeSubdivision: Math.round(boundedNumber(preset.metronomeSubdivision, 1, 1, 4)), rangeStart: Math.round(boundedNumber(preset.rangeStart, 1, 1, 4096)), rangeEnd: Math.round(boundedNumber(preset.rangeEnd, 0, 0, 4096)), fractionalLoop: preset.fractionalLoop===true, loopStart: boundedNumber(preset.loopStart,0,0,4096), loopEnd: boundedNumber(preset.loopEnd,0,0,4096), backingVolume: typeof preset.backingVolume === "number" ? boundedNumber(preset.backingVolume, 0.65, 0, 1) : undefined }];
   }).slice(-20) : [];
+  const exportPresets = Array.isArray(value.exportPresets) ? value.exportPresets.flatMap((preset) => {
+    if (!preset || typeof preset !== "object" || typeof preset.id !== "string" || typeof preset.name !== "string") return [];
+    const name = preset.name.trim().slice(0, 40);
+    if (!name) return [];
+    return [{ id: preset.id.slice(0, 100), name, view: preset.view === "staff" ? "staff" as const : "tab" as const, format: preset.format === "pdf" ? "pdf" as const : "png" as const, scope: preset.scope === "section" ? "section" as const : "song" as const, paperSize: preset.paperSize === "a4" ? "a4" as const : "letter" as const, orientation: preset.orientation === "portrait" ? "portrait" as const : "landscape" as const, barsPerPage: ([4, 6, 8].includes(preset.barsPerPage) ? preset.barsPerPage : 6) as 4 | 6 | 8, barsPerLine: ([1, 2, 3, 4].includes(preset.barsPerLine) ? preset.barsPerLine : 2) as 1 | 2 | 3 | 4, sectionLineBreaks: preset.sectionLineBreaks === true }];
+  }).slice(-20) : [];
   return {
     mix: normalizeDrumMix(value.mix),
     midiNotes: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, Math.round(boundedNumber(rawMidi[voice], DEFAULT_MIDI_NOTES[voice], 0, 127))])) as Record<SongInstrument, number>,
@@ -95,6 +105,7 @@ export function normalizeSongBuilderSettings(input: unknown): SongBuilderSetting
     midiLatencyMs: Math.round(boundedNumber(value.midiLatencyMs, 0, -250, 500)),
     kitPresets,
     performancePresets,
+    exportPresets,
     midiSeparateTracks: value.midiSeparateTracks !== false,
     notation: {
       paperSize: rawNotation.paperSize === 'a4' ? 'a4' : 'letter',

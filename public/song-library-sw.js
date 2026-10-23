@@ -1,7 +1,7 @@
 /* Offline caching is opt-in and stores selected Drum Hero pages and static learning assets. */
 const PREFIX='drum-hero-song-offline-';
 const META=PREFIX+'meta';
-const OFFLINE_ROUTES=['/','/learn','/practice','/trainer','/rudiments','/grooves','/kit','/song-library','/song-builder','/progress','/about','/play-alongs'];
+const OFFLINE_ROUTES=['/','/learn','/practice','/trainer','/improvisation','/ear-training','/sight-reading','/assessment','/rudiments','/grooves','/kit','/song-library','/song-builder','/progress','/about','/play-alongs'];
 const allowed=path=>path.startsWith('/_next/static/')||path.startsWith('/audio/drums/')||path.startsWith('/models/drums/')||path==='/drum-hero-logo.svg'||path==='/manifest.webmanifest';
 self.addEventListener('install',event=>event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));

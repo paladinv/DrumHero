@@ -1,4 +1,5 @@
-import type { SongInstrument } from "./types";
+import { SONG_INSTRUMENTS, type SongInstrument } from "./types";
+import type { CustomSampleLayers } from "./song-builder-samples";
 
 export type DrumAudio = {
   click: (accent?: boolean) => void;
@@ -9,7 +10,7 @@ export type DrumAudio = {
   setMasterLevel: (level: number) => void;
   setClickLevel: (level: number) => void;
   setClickSound: (sound: TrainerClickSound) => void;
-  setCustomSample: (instrument: SongInstrument, blob: Blob | null) => Promise<boolean>;
+  setCustomSample: (instrument: SongInstrument, blob: Blob | null, layer?: "primary" | "accent") => Promise<boolean>;
   ready: Promise<boolean>;
   silence: () => void;
   close: () => void;
@@ -25,15 +26,16 @@ export type DrumMixSettings = {
   solo: SongInstrument | "";
 };
 
+const voiceValues = <T,>(initial: T): Record<SongInstrument, T> => Object.fromEntries(SONG_INSTRUMENTS.map(voice => [voice, initial])) as Record<SongInstrument, T>;
 export const DEFAULT_DRUM_MIX: DrumMixSettings = {
-  levels: { kick: 0.82, snare: 0.82, hihat: 0.82, tom: 0.82, crash: 0.82, openhat: 0.82, ride: 0.82, rimshot: 0.82, cowbell: 0.82, shaker: 0.82, tambourine: 0.82, custom1: 0.82, custom2: 0.82, custom3: 0.82, custom4: 0.82 },
-  pan: { kick: 0, snare: 0, hihat: 0, tom: 0, crash: 0, openhat: 0, ride: 0, rimshot: 0, cowbell: 0, shaker: 0, tambourine: 0, custom1: 0, custom2: 0, custom3: 0, custom4: 0 },
-  sampleIndex: { kick: 0, snare: 0, hihat: 0, tom: 0, crash: 0, openhat: 0, ride: 0, rimshot: 0, cowbell: 0, shaker: 0, tambourine: 0, custom1: 0, custom2: 0, custom3: 0, custom4: 0 },
-  muted: { kick: false, snare: false, hihat: false, tom: false, crash: false, openhat: false, ride: false, rimshot: false, cowbell: false, shaker: false, tambourine: false, custom1: false, custom2: false, custom3: false, custom4: false },
+  levels: voiceValues(0.82),
+  pan: voiceValues(0),
+  sampleIndex: voiceValues(0),
+  muted: voiceValues(false),
   solo: ""
 };
 
-const samplePaths: Record<SongInstrument, string[]> = {
+const samplePaths = {
   kick: [1, 2, 3, 4].map((take) => `/audio/drums/kick-${take}.wav`),
   snare: [1, 2, 3].map((take) => `/audio/drums/snare-${take}.wav`),
   hihat: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`),
@@ -45,28 +47,34 @@ const samplePaths: Record<SongInstrument, string[]> = {
   cowbell: [1, 2, 3, 4].map((take) => `/audio/drums/crash-${take}.wav`),
   shaker: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`),
   tambourine: [1, 2, 3, 4].map((take) => `/audio/drums/hihat-${take}.wav`),
-  custom1: ["/audio/drums/kick-1.wav"], custom2: ["/audio/drums/snare-1.wav"], custom3: ["/audio/drums/tom-1.wav"], custom4: ["/audio/drums/crash-1.wav"]
-};
+  ...Object.fromEntries(Array.from({length:8},(_,index)=>[`custom${index+1}`, [`/audio/drums/${["kick","snare","tom","crash"][index%4]}-1.wav`]]))
+} as Record<SongInstrument, string[]>;
 
-export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, initialCustomSamples: Partial<Record<SongInstrument, Blob>> = {}): DrumAudio | null {
+export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, initialCustomSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, onInterrupted?: () => void): DrumAudio | null {
   if (typeof window === "undefined" || !(window.AudioContext || window.webkitAudioContext)) return null;
   const Context = window.AudioContext || window.webkitAudioContext;
   const context = new Context();
   const abort = new AbortController();
   const instruments = Object.keys(samplePaths) as SongInstrument[];
-  const samples: Record<SongInstrument, AudioBuffer[]> = { kick: [], snare: [], hihat: [], tom: [], crash: [], openhat: [], ride: [], rimshot: [], cowbell: [], shaker: [], tambourine: [], custom1: [], custom2: [], custom3: [], custom4: [] };
-  const customSamples: Partial<Record<SongInstrument, AudioBuffer>> = {};
-  const nextTake: Record<SongInstrument, number> = { kick: 0, snare: 0, hihat: 0, tom: 0, crash: 0, openhat: 0, ride: 0, rimshot: 0, cowbell: 0, shaker: 0, tambourine: 0, custom1: 0, custom2: 0, custom3: 0, custom4: 0 };
+  const samples: Record<SongInstrument, AudioBuffer[]> = voiceValues([]);
+  const customSamples: Partial<Record<SongInstrument, { primary: AudioBuffer; accent?: AudioBuffer }>> = {};
+  const nextTake: Record<SongInstrument, number> = voiceValues(0);
   let mix = initialMix;
   let masterLevel = 1;
   let clickLevel = 1;
   let clickSound: TrainerClickSound = "hat";
   let closed = false;
+  let hasRun = context.state === "running";
+  const stateChanged = () => {
+    if (context.state === "running") hasRun = true;
+    else if (!closed && hasRun && (context.state === "suspended" || String(context.state) === "interrupted")) onInterrupted?.();
+  };
+  if (onInterrupted) context.addEventListener("statechange", stateChanged);
   const activeSources=new Set<AudioScheduledSourceNode>();
   const silence=()=>{for(const source of activeSources){try{source.stop();}catch{/* Already ended. */}}activeSources.clear();activeOpenHat=null;};
   let activeOpenHat: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
 
-  const playSample = (instrument: SongInstrument, gainValue: number, duration?: number, metronomeClick = false, atMs?: number, panOverride?: number) => {
+  const playSample = (instrument: SongInstrument, gainValue: number, duration?: number, metronomeClick = false, atMs?: number, panOverride?: number, velocityValue = 86) => {
     const eventAt = context.currentTime + Math.max(0, ((atMs ?? performance.now()) - performance.now()) / 1000);
     if (!metronomeClick && (mix.muted[instrument] || (mix.solo && mix.solo !== instrument))) return;
     const takes = samples[instrument];
@@ -83,7 +91,7 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
       }
     }
     const chosenTake = metronomeClick ? 0 : Math.max(0, Math.min(takes.length - 1, Math.round(mix.sampleIndex[instrument] ?? 0)));
-    const take = custom ?? takes[chosenTake] ?? takes[nextTake[instrument] % Math.max(1, takes.length)];
+    const take = (custom ? velocityValue >= 96 && custom.accent ? custom.accent : custom.primary : undefined) ?? takes[chosenTake] ?? takes[nextTake[instrument] % Math.max(1, takes.length)];
     nextTake[instrument] += 1;
     const source = context.createBufferSource();
     const gain = context.createGain();
@@ -137,9 +145,14 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
     samples[instrument] = decoded.filter((sample): sample is AudioBuffer => sample !== null);
     return samples[instrument].length > 0;
   })).then(async (results) => {
-    await Promise.all(Object.entries(initialCustomSamples).map(async ([voice, blob]) => {
-      if (!blob) return;
-      try { customSamples[voice as SongInstrument] = await context.decodeAudioData(await blob.arrayBuffer()); }
+    await Promise.all(Object.entries(initialCustomSamples).map(async ([voice, source]) => {
+      if (!source) return;
+      try {
+        const layers = source instanceof Blob ? { primary: source } : source;
+        const primary = await context.decodeAudioData(await layers.primary.arrayBuffer());
+        const accent = layers.accent ? await context.decodeAudioData(await layers.accent.arrayBuffer()).catch(() => undefined) : undefined;
+        customSamples[voice as SongInstrument] = { primary, ...(accent ? { accent } : {}) };
+      }
       catch { /* A bad custom sample should not disable the built-in kit. */ }
     }));
     return results.every(Boolean);
@@ -148,17 +161,25 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
   void context.resume().catch(() => {});
   return {
     click: (accent = false) => playClick(accent),
-    hit: (instrument, accent = false, velocity, choke = false) => playSample(instrument, velocity ? Math.max(0.025, Math.min(0.95, velocity / 127)) : accent ? 0.82 : 0.55, choke ? 0.12 : undefined),
-    scheduleHit: (instrument,atMs,accent=false,velocity,choke=false,pan) => playSample(instrument,velocity?Math.max(.025,Math.min(.95,velocity/127)):accent?.82:.55,choke?.12:undefined,false,atMs,pan),
+    hit: (instrument, accent = false, velocity, choke = false) => playSample(instrument, velocity ? Math.max(0.025, Math.min(0.95, velocity / 127)) : accent ? 0.82 : 0.55, choke ? 0.12 : undefined, false, undefined, undefined, velocity ?? (accent ? 118 : 86)),
+    scheduleHit: (instrument,atMs,accent=false,velocity,choke=false,pan) => playSample(instrument,velocity?Math.max(.025,Math.min(.95,velocity/127)):accent?.82:.55,choke?.12:undefined,false,atMs,pan,velocity??(accent?118:86)),
     scheduleClick: (atMs,accent=false) => playClick(accent, atMs),
     setMix: (settings) => { mix = settings; },
     setMasterLevel: (level) => { masterLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 1)); },
     setClickLevel: (level) => { clickLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 1)); },
     setClickSound: (sound) => { clickSound = sound; },
-    setCustomSample: async (instrument, blob) => {
+    setCustomSample: async (instrument, blob, layer = "primary") => {
       try {
-        if (!blob) { delete customSamples[instrument]; return true; }
-        customSamples[instrument] = await context.decodeAudioData(await blob.arrayBuffer());
+        if (!blob) {
+          if (layer === "primary") delete customSamples[instrument];
+          else if (customSamples[instrument]) delete customSamples[instrument]!.accent;
+          return true;
+        }
+        const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+        if (layer === "accent") {
+          if (!customSamples[instrument]?.primary) return false;
+          customSamples[instrument] = { ...customSamples[instrument]!, accent: decoded };
+        } else customSamples[instrument] = { primary: decoded, ...(customSamples[instrument]?.accent ? { accent: customSamples[instrument]!.accent } : {}) };
         return true;
       } catch { return false; }
     },
@@ -167,6 +188,7 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
     close: () => {
       if (closed) return;
       closed = true;
+      if (onInterrupted) context.removeEventListener("statechange", stateChanged);
       silence();
       abort.abort();
       void context.close();

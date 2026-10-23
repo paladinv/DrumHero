@@ -13,6 +13,7 @@ export type BuilderBacking = {
   downbeat: number;
   volume: number;
   bpm?: number;
+  preservePitch?: boolean;
   source?: string;
   rights?: string;
 };
@@ -123,6 +124,14 @@ export async function saveBuilderBacking(value: BuilderBacking, announceStorageC
   const normalized = { ...value, songId: value.songId ?? value.id, stemId: value.stemId ?? 'main' };
   await transaction('backing', 'readwrite', (store) => store.put(normalized));
   if (announceStorageChange && typeof window !== 'undefined') window.dispatchEvent(new Event('drum-hero:audio-storage-change'));
+}
+
+export async function replaceBuilderBackingFiles(ids: string[], values: BuilderBacking[]) {
+  await transactionAction('backing', (store) => {
+    ids.forEach((id) => store.delete(id));
+    values.forEach((value) => store.put({ ...value, songId: value.songId ?? value.id, stemId: value.stemId ?? 'main' }));
+  });
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('drum-hero:audio-storage-change'));
 }
 
 export async function deleteBuilderBackingFiles(ids: string[]) {

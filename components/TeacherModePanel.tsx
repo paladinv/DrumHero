@@ -1,5 +1,7 @@
 "use client";
 
+import { IMPROVISATION_KEY, IMPROVISATION_WORKSPACE_KEY, IMPROVISATION_TAKES_KEY } from "@/lib/improvisation";
+
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { User } from "@supabase/supabase-js";
@@ -206,12 +208,12 @@ export function TeacherModePanel() {
   };
 
   const removeCurrentProfile = () => {
-    if (!currentProfile || profileId === "default" || !window.confirm(`Delete ${currentProfile.name}'s local progress, Trainer history, assignments, and imported shared reports from this browser?`)) return;
+    if (!currentProfile || profileId === "default" || !window.confirm(`Delete ${currentProfile.name}'s local progress, Trainer and improvisation history, assignments, and imported shared reports from this browser?`)) return;
     const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
     const nextAssignments = assignments.filter((item) => item.learnerId !== profileId);
     const nextSharedReports = sharedReports.filter((report) => report.learner.id !== profileId);
     try {
-      localStorage.removeItem(learnerStorageKey(STORAGE_KEY, profileId)); localStorage.removeItem(trainerStorageKey(profileId));
+      localStorage.removeItem(learnerStorageKey(STORAGE_KEY, profileId)); localStorage.removeItem(trainerStorageKey(profileId)); for (const key of [IMPROVISATION_KEY, IMPROVISATION_WORKSPACE_KEY, IMPROVISATION_TAKES_KEY]) localStorage.removeItem(learnerStorageKey(key, profileId));
       localStorage.setItem(LEARNER_PROFILES_KEY, JSON.stringify(nextProfiles.filter((item) => item.id !== "default")));
       localStorage.setItem(ASSIGNMENTS_KEY, JSON.stringify({ version: 1, assignments: nextAssignments }));
       localStorage.setItem(TEACHER_PROGRESS_REPORT_KEY, JSON.stringify(nextSharedReports));

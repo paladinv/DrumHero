@@ -16,11 +16,13 @@ import { localizedPattern } from "@/lib/teaching-pattern-display";
 
 type Mode="idle"|"loading"|"count-in"|"playing"|"paused"|"results";
 type ExpectedHit={at:number;instrument:Instrument;matched:boolean};
+function preferredTempo(pattern: PracticePattern, bpm: number) { return Math.min(pattern.tempoRange[1], Math.max(pattern.tempoRange[0], bpm)); }
 const instruments:Array<{id:Instrument;key:string;code:string}>=[
   {id:"kick",key:"Space",code:"Space"},{id:"snare",key:"F",code:"KeyF"},{id:"hihat",key:"J",code:"KeyJ"},{id:"tom",key:"K",code:"KeyK"},{id:"crash",key:"L",code:"KeyL"}
 ];
 
 export function PracticePad({initialPatternId}:{initialPatternId?:string}){
+  const {recordSession,progress,setSound,setPreferredBpm,hydrated}=useProgress();
   const [libraryPatterns,setLibraryPatterns]=useState<PracticePattern[]>([]);
   const [librarySongs,setLibrarySongs]=useState<ReturnType<typeof allSongs>>([]);
   const [customGrooves,setCustomGrooves]=useState<PracticePattern[]>([]);
@@ -28,9 +30,10 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const initial=availablePatterns.find((item)=>item.id===initialPatternId)??patterns[0];
   const [patternId,setPatternId]=useState(initialPatternId??initial.id);
   const pattern=availablePatterns.find((item)=>item.id===patternId)??patterns[0];
-  const [bpm,setBpm]=useState(initial.defaultBpm);
-  useEffect(()=>{const timer=window.setTimeout(()=>{const songs=allSongs(readSongLibrary());setLibrarySongs(songs);const next=songs.flatMap((song)=>song.sections.flatMap((section)=>section.parts.map((part)=>songPartPattern(song,section,part))));setLibraryPatterns(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(match.defaultBpm)},0);return()=>window.clearTimeout(timer)},[initialPatternId]);
-  useEffect(()=>{const load=()=>{const next=readCustomGrooves();setCustomGrooves(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(match.defaultBpm)};const timer=window.setTimeout(load,0);window.addEventListener(CUSTOM_GROOVES_EVENT,load);return()=>{window.clearTimeout(timer);window.removeEventListener(CUSTOM_GROOVES_EVENT,load)}},[initialPatternId]);
+  const [bpm,setBpm]=useState(preferredTempo(initial,progress.settings.preferredBpm));
+  useEffect(()=>{if(hydrated)setBpm(preferredTempo(pattern,progress.settings.preferredBpm))},[hydrated,pattern.id,progress.settings.preferredBpm]);
+  useEffect(()=>{const timer=window.setTimeout(()=>{const songs=allSongs(readSongLibrary());setLibrarySongs(songs);const next=songs.flatMap((song)=>song.sections.flatMap((section)=>section.parts.map((part)=>songPartPattern(song,section,part))));setLibraryPatterns(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(preferredTempo(match,progress.settings.preferredBpm))},0);return()=>window.clearTimeout(timer)},[initialPatternId,progress.settings.preferredBpm]);
+  useEffect(()=>{const load=()=>{const next=readCustomGrooves();setCustomGrooves(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(preferredTempo(match,progress.settings.preferredBpm))};const timer=window.setTimeout(load,0);window.addEventListener(CUSTOM_GROOVES_EVENT,load);return()=>{window.clearTimeout(timer);window.removeEventListener(CUSTOM_GROOVES_EVENT,load)}},[initialPatternId,progress.settings.preferredBpm]);
   const [mode,setModeState]=useState<Mode>("idle");
   const modeRef=useRef<Mode>("idle");
   const setMode=(next:Mode)=>{modeRef.current=next;setModeState(next)};
@@ -54,7 +57,6 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const bassRef=useRef<PracticeBass|null>(null);
   const startRequestRef=useRef(0);
   const kitRef=useRef<DrumKitCanvasHandle>(null);
-  const {recordSession,progress,setSound}=useProgress();
   const {t,formatNumber,locale}=useLocalization();
   const displayedPattern=localizedPattern(pattern,locale);
   const totalSteps=pattern.beats*(pattern.subdivision/4);
@@ -131,8 +133,8 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   useEffect(()=>{window.render_game_to_text=()=>{const nextTarget=expectedRef.current.find((target)=>!target.matched);return JSON.stringify({coordinateSystem:"time flows left to right across numbered steps",mode:modeRef.current,pattern:pattern.name,bpm,playhead,countIn,expectedHits:pattern.hits.length,recordedHits:ratedRef.current.length,lastHit,nextTargetInMs:nextTarget?Math.round(nextTarget.at-performance.now()):null,controls:{kick:"Space",snare:"F",hihat:"J",tom:"K",crash:"L"}})};window.advanceTime=(ms)=>{startAtRef.current-=ms;expectedRef.current.forEach((target)=>{target.at-=ms});tick()};return()=>{delete window.render_game_to_text;delete window.advanceTime}},[bpm,countIn,lastHit,pattern.hits.length,pattern.name,playhead,tick]);
 
   const live=summarizeHits(rated,pattern.id,pattern.name,bpm,"live");
-  const changePattern=(id:string)=>{reset();const next=availablePatterns.find((item)=>item.id===id)??patterns[0];setPatternId(id);setBpm(next.defaultBpm);if(next.beats%4!==0&&bassEnabled){setBassEnabled(false);setBassMessage("Bass accompaniment turned off because this pattern is not in complete 4/4 bars.")}};
-  const changeBpm=(value:number)=>{reset();setBpm(Math.min(200,Math.max(40,value)))};
+  const changePattern=(id:string)=>{reset();const next=availablePatterns.find((item)=>item.id===id)??patterns[0];setPatternId(id);setBpm(preferredTempo(next,progress.settings.preferredBpm));if(next.beats%4!==0&&bassEnabled){setBassEnabled(false);setBassMessage("Bass accompaniment turned off because this pattern is not in complete 4/4 bars.")}};
+  const changeBpm=(value:number)=>{reset();const next=preferredTempo(pattern,value);setBpm(next);setPreferredBpm(next)};
   if (pattern.id.startsWith("song:") && librarySongs.some(song => song.id === pattern.id.split(":")[1])) return <SongLinkedPractice patternId={pattern.id} engine="pad" targetBpm={bpm} />;
   return <div className="practice-layout">
     <section className="practice-console" aria-label={t("Practice controls")}>

@@ -1,0 +1,54 @@
+.studio { display: grid; gap: 1.25rem; }
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; border: 0; padding: 0; min-width: 0; }
+.settings label { display: grid; gap: .4rem; align-content: start; }
+.settings select, .settings input { max-width: 100%; width: 100%; }
+.settings .check { display: flex; align-items: center; }
+.check input { width: auto; }
+.transport { display: flex; gap: .75rem; flex-wrap: wrap; margin-block: 1rem; }
+.stage { border: 2px solid var(--coral); border-radius: 1rem; padding: 1.25rem; background: var(--surface, transparent); }
+.stage h2 { margin-block: 0 .5rem; }
+.beats { display: flex; gap: .65rem; margin-block: 1rem; }
+.beats span { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border: 1px solid currentColor; border-radius: 50%; }
+.beats .activeBeat { border: 3px solid currentColor; font-weight: 800; text-decoration: underline; }
+.pads { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: .75rem; }
+.pads button { min-height: 80px; touch-action: manipulation; display: grid; place-items: center; padding: .75rem; }
+.pads kbd { font-size: .8rem; }
+.results { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+.phrase { padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; }
+.phrase h3 { margin-top: 0; }
+.history { display: grid; gap: .8rem; padding-left: 1.25rem; }
+.history li { padding-block: .5rem; }
+.history button { margin-left: .75rem; }
+.note { font-size: .9rem; }
+
+.settings legend { margin-bottom: .75rem; font-weight: 800; }
+.settings select, .rating select { min-height: 44px; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface); }
+.rating { display: grid; gap: .5rem; }
+.pads button { border: 2px solid var(--line); border-radius: 16px; background: var(--paper); color: var(--ink); user-select: none; }
+.pads button:active:enabled { background: var(--amber-soft); border-color: var(--coral); }
+.pads button:disabled { opacity: .5; cursor: default; }
+.pads kbd { border: 1px solid var(--line); border-radius: 5px; padding: .15rem .5rem; }
+.stage p { color: var(--muted); }
+.history li > button { margin-left: 0; margin-top: .5rem; }
+@media (prefers-reduced-motion: reduce) { .studio * { scroll-behavior: auto; } }
+
+.transport :global(.button), .transport :global(.button):hover { background: #b93335; border-color: #b93335; color: #fff; }
+
+.bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(28px, 1fr)); gap: .4rem; margin-block: 1rem; }
+.bars span { text-align: center; padding: .5rem; border: 1px solid var(--line); border-radius: .5rem; }
+.bars .currentBar { border: 3px solid var(--coral-dark); font-weight: 800; text-decoration: underline; }
+.advice { padding: .75rem; border-left: 3px solid var(--coral-dark); background: var(--paper); }
+.phrase { display: grid; align-content: start; gap: .8rem; }
+.rating textarea { width: 100%; min-width: 0; color: var(--ink); background: var(--surface); border: 1px solid var(--line); padding: .7rem; border-radius: .6rem; font: inherit; }
+.replayLanes { display: grid; gap: .75rem; }
+.replayLane { position: relative; height: 36px; border: 1px solid var(--line); border-radius: .4rem; background: var(--paper); margin-block: .4rem; overflow: hidden; }
+.replayLane span { position: absolute; top: 7px; width: 3px; height: 20px; background: var(--coral-dark); }
+.tableScroll { max-width: 100%; overflow-x: auto; }
+.tableScroll table { width: 100%; border-collapse: collapse; text-align: left; }
+.tableScroll th, .tableScroll td { padding: .6rem; border-bottom: 1px solid var(--line); }
+
+.advanced { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: .6rem; padding: .8rem; }
+.advanced > summary { font-weight: 700; cursor: pointer; margin-bottom: .6rem; }
+.settings input:not([type=range]):not([type=checkbox]) { min-width: 0; min-height: 44px; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface); }
+.rating select { width: 100%; max-width: 100%; min-width: 0; }
+.history strong, .history summary, .history button { overflow-wrap: anywhere; max-width: 100%; }
