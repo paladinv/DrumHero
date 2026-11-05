@@ -34,7 +34,7 @@ export function SongQuickStart({ onSave }: { onSave: (song: DrumSong) => void })
     setTitle(""); setArtist("");
   };
 
-  return <details className="song-tool-panel song-quick-start">
+  return <details id="song-quick-start" className="song-tool-panel song-quick-start">
     <summary>Quick-start a song from an original groove</summary>
     <p>Choose a groove to start with a playable four-bar verse. You can add sections and change the part later.</p>
     <form onSubmit={create}>

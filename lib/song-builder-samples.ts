@@ -4,8 +4,9 @@ const DATABASE = "drum-hero-song-builder-kit";
 const STORE = "custom-samples";
 const VERSION = 1;
 export const MAX_CUSTOM_SAMPLE_BYTES = 12 * 1024 * 1024;
-export type CustomSampleRecord = { instrument: SongInstrument; name: string; blob: Blob; accentName?: string; accentBlob?: Blob; updatedAt: string };
-export type CustomSampleLayers = { primary: Blob; accent?: Blob };
+export type CustomSampleRecord = { instrument: SongInstrument; name: string; blob: Blob; softName?: string; softBlob?: Blob; accentName?: string; accentBlob?: Blob; updatedAt: string };
+export type CustomSampleLayers = { primary: Blob; soft?: Blob; accent?: Blob };
+export type CustomSampleLayer = "soft" | "primary" | "accent";
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -39,7 +40,7 @@ export async function readCustomSampleRecords() {
 
 export async function readCustomSamples() {
   const records = await readCustomSampleRecords();
-  return Object.fromEntries(records.map((record) => [record.instrument, { primary: record.blob, ...(record.accentBlob ? { accent: record.accentBlob } : {}) }])) as Partial<Record<SongInstrument, CustomSampleLayers>>;
+  return Object.fromEntries(records.map((record) => [record.instrument, { primary: record.blob, ...(record.softBlob ? { soft: record.softBlob } : {}), ...(record.accentBlob ? { accent: record.accentBlob } : {}) }])) as Partial<Record<SongInstrument, CustomSampleLayers>>;
 }
 
 export async function saveCustomSample(instrument: SongInstrument, file: File) {
@@ -60,22 +61,33 @@ export async function saveCustomAccentSample(instrument: SongInstrument, file: F
 }
 
 export async function saveCustomAccentSampleBlob(instrument: SongInstrument, name: string, blob: Blob) {
+  return saveCustomSampleLayerBlob(instrument, "accent", name, blob);
+}
+
+export async function saveCustomSampleLayerBlob(instrument: SongInstrument, layer: "soft" | "accent", name: string, blob: Blob) {
   if (!blob.type.startsWith("audio/")) throw new Error("Choose an audio file such as WAV, MP3, or OGG.");
   if (blob.size > MAX_CUSTOM_SAMPLE_BYTES) throw new Error("Custom drum samples must be 12 MB or smaller.");
   const previous = await transact<CustomSampleRecord | undefined>("readonly", (store) => store.get(instrument));
-  if (!previous?.blob) throw new Error("Import a primary sample for this voice before adding its accent layer.");
-  const record: CustomSampleRecord = { ...previous, accentName: name.slice(0, 120) || "Accent sample", accentBlob: blob.slice(0, blob.size, blob.type), updatedAt: new Date().toISOString() };
+  if (!previous?.blob) throw new Error("Import a primary sample for this voice before adding a velocity layer.");
+  const record: CustomSampleRecord = layer === "accent"
+    ? { ...previous, accentName: name.slice(0, 120) || "Accent sample", accentBlob: blob.slice(0, blob.size, blob.type), updatedAt: new Date().toISOString() }
+    : { ...previous, softName: name.slice(0, 120) || "Soft sample", softBlob: blob.slice(0, blob.size, blob.type), updatedAt: new Date().toISOString() };
   await transact<IDBValidKey>("readwrite", (store) => store.put(record));
   return record;
 }
 
-export async function deleteCustomSample(instrument: SongInstrument, layer?: "primary" | "accent") {
+export async function deleteCustomSample(instrument: SongInstrument, layer?: CustomSampleLayer) {
   if (!layer || layer === "primary") {
     await transact<undefined>("readwrite", (store) => store.delete(instrument));
     return;
   }
   const previous = await transact<CustomSampleRecord | undefined>("readonly", (store) => store.get(instrument));
   if (!previous) return;
-  const { accentBlob: _accentBlob, accentName: _accentName, ...primary } = previous;
-  await transact<IDBValidKey>("readwrite", (store) => store.put(primary));
+  if (layer === "accent") {
+    const { accentBlob: _blob, accentName: _name, ...primary } = previous;
+    await transact<IDBValidKey>("readwrite", (store) => store.put(primary));
+  } else {
+    const { softBlob: _blob, softName: _name, ...primary } = previous;
+    await transact<IDBValidKey>("readwrite", (store) => store.put(primary));
+  }
 }

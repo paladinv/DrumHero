@@ -9,6 +9,15 @@ import { buildArrangementBars, humanizeArrangementBars } from "@/lib/song-builde
 import { drawNotationPage, paginateNotation, DEFAULT_NOTATION_OPTIONS, type NotationView } from "@/lib/song-builder-notation";
 import type { DrumSong } from "@/lib/song-library";
 
+type ReviewNote = { id: string; measure: number; text: string; createdAt: string };
+
+function shareReviewKey(song: DrumSong) {
+  const source = `${song.title}|${song.artist}|${JSON.stringify(song.sections)}`;
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) hash = Math.imul(hash ^ source.charCodeAt(index), 16777619);
+  return `drum-hero-song-review-${(hash >>> 0).toString(36)}`;
+}
+
 export function SongBuilderSharePlayer() {
   const [song, setSong] = useState<DrumSong | null>(null);
   const [error, setError] = useState("");
@@ -18,6 +27,9 @@ export function SongBuilderSharePlayer() {
   const [page, setPage] = useState(0);
   const [audioTime, setAudioTime] = useState(0);
   const [followPlayhead, setFollowPlayhead] = useState(true);
+  const [reviewNotes, setReviewNotes] = useState<ReviewNote[]>([]);
+  const [reviewMeasure, setReviewMeasure] = useState(1);
+  const [reviewDraft, setReviewDraft] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const bars = useMemo(() => song ? buildArrangementBars(song) : [], [song]);
@@ -38,6 +50,14 @@ export function SongBuilderSharePlayer() {
     void readSongShareHash(window.location.hash).then(value => { if (active) setSong(value); }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : "Could not open this playback link."); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!song) return;
+    try {
+      const stored = JSON.parse(localStorage.getItem(shareReviewKey(song)) ?? "[]");
+      setReviewNotes(Array.isArray(stored) ? stored.filter((note): note is ReviewNote => Boolean(note && typeof note.id === "string" && Number.isInteger(note.measure) && typeof note.text === "string")) : []);
+    } catch { setReviewNotes([]); }
+  }, [song]);
 
   useEffect(() => {
     if (!followPlayhead || !position) return;
@@ -70,6 +90,22 @@ export function SongBuilderSharePlayer() {
     } finally { setRendering(false); }
   };
 
+  const saveReviewNotes = (next: ReviewNote[]) => {
+    setReviewNotes(next);
+    if (!song) return;
+    try { localStorage.setItem(shareReviewKey(song), JSON.stringify(next)); }
+    catch { setError("This browser could not save review notes. Copy the report before leaving this page."); }
+  };
+
+  const copyReviewReport = async () => {
+    if (!song || !reviewNotes.length) return;
+    const report = [`Review notes for ${song.title}`, ...reviewNotes.map(note => `Measure ${note.measure}: ${note.text}`)].join("\n");
+    try {
+      await navigator.clipboard.writeText(report);
+      setError("Review notes copied. Paste them into a message to send them to the song owner.");
+    } catch { setError("Clipboard access is unavailable. Select the review notes below and copy them manually."); }
+  };
+
   if (error && !song) return <main className="page song-builder-share"><section className="card"><span className="eyebrow">Song Builder playback</span><h1>Playback link unavailable</h1><p role="alert">{error}</p><Link className="button-secondary" href="/song-builder">Open Song Builder</Link></section></main>;
   if (!song) return <main className="page song-builder-share"><section className="card" aria-live="polite"><span className="eyebrow">Song Builder playback</span><h1>Opening arrangement…</h1></section></main>;
 
@@ -85,6 +121,11 @@ export function SongBuilderSharePlayer() {
       <div className="song-builder-actions"><button type="button" onClick={() => void prepareAudio()} disabled={rendering || !bars.length}>{rendering ? "Preparing audio…" : audioUrl ? "Regenerate audio" : "Prepare built-in drum playback"}</button>{audioUrl && <button type="button" onClick={() => { if (audioRef.current) { audioRef.current.currentTime = 0; void audioRef.current.play(); } }}>Play from start</button>}</div>
       {audioUrl && <audio ref={audioRef} controls preload="metadata" src={audioUrl} onTimeUpdate={event => setAudioTime(event.currentTarget.currentTime)} onSeeking={event => setAudioTime(event.currentTarget.currentTime)} onEnded={() => setAudioTime(bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0))} aria-label={`${song.title} drum playback`} />}
       <p role="status">{error || (audioUrl ? "Audio uses Drum Hero’s built-in kit. The measure cursor follows playback." : "Prepare audio to hear the arrangement with Drum Hero’s built-in drum kit.")}</p>
+      <section className="song-builder-share-review" aria-label="Private arrangement review notes">
+        <div><h2>Review notes</h2><p>Notes are saved in this browser and do not change the shared arrangement. Copy the report to send feedback to the song owner.</p></div>
+        <div className="song-builder-tool-fields"><label>Measure<select value={reviewMeasure} onChange={event => setReviewMeasure(Number(event.target.value))}>{bars.map((bar, index) => <option key={`${bar.sectionId}-${bar.clipId}-${index}`} value={index + 1}>Measure {index + 1} · {bar.sectionName}</option>)}</select></label><button type="button" disabled={!currentBar} onClick={() => setReviewMeasure((position?.barIndex ?? 0) + 1)}>Use current measure</button><label>Feedback<textarea maxLength={500} rows={3} value={reviewDraft} onChange={event => setReviewDraft(event.target.value)} placeholder="Add a timing, transition, or notation note…" /></label><button type="button" disabled={!reviewDraft.trim()} onClick={() => { const text = reviewDraft.trim(); saveReviewNotes([...reviewNotes, { id: crypto.randomUUID(), measure: reviewMeasure, text, createdAt: new Date().toISOString() }]); setReviewDraft(""); }}>Add note</button><button type="button" disabled={!reviewNotes.length} onClick={() => void copyReviewReport()}>Copy review report</button></div>
+        {reviewNotes.length > 0 && <ul>{reviewNotes.map(note => <li key={note.id}><strong>Measure {note.measure}</strong><span>{note.text}</span><button type="button" aria-label={`Remove review note for measure ${note.measure}`} onClick={() => saveReviewNotes(reviewNotes.filter(item => item.id !== note.id))}>Remove</button></li>)}</ul>}
+      </section>
     </section>
   </main>;
 }

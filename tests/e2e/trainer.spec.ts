@@ -29,8 +29,40 @@ test("self-rated round pauses for each rating and reaches a recap", async ({ pag
   }
   await expect(page.getByRole("heading", { name: "Round recap" })).toBeVisible();
   await expect(page.getByText("10 clean", { exact: true })).toBeVisible();
+  await page.getByText("Practice notes and tags", { exact: true }).click();
+  await page.locator(".trainer-round-journal li details summary").first().click();
+  await page.getByLabel("Round note").first().fill("Keep the left hand relaxed.");
+  await page.getByLabel("Focused practice").first().check();
+  await page.reload();
+  await page.getByText("Practice notes and tags", { exact: true }).click();
+  await page.locator(".trainer-round-journal li details summary").first().click();
+  await expect(page.getByLabel("Round note").first()).toHaveValue("Keep the left hand relaxed.");
+  await expect(page.getByLabel("Focused practice").first()).toBeChecked();
   await page.goto("/progress");
   await expect(page.getByText(/Trainer · 70 BPM · 10\/10 clean/)).toBeVisible();
+});
+
+test("sticking practice, voice layers, notation, and review reminders are available", async ({ page }) => {
+  await page.getByLabel("Choose a sticking exercise").selectOption("rudiment-five-stroke-roll");
+  await expect(page.getByText(/Sticking: R R L L R L L R R L/)).toBeVisible();
+  await page.getByLabel("Show drum staff notation").check();
+  await expect(page.getByRole("group", { name: /Five-stroke roll drum staff notation/ })).toBeVisible();
+
+  await page.locator(".trainer-setup > label > select").first().selectOption("first-beat");
+  const advanced = page.locator("#trainer-advanced");
+  if (!await advanced.evaluate(element => (element as HTMLDetailsElement).open)) await advanced.locator("summary").first().click();
+  await page.locator(".trainer-voice-practice").getByLabel("Voice practice").selectOption("layers");
+  await page.getByLabel("Layers to play together").selectOption("2");
+  await expect(page.locator(".trainer-stage h2")).toContainText("layers 2/3");
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dueDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+  await page.getByText(/Review reminders ·/).click();
+  await page.getByLabel("Review on").fill(dueDate);
+  await page.getByRole("button", { name: "Set reminder" }).click();
+  await expect(page.getByText("Review on", { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open backup and restore" })).toHaveAttribute("href", "/progress#data-backup");
 });
 
 test("scored round supports keyboard input, pause, and reset", { tag: "@smoke" }, async ({ page }) => {

@@ -2,6 +2,7 @@ import type { DrumPart } from "./song-library";
 import type { SongInstrument } from "./types";
 export type ReviewedRecordingHit={onsetIndex:number;expectedIndex:number|null;instrument?:SongInstrument};
 export type SongRecording = {
+  learnerId?: string;
   name?: string;
   id: string;
   clockAligned?: boolean;

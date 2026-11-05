@@ -5,6 +5,22 @@ import { normalizeSong } from "./song-library";
 
 export const SAVED_ARRANGEMENT_TEMPLATES_KEY = "drum-hero:song-builder-templates:v1";
 export type SavedArrangementTemplate = { id: string; name: string; meter: string; bpm: number; sections: SongSection[]; createdAt: string };
+export type ArrangementTemplateBackup = { format: "drum-hero-arrangement-templates"; version: 1; templates: SavedArrangementTemplate[] };
+
+export function parseArrangementTemplateBackup(source: string): SavedArrangementTemplate[] {
+  if (source.length > 8 * 1024 * 1024) throw new Error("Template backup must be smaller than 8 MB.");
+  let value: unknown;
+  try { value = JSON.parse(source); } catch { throw new Error("That template file is not valid JSON."); }
+  const archive = value as Partial<ArrangementTemplateBackup>;
+  if (archive?.format !== "drum-hero-arrangement-templates" || archive.version !== 1 || !Array.isArray(archive.templates)) throw new Error("Choose a Drum Hero arrangement template backup.");
+  const templates = normalizeSavedArrangementTemplates(archive.templates);
+  if (!templates.length) throw new Error("The backup has no usable arrangement templates.");
+  return templates;
+}
+
+export function makeArrangementTemplateBackup(templates: SavedArrangementTemplate[]): ArrangementTemplateBackup {
+  return { format: "drum-hero-arrangement-templates", version: 1, templates: normalizeSavedArrangementTemplates(templates) };
+}
 
 export function normalizeSavedArrangementTemplates(input: unknown): SavedArrangementTemplate[] {
   if (!Array.isArray(input)) return [];
@@ -35,7 +51,7 @@ export function instantiateSavedArrangementTemplate(template: SavedArrangementTe
     return {
       ...structuredClone(section), id: sectionIds.get(section.id)!,
       parts: section.parts.map(part => ({ ...structuredClone(part), id: partIds.get(part.id)!, sourceId: undefined, linkedBaseId: part.linkedBaseId ? partIds.get(part.linkedBaseId) : undefined })),
-      clips: section.clips?.map(clip => ({ ...structuredClone(clip), id: crypto.randomUUID(), partId: partIds.get(clip.partId)!, repeatVariants: clip.repeatVariants?.flatMap(variant => partIds.has(variant.partId) ? [{ ...variant, partId: partIds.get(variant.partId)! }] : []) })),
+      clips: section.clips?.map(clip => ({ ...structuredClone(clip), id: crypto.randomUUID(), partId: partIds.get(clip.partId)!, layers: clip.layers?.flatMap(id => partIds.has(id) ? [partIds.get(id)!] : []), overrides: clip.overrides ? { ...clip.overrides, mutedLayers: clip.overrides.mutedLayers?.flatMap(id => partIds.has(id) ? [partIds.get(id)!] : []), soloLayer: clip.overrides.soloLayer ? partIds.get(clip.overrides.soloLayer) : undefined } : undefined, repeatVariants: clip.repeatVariants?.flatMap(variant => partIds.has(variant.partId) ? [{ ...variant, partId: partIds.get(variant.partId)! }] : []) })),
       rehearsalCues: section.rehearsalCues?.map(cue => ({ ...cue, id: crypto.randomUUID() }))
     };
   });

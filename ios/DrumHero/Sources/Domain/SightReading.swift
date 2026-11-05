@@ -3,18 +3,20 @@ import Foundation
 struct SightSettings: Codable, Equatable {
     var level = LearnerLevel.beginner
     var bpm = 80
-    var bars = 2
+    var bars = 4
     var meter = "4/4"
     var triplets = false
     var snareOnly = false
     var focusVoice = "mixed"
     var focusRhythm = "mixed"
     var style = "varied"
+    var density = "balanced"
     var meters: [String] { level == .beginner ? ["4/4"] : level == .intermediate ? ["4/4", "3/4"] : ["4/4", "3/4", "5/4", "7/8"] }
+    var countAccentBeats: [Double] { meter == "5/4" ? [0, 3] : meter == "7/8" ? [0, 1, 2] : meter == "4/4" ? [0, 2] : [0] }
     var normalized: Self {
         var result = self
         result.bpm = max(40, min(200, bpm))
-        result.bars = [1, 2, 4].contains(bars) ? bars : 2
+        result.bars = [1, 2, 4, 8].contains(bars) ? bars : 2
         if !meters.contains(meter) { result.meter = "4/4" }
         result.triplets = level == .advanced && triplets && result.meter != "7/8"
         result.snareOnly = level == .beginner && snareOnly
@@ -24,16 +26,40 @@ struct SightSettings: Codable, Equatable {
             || focusRhythm == "sixteenths" && level != .beginner
             || focusRhythm == "triplets" && level == .advanced && result.meter != "7/8"
         if !rhythmAvailable { result.focusRhythm = "mixed" }
-        let styles = level == .beginner ? ["varied", "rock"] : level == .intermediate ? ["varied", "rock", "fill"] : ["varied", "rock", "shuffle", "fill"]
+        let styles = level == .beginner ? ["varied", "rock"] : level == .intermediate ? ["varied", "rock", "fill", "half-time", "funk"] : ["varied", "rock", "shuffle", "fill", "half-time", "funk", "latin"]
         if !styles.contains(style) || style == "shuffle" && result.meter == "7/8" { result.style = "varied" }
         if result.style == "shuffle" && !["mixed", "triplets"].contains(result.focusRhythm) { result.focusRhythm = "mixed" }
+        if !["light", "balanced", "dense"].contains(density) { result.density = "balanced" }
         return result
     }
-    private enum CodingKeys: String, CodingKey { case level, bpm, bars, meter, triplets, snareOnly, focusVoice, focusRhythm, style }
-    init(level: LearnerLevel = .beginner, bpm: Int = 80, bars: Int = 2, meter: String = "4/4", triplets: Bool = false, snareOnly: Bool = false, focusVoice: String = "mixed", focusRhythm: String = "mixed", style: String = "varied") {
+    static func adaptiveNext(from settings: Self, accuracy: Int, timingSpreadMs: Int?) -> Self? {
+        var next = settings
+        if accuracy >= 88 && (timingSpreadMs.map { $0 <= 55 } ?? true) {
+            if next.focusRhythm == "quarters" { next.focusRhythm = "eighths" }
+            else if next.focusRhythm == "eighths" && next.level != .beginner { next.focusRhythm = "sixteenths" }
+            else if next.focusRhythm == "sixteenths" && next.level == .advanced && next.meter != "7/8" { next.focusRhythm = "triplets" }
+            else if next.style == "varied" && next.density == "light" { next.density = "balanced" }
+            else if next.style == "varied" && next.density == "balanced" { next.density = "dense" }
+            else if next.bpm < 200 { next.bpm = min(200, next.bpm + 5) }
+            else { return nil }
+        } else if accuracy < 75 || (timingSpreadMs.map { $0 > 95 } ?? false) {
+            if next.style == "varied" && next.density == "dense" { next.density = "balanced" }
+            else if next.style == "varied" && next.density == "balanced" { next.density = "light" }
+            else if next.bpm > 40 { next.bpm = max(40, next.bpm - 5) }
+            else { return nil }
+        } else { return nil }
+        return next.normalized
+    }
+    static func adaptivePreviewSeconds(current: Int, accuracy: Int, timingSpreadMs: Int?) -> Int? {
+        if accuracy >= 88 && (timingSpreadMs.map { $0 <= 55 } ?? true) { return current > 0 ? (current == 10 ? 5 : 0) : nil }
+        if accuracy < 75 || (timingSpreadMs.map { $0 > 95 } ?? false) { return current < 10 ? (current == 0 ? 5 : 10) : nil }
+        return nil
+    }
+    private enum CodingKeys: String, CodingKey { case level, bpm, bars, meter, triplets, snareOnly, focusVoice, focusRhythm, style, density }
+    init(level: LearnerLevel = .beginner, bpm: Int = 80, bars: Int = 4, meter: String = "4/4", triplets: Bool = false, snareOnly: Bool = false, focusVoice: String = "mixed", focusRhythm: String = "mixed", style: String = "varied", density: String = "balanced") {
         self.level = level; self.bpm = bpm; self.bars = bars; self.meter = meter
         self.triplets = triplets; self.snareOnly = snareOnly; self.focusVoice = focusVoice
-        self.focusRhythm = focusRhythm; self.style = style
+        self.focusRhythm = focusRhythm; self.style = style; self.density = density
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -46,12 +72,13 @@ struct SightSettings: Codable, Equatable {
         focusVoice = try values.decodeIfPresent(String.self, forKey: .focusVoice) ?? "mixed"
         focusRhythm = try values.decodeIfPresent(String.self, forKey: .focusRhythm) ?? "mixed"
         style = try values.decodeIfPresent(String.self, forKey: .style) ?? "varied"
+        density = try values.decodeIfPresent(String.self, forKey: .density) ?? "balanced"
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(level, forKey: .level); try values.encode(bpm, forKey: .bpm); try values.encode(bars, forKey: .bars)
         try values.encode(meter, forKey: .meter); try values.encode(triplets, forKey: .triplets); try values.encode(snareOnly, forKey: .snareOnly)
-        try values.encode(focusVoice, forKey: .focusVoice); try values.encode(focusRhythm, forKey: .focusRhythm); try values.encode(style, forKey: .style)
+        try values.encode(focusVoice, forKey: .focusVoice); try values.encode(focusRhythm, forKey: .focusRhythm); try values.encode(style, forKey: .style); try values.encode(density, forKey: .density)
     }
 }
 struct SightExercise: Codable {
@@ -66,6 +93,17 @@ struct SightExercise: Codable {
     var stepDuration: TimeInterval { 60 / Double(settings.bpm) * 4 / Double(subdivision) }
     var fingerprint: String { "\(settings.meter):\(subdivision):" + hits.map { "\($0.step)/\($0.instrument.rawValue)/\($0.accent ? 1 : 0)" }.joined(separator: ",") }
     var pattern: PracticePattern { PracticePattern(id: "sight-v1-\(seed)", name: "Sight reading", level: settings.level, description: "Read and play", subdivision: subdivision, beats: beatsPerBar * Double(settings.bars), defaultBpm: settings.bpm, tempoRange: [40, 200], hits: hits) }
+    func repeatingBar(_ sourceBar: Int) -> Self {
+        let bar = min(settings.bars - 1, max(0, sourceBar))
+        let sourceHits = hits.filter { $0.step / stepsPerBar == bar }.map { hit in
+            var copy = hit; copy.step -= bar * stepsPerBar; return copy
+        }
+        var repeated = sourceHits
+        repeated += sourceHits.map { hit in var copy = hit; copy.step += stepsPerBar; return copy }
+        repeated.sort { $0.step != $1.step ? $0.step < $1.step : DrumVoice.allCases.firstIndex(of: $0.instrument)! < DrumVoice.allCases.firstIndex(of: $1.instrument)! }
+        var drillSettings = settings; drillSettings.bars = 2
+        return Self(seed: seed, settings: drillSettings, subdivision: subdivision, beatsPerBar: beatsPerBar, stepsPerBar: stepsPerBar, hits: repeated)
+    }
     static func generate(_ settings: SightSettings, seed: UInt32, previous: String? = nil) -> Self {
         let config = settings.normalized
         var actualSeed = seed
@@ -76,9 +114,34 @@ struct SightExercise: Codable {
             let subdivision = config.style == "shuffle" ? 12 : config.focusRhythm == "quarters" ? 4 : config.focusRhythm == "eighths" ? 8 : config.focusRhythm == "sixteenths" ? 16 : config.focusRhythm == "triplets" ? 12 : config.triplets ? 12 : config.level == .beginner ? (actualSeed % 2 == 0 ? 4 : 8) : 16
             let steps = Int(beats * Double(subdivision) / 4)
             let unit = subdivision / 4
-            let templates = subdivision == 4 ? [[0], [0], [], [0]] : subdivision == 8 ? [[0], [0, 1], [1], []] : subdivision == 12 ? [[0, 1, 2], [0, 2], [1], []] : [[0, 2], [0, 3], [1, 2], [0, 1, 3], [2], []]
+            let baseTemplates = subdivision == 4 ? [[0], [0], [], [0]] : subdivision == 8 ? [[0], [0, 1], [1], []] : subdivision == 12 ? [[0, 1, 2], [0, 2], [1], []] : [[0, 2], [0, 3], [1, 2], [0, 1, 3], [2], []]
+            let templates: [[Int]] = config.density == "balanced" ? baseTemplates : subdivision == 4 ? baseTemplates
+                : subdivision == 8 ? (config.density == "light" ? [[0], [0], [], [0]] : [[0, 1], [0, 1], [1], [0]])
+                : subdivision == 12 ? (config.density == "light" ? [[0], [0], [2], []] : [[0, 1, 2], [0, 2], [1, 2], [0, 1, 2]])
+                : (config.density == "light" ? [[0], [0, 2], [2], []] : [[0, 1, 2, 3], [0, 2, 3], [0, 1, 3], [1, 2, 3]])
             var hits: [PatternHit] = []
             for bar in 0..<config.bars {
+                if ["half-time", "funk", "latin"].contains(config.style) {
+                    let beatsInBar = Int(ceil(beats)), offbeat = unit / 2
+                    let handVoice = DrumVoice(rawValue: config.focusVoice).flatMap { $0 == .kick || $0 == .hihat ? nil : $0 } ?? .snare
+                    for beat in 0..<beatsInBar {
+                        let base = beat * unit
+                        if base >= steps { continue }
+                        let hats = subdivision == 4 ? [0] : config.style == "latin" ? [0, max(1, unit - 1)] : [0, offbeat]
+                        if config.focusVoice == "mixed" || config.focusVoice == "hihat" {
+                            for offset in hats where base + offset < steps { hits.append(PatternHit(step: bar * steps + base + offset, instrument: .hihat, accent: offset == 0 && beat % 2 == 0)) }
+                        }
+                        let kickBeats = config.style == "half-time" ? [0] : config.style == "funk" ? [0, 2] : [0, max(1, beatsInBar - 1)]
+                        let snareBeats = config.style == "half-time" ? [2] : config.style == "funk" ? [1, 3] : [1, max(1, beatsInBar - 1)]
+                        let includeKick = config.focusVoice == "mixed" || config.focusVoice == "kick"
+                        let includeHand = config.focusVoice == "mixed" || config.focusVoice != "kick" && config.focusVoice != "hihat"
+                        if includeKick && kickBeats.contains(beat) { hits.append(PatternHit(step: bar * steps + base, instrument: .kick, accent: beat == 0)) }
+                        if includeKick && config.style == "funk" && beat == min(3, beatsInBar - 1) && offbeat > 0 && base + offbeat < steps { hits.append(PatternHit(step: bar * steps + base + offbeat, instrument: .kick)) }
+                        if includeHand && snareBeats.contains(beat) { hits.append(PatternHit(step: bar * steps + base, instrument: handVoice, accent: beat == 1 || beat == 3)) }
+                        if includeHand && config.style == "latin" && beat == min(2, beatsInBar - 1) && offbeat > 0 && base + offbeat < steps { hits.append(PatternHit(step: bar * steps + base + offbeat, instrument: handVoice)) }
+                    }
+                    continue
+                }
                 if ["rock", "shuffle", "fill"].contains(config.style) {
                     let beatsInBar = Int(ceil(beats))
                     let hats = subdivision == 4 ? [0] : [0, 2]
@@ -130,6 +193,35 @@ struct SightExercise: Codable {
         }
         preconditionFailure("Bounded generation must return")
     }
+    static func generateFresh(_ settings: SightSettings, seed: UInt32, recentFingerprints: [String]) -> Self {
+        var candidate = seed
+        let recent = Set(recentFingerprints.suffix(24))
+        for _ in 0...32 {
+            let exercise = generate(settings, seed: candidate)
+            if !recent.contains(exercise.fingerprint) { return exercise }
+            candidate = candidate &+ 1
+        }
+        return generate(settings, seed: candidate)
+    }
+    var accessibleDescription: String {
+        let unitsPerBeat = subdivision / 4
+        func label(_ localStep: Int) -> String {
+            let beat = localStep / unitsPerBeat + 1
+            let within = localStep % unitsPerBeat
+            if within == 0 { return "beat \(beat)" }
+            if subdivision == 8 { return "beat \(beat) and" }
+            if subdivision == 12 { return "beat \(beat), triplet \(within + 1)" }
+            return "beat \(beat), \(["", "e", "and", "a"][min(3, within)])"
+        }
+        return (0..<settings.bars).map { bar in
+            let events = (0..<stepsPerBar).map { localStep in
+                let notes = hits.filter { $0.step == bar * stepsPerBar + localStep }
+                let content = notes.isEmpty ? "rest" : notes.map { "\($0.instrument.title)\($0.accent ? ", accent" : "")" }.joined(separator: " and ")
+                return "\(label(localStep)): \(content)"
+            }
+            return "Bar \(bar + 1), \(settings.meter): \(events.joined(separator: "; "))."
+        }.joined(separator: " ")
+    }
 }
 struct SightAttempt: Codable, Identifiable {
     var id = UUID().uuidString
@@ -140,12 +232,205 @@ struct SightAttempt: Codable, Identifiable {
     var source: String
     var inputProfile: String
     var classification: String
+    var targetPlayback: Bool? = nil
     var score: Int
     var accuracy: Int
     var meanOffsetMs: Int?
     var misses: Int
     var extras: Int
-    var valid: Bool { version == 1 && settings == settings.normalized && ["keyboard", "touch", "midi"].contains(source) && ["reading", "practice", "assisted"].contains(classification) && (0...100).contains(score) && (0...100).contains(accuracy) && (meanOffsetMs == nil || (-100...100).contains(meanOffsetMs!)) && (0...100000).contains(misses) && (0...100000).contains(extras) && inputProfile.count <= 200 }
+    var fluency: [String: Int]? = nil
+    var previewSeconds: Int? = nil
+    var countInBars: Int? = nil
+    var assignmentTitle: String? = nil
+    var assignmentDueDate: String? = nil
+    var assignmentMinimumAccuracy: Int? = nil
+    var fingerprint: String? = nil
+    var timingSpreadMs: Int? = nil
+    var earlyHits: Int? = nil
+    var lateHits: Int? = nil
+    var pulseRecovery: Int? = nil
+    var confidence: Int? = nil
+    var inputCalibrated: Bool? = nil
+    var inputCalibrationSpreadMs: Int? = nil
+    var inputCalibrationAgeDays: Int? = nil
+    var inputTimingCorrectionMs: Int? = nil
+    var valid: Bool { version == 1 && settings == settings.normalized && ["keyboard", "touch", "midi"].contains(source) && ["reading", "practice", "assisted"].contains(classification) && (targetPlayback != true || classification == "assisted") && (0...100).contains(score) && (0...100).contains(accuracy) && (meanOffsetMs == nil || (-100...100).contains(meanOffsetMs!)) && (timingSpreadMs == nil || (0...100).contains(timingSpreadMs!)) && (pulseRecovery == nil || (0...100).contains(pulseRecovery!)) && (confidence == nil || (1...5).contains(confidence!)) && (inputCalibrationSpreadMs == nil || (0...240).contains(inputCalibrationSpreadMs!)) && (inputCalibrationAgeDays == nil || (0...100000).contains(inputCalibrationAgeDays!)) && (inputTimingCorrectionMs == nil || (-250...250).contains(inputTimingCorrectionMs!)) && (earlyHits == nil || (0...100000).contains(earlyHits!)) && (lateHits == nil || (0...100000).contains(lateHits!)) && (fingerprint == nil || fingerprint!.count <= 20000) && (0...100000).contains(misses) && (0...100000).contains(extras) && inputProfile.count <= 200 && (fluency == nil || fluency!.values.allSatisfy { (0...100).contains($0) }) && (previewSeconds == nil || [0, 5, 10].contains(previewSeconds!)) && (countInBars == nil || (0...2).contains(countInBars!)) && (assignmentTitle == nil || assignmentTitle!.count <= 80) && (assignmentDueDate == nil || SightAssignment.validDate(assignmentDueDate!)) && (assignmentMinimumAccuracy == nil || (50...100).contains(assignmentMinimumAccuracy!)) }
+}
+enum SightAnalytics {
+    static func pulseRecovery(exercise: SightExercise, rated: [RatedHit]) -> Int? {
+        let errors = rated.filter { $0.rating == .miss || $0.rating == .extra }.compactMap(\.step)
+        guard !errors.isEmpty else { return nil }
+        let stepsPerBeat = exercise.subdivision / 4
+        var targets: [String: PatternHit] = [:]
+        for error in errors {
+            for target in exercise.hits where target.step > error && target.step <= error + stepsPerBeat * 2 {
+                targets["\(target.step):\(target.instrument.rawValue)"] = target
+            }
+        }
+        guard !targets.isEmpty else { return nil }
+        var recovered = 0
+        for target in targets.values {
+            if rated.contains(where: { $0.step == target.step && $0.instrument == target.instrument && ($0.rating == .great || $0.rating == .good) }) { recovered += 1 }
+        }
+        return Int((Double(recovered) * 100 / Double(targets.count)).rounded())
+    }
+
+    static func supportedRhythms(level: LearnerLevel, meter: String) -> [String] {
+        ["quarters", "eighths"] + (level == .beginner ? [] : ["sixteenths"]) + (level == .advanced && meter != "7/8" ? ["triplets"] : [])
+    }
+
+    static func leastPracticedSettings(current: SightSettings, history: [SightAttempt]) -> SightSettings {
+        let candidates = current.meters.flatMap { meter in supportedRhythms(level: current.level, meter: meter).map { rhythm in
+            var value = current; value.meter = meter; value.focusRhythm = rhythm; value.focusVoice = "mixed"; value.style = "varied"; value.density = "light"
+            return value.normalized
+        } }
+        let ranked = candidates.map { setting -> (SightSettings, Int, String) in
+            let matches = history.filter { $0.classification == "reading" && $0.settings.level == setting.level && $0.settings.meter == setting.meter && $0.settings.focusRhythm == setting.focusRhythm }
+            return (setting, matches.count, matches.last?.playedAt.ISO8601Format() ?? "")
+        }.sorted { $0.1 != $1.1 ? $0.1 < $1.1 : $0.2 < $1.2 }
+        return ranked.first(where: { $0.0.meter != current.meter || $0.0.focusRhythm != current.focusRhythm })?.0 ?? ranked.first?.0 ?? current
+    }
+
+    static func varietySummary(_ history: [SightAttempt]) -> (attempts: Int, uniquePhrases: Int, meters: Int, rhythmSettings: Int, styles: Int) {
+        let recent = history.filter { $0.classification == "reading" }.suffix(100)
+        return (recent.count, Set(recent.map { $0.fingerprint ?? "\($0.settings.meter)|\($0.settings.focusRhythm)|\($0.settings.style)|\($0.seed)" }).count,
+                Set(recent.map { $0.settings.meter }).count, Set(recent.map { "\($0.settings.meter)|\($0.settings.focusRhythm)" }).count, Set(recent.map { $0.settings.style }).count)
+    }
+
+    static func errorDrill(exercise: SightExercise, rated: [RatedHit], seed: UInt32, recent: [String], history: [SightAttempt] = []) -> (exercise: SightExercise, focus: String, voice: String) {
+        let errors = rated.filter { ($0.rating == .miss || $0.rating == .extra) && $0.step != nil }
+        let stepsPerBeat = exercise.subdivision / 4
+        func rhythm(_ step: Int) -> String {
+            let within = step % stepsPerBeat
+            if within == 0 { return "quarters" }
+            if exercise.subdivision == 12 { return "triplets" }
+            if exercise.subdivision == 8 { return "eighths" }
+            return within % 2 == 0 ? "eighths" : "sixteenths"
+        }
+        var focusCounts: [String: Int] = [:], voiceCounts: [DrumVoice: Int] = [:]
+        for error in errors {
+            let step = error.step ?? 0
+            let targetExists = exercise.hits.contains { $0.step == step }
+            let focus = error.rating == .extra && !targetExists ? "rests" : step % stepsPerBeat != 0 ? "syncopation" : rhythm(step)
+            focusCounts[focus, default: 0] += 1; voiceCounts[error.instrument, default: 0] += 1
+        }
+        var focus = focusCounts.max { $0.value < $1.value }?.key ?? "mixed"
+        let recentReads = history.filter { $0.classification == "reading" && $0.settings.level == exercise.settings.level && $0.settings.meter == exercise.settings.meter }.suffix(5)
+        if recentReads.count >= 2 {
+            let recurrent = ["quarters", "eighths", "sixteenths", "triplets", "syncopation", "rests"].compactMap { name -> (String, Int, Int)? in
+                let values = recentReads.compactMap { $0.fluency?[name] }
+                guard values.count >= 2 else { return nil }
+                return (name, values.reduce(0, +) / values.count, values.count)
+            }.filter { $0.1 <= 80 }.sorted { $0.1 < $1.1 }.first
+            if let recurrent { focus = recurrent.0 }
+        }
+        let voice = voiceCounts.max { $0.value < $1.value }?.key.rawValue ?? "mixed"
+        var settings = exercise.settings
+        settings.bars = 2; settings.bpm = max(40, settings.bpm - 10); settings.focusVoice = voice; settings.density = "light"
+        settings.focusRhythm = supportedRhythms(level: settings.level, meter: settings.meter).contains(focus) ? focus : "mixed"
+        settings.style = focus == "syncopation" && settings.level != .beginner && settings.meter != "7/8" ? "funk" : "varied"
+        let normalized = settings.normalized
+        return (SightExercise.generateFresh(normalized, seed: seed, recentFingerprints: recent), focus, voice)
+    }
+
+    static func goalPath(goal: SightGoal, history: [SightAttempt]) -> [SightSettings] {
+        let target = SightSettings(level: goal.level, bpm: goal.bpm, meter: goal.meter, focusRhythm: goal.focusRhythm, style: "varied", density: "balanced").normalized
+        let rhythms = supportedRhythms(level: target.level, meter: target.meter)
+        let easier = rhythms[max(0, (rhythms.firstIndex(of: target.focusRhythm) ?? 0) - 1)]
+        var groups: [String: (settings: SightSettings, rows: [SightAttempt], last: Date)] = [:]
+        for row in history where row.classification == "reading" && row.settings.level == target.level {
+            let key = "\(row.settings.meter)|\(row.settings.focusRhythm)"
+            var group = groups[key] ?? (row.settings, [], .distantPast)
+            group.rows.append(row); group.last = row.playedAt; groups[key] = group
+        }
+        let review = groups.values.filter { $0.settings.meter != target.meter || $0.settings.focusRhythm != target.focusRhythm }
+            .min { a, b in
+                let aa = Double(a.rows.reduce(0) { $0 + $1.accuracy }) / Double(max(1, a.rows.count))
+                let ba = Double(b.rows.reduce(0) { $0 + $1.accuracy }) / Double(max(1, b.rows.count))
+                return aa != ba ? aa < ba : a.last < b.last
+            }?.settings
+        var warmup = target; warmup.bpm = max(40, target.bpm - 15); warmup.focusRhythm = easier; warmup.density = "light"
+        var build = target; build.bpm = max(40, target.bpm - 10); build.density = "light"
+        var reviewSettings = review ?? warmup; reviewSettings.bpm = min(reviewSettings.bpm, target.bpm); reviewSettings.bars = 2; reviewSettings.style = "varied"; reviewSettings.density = "light"
+        var stretch = target; stretch.bpm = target.bpm < 200 ? target.bpm + 5 : target.bpm; stretch.density = "dense"
+        return [warmup.normalized, build.normalized, reviewSettings.normalized, target, stretch.normalized]
+    }
+}
+struct SightPerformedHit: Equatable {
+    var instrument: DrumVoice
+    var at: TimeInterval
+}
+struct SightAssignment: Codable {
+    var version = 1
+    var seed: UInt32
+    var settings: SightSettings
+    var title: String
+    var dueDate: String?
+    var minimumAccuracy: Int?
+    var valid: Bool { version == 1 && settings == settings.normalized && title.count <= 80 && (dueDate == nil || Self.validDate(dueDate!)) && (minimumAccuracy == nil || (50...100).contains(minimumAccuracy!)) }
+    static func validDate(_ value: String) -> Bool {
+        guard value.count == 10, value[value.index(value.startIndex, offsetBy: 4)] == "-", value[value.index(value.startIndex, offsetBy: 7)] == "-" else { return false }
+        let formatter = DateFormatter(); formatter.calendar = Calendar(identifier: .gregorian); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "yyyy-MM-dd"; formatter.isLenient = false
+        return formatter.date(from: value) != nil
+    }
+}
+struct SightSubmission: Codable {
+    var version = 1
+    var title: String?
+    var dueDate: String?
+    var minimumAccuracy: Int?
+    var meter: String
+    var level: String
+    var bpm: Int
+    var accuracy: Int
+    var score: Int
+    var classification: String
+    var valid: Bool { version == 1 && (0...100).contains(accuracy) && (0...100).contains(score) && (40...200).contains(bpm) && (title == nil || title!.count <= 80) && (dueDate == nil || SightAssignment.validDate(dueDate!)) && (minimumAccuracy == nil || (50...100).contains(minimumAccuracy!)) }
+}
+struct SightLearningPathStep {
+    let title: String
+    let level: LearnerLevel
+    let meter: String
+    let rhythm: String
+    var settings: SightSettings { SightSettings(level: level, bpm: 80, bars: 2, meter: meter, focusRhythm: rhythm) }
+}
+enum SightLearningPath {
+    static let steps = [
+        SightLearningPathStep(title: "Steady quarter notes", level: .beginner, meter: "4/4", rhythm: "quarters"),
+        SightLearningPathStep(title: "Eighth-note pulse", level: .beginner, meter: "4/4", rhythm: "eighths"),
+        SightLearningPathStep(title: "Three-beat measures", level: .intermediate, meter: "3/4", rhythm: "eighths"),
+        SightLearningPathStep(title: "Sixteenth-note reading", level: .intermediate, meter: "4/4", rhythm: "sixteenths"),
+        SightLearningPathStep(title: "Five-quarter grouping", level: .advanced, meter: "5/4", rhythm: "sixteenths"),
+        SightLearningPathStep(title: "Seven-eighth grouping", level: .advanced, meter: "7/8", rhythm: "sixteenths")
+    ]
+    static func nextIndex(in history: [SightAttempt]) -> Int {
+        steps.firstIndex { step in !history.contains { $0.classification == "reading" && $0.accuracy >= 80 && $0.settings.level == step.level && $0.settings.meter == step.meter && $0.settings.focusRhythm == step.rhythm } } ?? steps.count
+    }
+}
+enum SightFluency {
+    static func calculate(exercise: SightExercise, rated: [RatedHit]) -> [String: Int] {
+        var totals: [String: Int] = [:], correct: [String: Int] = [:]
+        func record(_ name: String, _ passed: Bool) { totals[name, default: 0] += 1; if passed { correct[name, default: 0] += 1 } }
+        let perBeat = exercise.subdivision / 4
+        func rhythm(_ step: Int) -> String {
+            let position = step % perBeat
+            if position == 0 { return "quarters" }
+            if exercise.subdivision == 12 { return "triplets" }
+            if exercise.subdivision == 8 { return "eighths" }
+            return position % 2 == 0 ? "eighths" : "sixteenths"
+        }
+        for target in exercise.hits {
+            let row = rated.first { $0.step == target.step && $0.instrument == target.instrument && $0.rating != .miss && $0.rating != .extra }
+            let passed = row?.rating == .great || row?.rating == .good
+            record(rhythm(target.step), passed)
+            if target.step % perBeat != 0 { record("syncopation", passed) }
+        }
+        let expected = Set(exercise.hits.map(\.step)), extras = Set(rated.filter { $0.rating == .extra }.compactMap(\.step))
+        if exercise.stepsPerBar * exercise.settings.bars > 0 {
+            for step in 0..<(exercise.stepsPerBar * exercise.settings.bars) where !expected.contains(step) { record("rests", !extras.contains(step)) }
+        }
+        return Dictionary(uniqueKeysWithValues: totals.map { ($0.key, Int((Double(correct[$0.key, default: 0]) * 100 / Double($0.value)).rounded())) })
+    }
 }
 struct SightGoal: Codable, Equatable {
     var level = LearnerLevel.beginner
@@ -170,8 +455,11 @@ enum SightHistory {
     // Native currently has one learner. Keep the learner key explicit for future profile support.
     static let key = "drumHero.sightReading.v1.default"
     static let goalKey = "drumHero.sightReadingGoal.v1.default"
+    static let seenKey = "drumHero.sightReadingSeen.v1.default"
     static func read() -> [SightAttempt] { guard let data = UserDefaults.standard.data(forKey: key), let rows = try? JSONDecoder().decode([SightAttempt].self, from: data) else { return [] }; return Array(rows.filter(\.valid).suffix(100)) }
     static func write(_ rows: [SightAttempt]) throws { UserDefaults.standard.set(try JSONEncoder().encode(Array(rows.suffix(100))), forKey: key) }
+    static func readSeen() -> [String] { (UserDefaults.standard.array(forKey: seenKey) as? [String] ?? []).filter { !$0.isEmpty && $0.count <= 20000 }.suffix(32).map { $0 } }
+    static func remember(_ fingerprint: String) { var recent = readSeen().filter { $0 != fingerprint }; recent.append(String(fingerprint.prefix(20000))); UserDefaults.standard.set(Array(recent.suffix(32)), forKey: seenKey) }
     static func readGoal() -> SightGoal? { guard let data = UserDefaults.standard.data(forKey: goalKey), let value = try? JSONDecoder().decode(SightGoal.self, from: data), value.valid else { return nil }; return value }
     static func writeGoal(_ goal: SightGoal?) throws { if let goal { UserDefaults.standard.set(try JSONEncoder().encode(goal), forKey: goalKey) } else { UserDefaults.standard.removeObject(forKey: goalKey) } }
 }

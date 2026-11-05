@@ -8,6 +8,71 @@ private struct MobileSongProjectEnvelope: Codable {
     var song: MobileSong
 }
 
+private struct MobileSongLibraryPackEnvelope: Codable {
+    let format: String
+    let version: Int
+    let exportedAt: String
+    let songs: [MobileSong]
+}
+
+struct MobileSongLibraryPackDecode {
+    let songs: [MobileSong]
+    let warnings: [String]
+}
+
+enum MobileSongLibraryPackCodec {
+    static let format = "drum-hero-song-library-pack-v1"
+    static let maximumBytes = 32 * 1024 * 1024
+    static let maximumSongs = 200
+
+    static func decode(_ data: Data) throws -> MobileSongLibraryPackDecode {
+        guard data.count <= maximumBytes else { throw MobileSongProjectError.tooLarge }
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              root["format"] as? String == format,
+              root["version"] as? Int == 1,
+              let rawSongs = root["songs"] as? [[String: Any]] else {
+            throw MobileSongProjectError.unsupportedFormat
+        }
+        guard !rawSongs.isEmpty else { throw MobileSongProjectError.invalidSong("This library transfer pack contains no songs.") }
+        guard rawSongs.count <= maximumSongs else { throw MobileSongProjectError.invalidSong("A transfer pack can contain at most 200 songs.") }
+
+        var songs: [MobileSong] = []
+        var warnings: [String] = []
+        var seenIDs = Set<String>()
+        for rawSong in rawSongs {
+            let title = String((rawSong["title"] as? String ?? "Untitled song").prefix(120))
+            guard let id = rawSong["id"] as? String, seenIDs.insert(id).inserted else {
+                warnings.append("\(title): duplicate or missing song ID; skipped.")
+                continue
+            }
+            do {
+                let wrapped = try JSONSerialization.data(withJSONObject: ["format": MobileSongProjectCodec.format, "song": rawSong], options: [.sortedKeys])
+                songs.append(try MobileSongProjectCodec.decode(wrapped))
+            } catch {
+                warnings.append("\(title): \(error.localizedDescription)")
+            }
+        }
+        guard !songs.isEmpty else {
+            throw MobileSongProjectError.invalidSong(warnings.isEmpty ? "No songs in this transfer pack are supported on iOS." : warnings.joined(separator: " "))
+        }
+        return MobileSongLibraryPackDecode(songs: songs, warnings: warnings)
+    }
+
+    static func encode(_ songs: [MobileSong]) throws -> Data {
+        guard !songs.isEmpty else { throw MobileSongProjectError.invalidSong("Add a personal song before exporting a transfer pack.") }
+        guard songs.count <= maximumSongs else { throw MobileSongProjectError.invalidSong("A transfer pack can contain at most 200 songs.") }
+        guard Set(songs.map(\.id)).count == songs.count else { throw MobileSongProjectError.invalidSong("Song IDs must be unique in a transfer pack.") }
+        for song in songs { _ = try MobileSongProjectCodec.encode(song) }
+        let envelope = MobileSongLibraryPackEnvelope(format: format, version: 1,
+            exportedAt: ISO8601DateFormatter().string(from: .now), songs: songs)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(envelope)
+        guard data.count <= maximumBytes else { throw MobileSongProjectError.tooLarge }
+        return data
+    }
+}
+
 enum MobileSongProjectError: LocalizedError {
     case tooLarge
     case unsupportedFormat
@@ -16,7 +81,7 @@ enum MobileSongProjectError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .tooLarge:
-            "Song projects must be 8 MB or smaller."
+            "Song projects must be 8 MB or smaller. Library transfer packs must be 32 MB or smaller."
         case .unsupportedFormat:
             "Choose a Drum Hero song export in JSON format."
         case .invalidSong(let reason):
@@ -37,6 +102,10 @@ enum MobileSongProjectCodec {
         do {
             envelope = try JSONDecoder().decode(MobileSongProjectEnvelope.self, from: data)
         } catch {
+            let unsupportedVoices = unsupportedVoiceNames(in: data)
+            if !unsupportedVoices.isEmpty {
+                throw MobileSongProjectError.invalidSong("This song uses drum voices that are not supported on iOS: \(unsupportedVoices.joined(separator: ", ")). No project was imported. Keep the full web copy and export a compatible variation using kick, snare, hi-hat, tom, or crash.")
+            }
             throw MobileSongProjectError.invalidSong("This file is invalid or uses drum voices that are not supported on iOS yet.")
         }
         guard envelope.format == format else { throw MobileSongProjectError.unsupportedFormat }
@@ -62,6 +131,18 @@ enum MobileSongProjectCodec {
     private static func isTimestamp(_ value: String?) -> Bool {
         guard let value else { return false }
         return ISO8601DateFormatter().date(from: value) != nil
+    }
+
+    private static func unsupportedVoiceNames(in data: Data) -> [String] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let song = root["song"] as? [String: Any],
+              let sections = song["sections"] as? [[String: Any]] else { return [] }
+        let supported = Set(DrumVoice.allCases.map(\.rawValue))
+        let voices = sections.flatMap { $0["parts"] as? [[String: Any]] ?? [] }
+            .flatMap { $0["hits"] as? [[String: Any]] ?? [] }
+            .compactMap { $0["instrument"] as? String }
+            .filter { !supported.contains($0) }
+        return Array(Set(voices)).sorted()
     }
 
     private static func validate(_ song: MobileSong) throws {
@@ -136,6 +217,8 @@ struct MobileSongProjectDocument: FileDocument {
         data = try MobileSongProjectCodec.encode(song)
     }
 
+    init(data: Data) { self.data = data }
+
     init(configuration: ReadConfiguration) throws {
         guard let contents = configuration.file.regularFileContents else {
             throw MobileSongProjectError.unsupportedFormat
@@ -145,6 +228,19 @@ struct MobileSongProjectDocument: FileDocument {
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: data)
+    }
+}
+
+private enum MobileSongImportChoice: String, CaseIterable, Identifiable, Equatable {
+    case add, replace, copy, skip
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .add: "Add song"
+        case .replace: "Replace matching song"
+        case .copy: "Add as separate copy"
+        case .skip: "Skip"
+        }
     }
 }
 
@@ -158,6 +254,10 @@ struct MobileSongLibraryScreen: View {
     @State private var isCreating = false
     @State private var exportDocument: MobileSongProjectDocument?
     @State private var exportFilename = "Drum-Hero-Song"
+    @State private var pendingImport: [MobileSong] = []
+    @State private var importWarnings: [String] = []
+    @State private var importChoices: [String: MobileSongImportChoice] = [:]
+    @State private var isReviewingImport = false
     @State private var message = ""
     @Query(sort: \PersonalSongRecord.updatedAt, order: .reverse) private var personalSongs: [PersonalSongRecord]
 
@@ -221,6 +321,9 @@ struct MobileSongLibraryScreen: View {
                 Menu {
                     Button("New song project", systemImage: "plus") { isCreating = true }
                     Button("Import song JSON", systemImage: "square.and.arrow.down") { isImporting = true }
+                    if !personalSongs.isEmpty {
+                        Button("Export all personal songs", systemImage: "square.and.arrow.up") { beginExportLibraryPack() }
+                    }
                 } label: {
                     Label("Add song", systemImage: "plus")
                 }
@@ -240,6 +343,7 @@ struct MobileSongLibraryScreen: View {
             }
             exportDocument = nil
         }
+        .sheet(isPresented: $isReviewingImport) { importReviewSheet }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !message.isEmpty {
                 Text(message)
@@ -266,20 +370,109 @@ struct MobileSongLibraryScreen: View {
 
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
-            let data = try handle.read(upToCount: MobileSongProjectCodec.maximumBytes + 1) ?? Data()
-            var song = try MobileSongProjectCodec.decode(data)
-            song.id = UUID().uuidString
-            let encoded = try MobileSongProjectCodec.encode(song)
-            modelContext.insert(PersonalSongRecord(song: song, data: encoded))
-            do {
-                try modelContext.save()
-                message = "Imported \(song.title). The project is saved on this device."
-            } catch {
-                modelContext.rollback()
-                message = "Could not save this song to the library. Try importing it again."
+            let data = try handle.read(upToCount: MobileSongLibraryPackCodec.maximumBytes + 1) ?? Data()
+            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], root["format"] as? String == MobileSongLibraryPackCodec.format {
+                let decoded = try MobileSongLibraryPackCodec.decode(data)
+                pendingImport = decoded.songs
+                importWarnings = decoded.warnings
+            } else {
+                pendingImport = [try MobileSongProjectCodec.decode(data)]
+                importWarnings = []
             }
+            importChoices = Dictionary(uniqueKeysWithValues: pendingImport.map { song in
+                (song.id, matchingSong(for: song) == nil ? .add : .skip)
+            })
+            isReviewingImport = !pendingImport.isEmpty
+            if !importWarnings.isEmpty { message = "Review the transfer. Some songs could not be opened on iOS; details are listed before import." }
         } catch {
             message = "Could not import this song: \(error.localizedDescription)"
+        }
+    }
+
+    private func matchingSong(for incoming: MobileSong) -> PersonalSongRecord? {
+        let normalizedTitle = incoming.title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedArtist = incoming.artist.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).trimmingCharacters(in: .whitespacesAndNewlines)
+        return personalSongs.first { record in
+            guard let existing = record.song else { return record.id == incoming.id }
+            return existing.id == incoming.id || (existing.title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).trimmingCharacters(in: .whitespacesAndNewlines) == normalizedTitle && existing.artist.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).trimmingCharacters(in: .whitespacesAndNewlines) == normalizedArtist)
+        }
+    }
+
+    private var importReviewSheet: some View {
+        NavigationStack {
+            List {
+                Section("Review before importing") {
+                    Text("Songs are matched by ID first, then by title and artist. Choose how each match should be handled. No library changes are saved until you import.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                if !importWarnings.isEmpty {
+                    Section("Skipped for iOS compatibility") {
+                        ForEach(importWarnings.indices, id: \.self) { index in
+                            Text(importWarnings[index]).font(.footnote).foregroundStyle(.orange)
+                        }
+                    }
+                }
+                Section("Songs · \(pendingImport.count)") {
+                    ForEach(pendingImport, id: \.id) { song in
+                        let match = matchingSong(for: song)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(song.title).font(.headline)
+                            Text("\(song.artist) · \(song.sections.count) sections · \(song.bpm) BPM")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let match { Text("Possible match: \(match.title) · \(match.artist)").font(.caption).foregroundStyle(.orange) }
+                            Picker("Import action", selection: Binding(
+                                get: { importChoices[song.id] ?? (match == nil ? .add : .skip) },
+                                set: { importChoices[song.id] = $0 }
+                            )) {
+                                if match == nil { Text(MobileSongImportChoice.add.title).tag(MobileSongImportChoice.add) }
+                                else {
+                                    Text(MobileSongImportChoice.replace.title).tag(MobileSongImportChoice.replace)
+                                    Text(MobileSongImportChoice.copy.title).tag(MobileSongImportChoice.copy)
+                                }
+                                Text(MobileSongImportChoice.skip.title).tag(MobileSongImportChoice.skip)
+                            }
+                            .pickerStyle(.menu)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle("Import song library")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { isReviewingImport = false } }
+                ToolbarItem(placement: .confirmationAction) { Button("Import") { applyReviewedImport() } }
+            }
+        }
+    }
+
+    private func applyReviewedImport() {
+        var imported = 0
+        do {
+            for var song in pendingImport {
+                let choice = importChoices[song.id] ?? (matchingSong(for: song) == nil ? .add : .skip)
+                if choice == .skip { continue }
+                let match = matchingSong(for: song)
+                if choice == .replace, let match { song.id = match.id }
+                if choice == .copy, match != nil {
+                    song.id = UUID().uuidString
+                    song.title = String(song.title.prefix(110)) + " (copy)"
+                }
+                if choice == .add, match != nil { continue }
+                let encoded = try MobileSongProjectCodec.encode(song)
+                if let record = personalSongs.first(where: { $0.id == song.id }) {
+                    record.title = song.title; record.artist = song.artist; record.difficulty = song.difficulty
+                    record.bpm = song.bpm; record.meter = song.meter; record.songData = encoded; record.updatedAt = .now
+                } else {
+                    modelContext.insert(PersonalSongRecord(song: song, data: encoded))
+                }
+                imported += 1
+            }
+            try modelContext.save()
+            message = "Imported or updated \(imported) song\(imported == 1 ? "" : "s"). Skipped \(pendingImport.count - imported) by review or compatibility."
+            pendingImport = []; importWarnings = []; importChoices = [:]; isReviewingImport = false
+        } catch {
+            modelContext.rollback()
+            message = "The reviewed import was not saved: \(error.localizedDescription)"
         }
     }
 
@@ -330,6 +523,17 @@ struct MobileSongLibraryScreen: View {
             isExporting = true
         } catch {
             message = "Could not prepare this song for export: \(error.localizedDescription)"
+        }
+    }
+
+    private func beginExportLibraryPack() {
+        do {
+            let songs = personalSongs.compactMap(\.song)
+            exportDocument = MobileSongProjectDocument(data: try MobileSongLibraryPackCodec.encode(songs))
+            exportFilename = "drum-hero-song-library-transfer"
+            isExporting = true
+        } catch {
+            message = "Could not prepare the library transfer: \(error.localizedDescription)"
         }
     }
 

@@ -10,7 +10,7 @@ export type DrumAudio = {
   setMasterLevel: (level: number) => void;
   setClickLevel: (level: number) => void;
   setClickSound: (sound: TrainerClickSound) => void;
-  setCustomSample: (instrument: SongInstrument, blob: Blob | null, layer?: "primary" | "accent") => Promise<boolean>;
+  setCustomSample: (instrument: SongInstrument, blob: Blob | null, layer?: "soft" | "primary" | "accent") => Promise<boolean>;
   ready: Promise<boolean>;
   silence: () => void;
   close: () => void;
@@ -22,6 +22,8 @@ export type DrumMixSettings = {
   levels: Record<SongInstrument, number>;
   pan: Record<SongInstrument, number>;
   sampleIndex: Record<SongInstrument, number>;
+  pitch: Record<SongInstrument, number>;
+  decay: Record<SongInstrument, number>;
   muted: Record<SongInstrument, boolean>;
   solo: SongInstrument | "";
 };
@@ -31,6 +33,8 @@ export const DEFAULT_DRUM_MIX: DrumMixSettings = {
   levels: voiceValues(0.82),
   pan: voiceValues(0),
   sampleIndex: voiceValues(0),
+  pitch: voiceValues(0),
+  decay: voiceValues(1),
   muted: voiceValues(false),
   solo: ""
 };
@@ -57,7 +61,7 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
   const abort = new AbortController();
   const instruments = Object.keys(samplePaths) as SongInstrument[];
   const samples: Record<SongInstrument, AudioBuffer[]> = voiceValues([]);
-  const customSamples: Partial<Record<SongInstrument, { primary: AudioBuffer; accent?: AudioBuffer }>> = {};
+  const customSamples: Partial<Record<SongInstrument, { primary: AudioBuffer; soft?: AudioBuffer; accent?: AudioBuffer }>> = {};
   const nextTake: Record<SongInstrument, number> = voiceValues(0);
   let mix = initialMix;
   let masterLevel = 1;
@@ -91,12 +95,15 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
       }
     }
     const chosenTake = metronomeClick ? 0 : Math.max(0, Math.min(takes.length - 1, Math.round(mix.sampleIndex[instrument] ?? 0)));
-    const take = (custom ? velocityValue >= 96 && custom.accent ? custom.accent : custom.primary : undefined) ?? takes[chosenTake] ?? takes[nextTake[instrument] % Math.max(1, takes.length)];
+    const take = (custom ? velocityValue < 48 && custom.soft ? custom.soft : velocityValue >= 96 && custom.accent ? custom.accent : custom.primary : undefined) ?? takes[chosenTake] ?? takes[nextTake[instrument] % Math.max(1, takes.length)];
     nextTake[instrument] += 1;
     const source = context.createBufferSource();
     const gain = context.createGain();
     const now = eventAt;
     source.buffer = take;
+    const pitch = mix.pitch?.[instrument] ?? 0;
+    const playbackRate = Math.pow(2, pitch / 12);
+    source.playbackRate.setValueAtTime(playbackRate, now);
     gain.gain.setValueAtTime(Math.max(0.0001, gainValue * (metronomeClick ? clickLevel : masterLevel * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)))), now);
     if (duration !== undefined) gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
     const panner = context.createStereoPanner?.();
@@ -105,7 +112,15 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
       source.connect(gain).connect(panner).connect(context.destination);
     } else source.connect(gain).connect(context.destination);
     activeSources.add(source);
-    if (duration === undefined) source.start(now);
+    if (duration === undefined) {
+      const decay = Math.max(0.05, Math.min(1, mix.decay?.[instrument] ?? 1));
+      if (decay < 0.999) {
+        const audibleDuration = Math.max(0.04, take.duration / playbackRate * decay);
+        gain.gain.setValueAtTime(Math.max(0.0001, gainValue * masterLevel * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82))), now + audibleDuration * 0.82);
+        gain.gain.linearRampToValueAtTime(0.0001, now + audibleDuration);
+        source.start(now); source.stop(now + audibleDuration + 0.005);
+      } else source.start(now);
+    }
     else source.start(now, 0, duration);
     if (!metronomeClick && instrument === "openhat") activeOpenHat = { source, gain };
     source.onended = () => { activeSources.delete(source); if (activeOpenHat?.source === source) activeOpenHat = null; };
@@ -150,8 +165,9 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
       try {
         const layers = source instanceof Blob ? { primary: source } : source;
         const primary = await context.decodeAudioData(await layers.primary.arrayBuffer());
+        const soft = layers.soft ? await context.decodeAudioData(await layers.soft.arrayBuffer()).catch(() => undefined) : undefined;
         const accent = layers.accent ? await context.decodeAudioData(await layers.accent.arrayBuffer()).catch(() => undefined) : undefined;
-        customSamples[voice as SongInstrument] = { primary, ...(accent ? { accent } : {}) };
+        customSamples[voice as SongInstrument] = { primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}) };
       }
       catch { /* A bad custom sample should not disable the built-in kit. */ }
     }));
@@ -172,14 +188,14 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
       try {
         if (!blob) {
           if (layer === "primary") delete customSamples[instrument];
-          else if (customSamples[instrument]) delete customSamples[instrument]!.accent;
+          else if (customSamples[instrument]) delete customSamples[instrument]![layer];
           return true;
         }
         const decoded = await context.decodeAudioData(await blob.arrayBuffer());
-        if (layer === "accent") {
+        if (layer !== "primary") {
           if (!customSamples[instrument]?.primary) return false;
-          customSamples[instrument] = { ...customSamples[instrument]!, accent: decoded };
-        } else customSamples[instrument] = { primary: decoded, ...(customSamples[instrument]?.accent ? { accent: customSamples[instrument]!.accent } : {}) };
+          customSamples[instrument] = { ...customSamples[instrument]!, [layer]: decoded };
+        } else customSamples[instrument] = { primary: decoded, ...(customSamples[instrument]?.soft ? { soft: customSamples[instrument]!.soft } : {}), ...(customSamples[instrument]?.accent ? { accent: customSamples[instrument]!.accent } : {}) };
         return true;
       } catch { return false; }
     },

@@ -2,6 +2,7 @@ import { readSongLibrary, writeSongLibrary } from './song-library';
 import { storedRecordingBlob } from './song-recording';
 import { readTrainerTakes } from './trainer-take-library';
 import { deleteBuilderBackingFiles, readAllBuilderBackings } from './song-builder-storage';
+import { learnerProfileIdFromBrowser } from './learner-profiles';
 
 export type StoredAudio = { id: string; kind: 'song' | 'trainer' | 'builder'; label: string; fileName?: string; createdAt: string; bytes: number; mimeType: string; pinned: boolean; blob: Blob };
 export const AUDIO_STORAGE_EVENT = 'drum-hero:audio-storage-change';
@@ -21,8 +22,11 @@ async function songAudioRows() {
 export async function listStoredAudio(): Promise<StoredAudio[]> {
   const [trainer, song, backings] = await Promise.all([readTrainerTakes(), songAudioRows(), readAllBuilderBackings()]);
   const library = readSongLibrary();
-  return [...trainer.map(take => ({ ...take, kind: 'trainer' as const, label: take.name, bytes: take.blob.size, mimeType: take.blob.type })), ...song.map(row => {
-    const metadata = library.recordings.find(take => take.id === row.id);
+  const learnerId = learnerProfileIdFromBrowser();
+  const ownedRecordings = library.recordings.filter(take => (take.learnerId ?? 'default') === learnerId);
+  const ownedAudio = song.filter(row => ownedRecordings.some(take => take.id === row.id));
+  return [...trainer.map(take => ({ ...take, kind: 'trainer' as const, label: take.name, bytes: take.blob.size, mimeType: take.blob.type })), ...ownedAudio.map(row => {
+    const metadata = ownedRecordings.find(take => take.id === row.id);
     return { ...row, kind: 'song' as const, label: metadata ? `Song take · ${metadata.createdAt}` : `Unlinked song take · ${row.id}`, createdAt: metadata?.createdAt ?? '', bytes: row.blob.size, mimeType: row.blob.type, pinned: false };
   }), ...backings.map(item => ({
     id: item.id,
@@ -51,10 +55,12 @@ async function removeRows(databaseName: string, ids: string[], keyPath?: string)
   });
 }
 export async function deleteStoredAudio(items: Pick<StoredAudio, 'id' | 'kind'>[]) {
-  const songIds = new Set(items.filter(item => item.kind === 'song').map(item => item.id));
+  const selectedSongIds = new Set(items.filter(item => item.kind === 'song').map(item => item.id));
   const builderIds = items.filter(item => item.kind === 'builder').map(item => item.id);
   const trainerIds = items.filter(item => item.kind === 'trainer').map(item => item.id);
   const previous = readSongLibrary();
+  const learnerId = learnerProfileIdFromBrowser();
+  const songIds = new Set(previous.recordings.filter(take => selectedSongIds.has(take.id) && (take.learnerId ?? 'default') === learnerId).map(take => take.id));
   // Metadata must be writable before committing permanent audio deletion.
   if (songIds.size) writeSongLibrary({ ...previous, recordings: previous.recordings.filter(take => !songIds.has(take.id)) });
   try {

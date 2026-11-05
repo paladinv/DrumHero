@@ -12,6 +12,7 @@ const SONG_LIBRARY_STORAGE_KEY = "drum-hero:song-library:v1";
 
 const pages = [
   ["/assessment", "Initial skill assessment", "placement starting point skills test results"],
+  ["/practice/session", "Guided practice", "daily session warmup focus music resume timer"],
   ["/", "Home", "dashboard practice plan recommended next"],
   ["/learn", "Learn", "curriculum lesson class"],
   ["/trainer", "Trainer", "timing midi microphone practice"],

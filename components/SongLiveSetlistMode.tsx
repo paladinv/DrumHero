@@ -9,7 +9,7 @@ const outcomes: Array<{ id: SetlistRunOutcome; label: string }> = [
   { id: "solid", label: "Solid" }, { id: "wobbly", label: "Wobbly" }, { id: "retry", label: "Needs another run" }, { id: "skipped", label: "Skipped" }
 ];
 
-export function SongLiveSetlistMode({ state, songs, setlist, save }: { state: SongLibraryState; songs: DrumSong[]; setlist: Setlist; save: (state: SongLibraryState | ((current: SongLibraryState) => SongLibraryState)) => void }) {
+export function SongLiveSetlistMode({ state, songs, setlist, save, onPractice }: { state: SongLibraryState; songs: DrumSong[]; setlist: Setlist; save: (state: SongLibraryState | ((current: SongLibraryState) => SongLibraryState)) => void; onPractice?: (songId: string, sectionId?: string, partId?: string) => void }) {
   const entries = useMemo(() => setlistEntries(setlist), [setlist]);
   const [open, setOpen] = useState(false);
   const [runId, setRunId] = useState("");
@@ -23,6 +23,9 @@ export function SongLiveSetlistMode({ state, songs, setlist, save }: { state: So
   const run = allRuns.find(item => item.id === runId && item.setlistId === setlist.id) ?? [...allRuns].filter(item => item.setlistId === setlist.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
   const resumable = [...allRuns].filter(item => item.setlistId === setlist.id && !item.completedAt).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
   const recentRuns = [...allRuns].filter(item => item.setlistId === setlist.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 5);
+  const completedRuns = [...allRuns].filter(item => item.setlistId === setlist.id && item.completedAt).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const latestCompletedRun = completedRuns[0];
+  const previousCompletedRun = completedRuns[1];
   const runEntry = run?.entries[index];
   const savedSetlistEntry = runEntry ? entries.find(entry => entry.id === runEntry.id) : undefined;
   const chartEntry = runEntry ? { ...savedSetlistEntry, ...runEntry, bpm: runEntry.bpm ?? savedSetlistEntry?.bpm, countInBeats: runEntry.countInBeats ?? savedSetlistEntry?.countInBeats ?? 4, breakSeconds: runEntry.breakSeconds ?? savedSetlistEntry?.breakSeconds ?? 0, transitionNote: runEntry.transitionNote ?? savedSetlistEntry?.note, note: savedSetlistEntry?.note } : entries[index];
@@ -35,6 +38,44 @@ export function SongLiveSetlistMode({ state, songs, setlist, save }: { state: So
   const nextEntry = run?.entries[index + 1];
   const nextSong = songs.find(item => item.id === nextEntry?.songId);
   const runSummary = run?.entries.reduce<Record<string, number>>((summary, entry) => { if (entry.outcome) summary[entry.outcome] = (summary[entry.outcome] ?? 0) + 1; return summary; }, {}) ?? {};
+  const outcomeCounts = (item: SetlistRun) => item.entries.reduce<Record<string, number>>((summary, entry) => { if (entry.outcome) summary[entry.outcome] = (summary[entry.outcome] ?? 0) + 1; return summary; }, {});
+  const latestCounts = latestCompletedRun ? outcomeCounts(latestCompletedRun) : {};
+  const previousCounts = previousCompletedRun ? outcomeCounts(previousCompletedRun) : {};
+  const followUpEntries = latestCompletedRun?.entries.filter(entry => entry.outcome === "wobbly" || entry.outcome === "retry" || entry.outcome === "skipped").slice(0, 5) ?? [];
+  const practiceEntry = (entry: SetlistRun["entries"][number]) => {
+    const song = songs.find(item => item.id === entry.songId);
+    if (!song || !onPractice) return;
+    close();
+    onPractice(song.id, entry.sectionId ?? song.sections[0]?.id, entry.partId);
+  };
+  const createFollowUpPlan = () => {
+    const followUps = [...new Map(followUpEntries
+      .filter(entry => songs.some(item => item.id === entry.songId))
+      .map(entry => [`${entry.songId}:${entry.sectionId ?? ""}:${entry.partId ?? ""}`, entry])).values()];
+    if (!followUps.length) return;
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 1);
+    const dueAt = dueDate.toISOString();
+    const newQueues = followUps.slice(0, Math.max(0, 100 - state.queues.length)).map(entry => {
+      const song = songs.find(item => item.id === entry.songId);
+      const sectionName = song?.sections.find(item => item.id === entry.sectionId)?.name;
+      return {
+        id: uid(),
+        name: `${setlist.name} · ${sectionName ?? song?.title ?? "Song"}`.slice(0, 80),
+        songIds: [entry.songId],
+        sectionIds: entry.sectionId ? { [entry.songId]: entry.sectionId } : {},
+        targets: { [entry.songId]: { partId: entry.partId, repetitions: 2, bpm: entry.bpm } }
+      };
+    });
+    const schedules = followUps.slice(0, Math.max(0, 500 - state.schedules.length)).map(entry => {
+      const song = songs.find(item => item.id === entry.songId);
+      const sectionName = song?.sections.find(item => item.id === entry.sectionId)?.name;
+      return { id: uid(), songId: entry.songId, dueAt, note: `${sectionName ? `${sectionName} · ` : ""}${setlist.name} follow-up` };
+    });
+    if (!newQueues.length && !schedules.length) { setMessage("Practice queues and schedules are full. Remove an old item to make room for this debrief."); return; }
+    save(current => ({ ...current, queues: [...current.queues, ...newQueues].slice(-100), schedules: [...current.schedules, ...schedules].slice(-500) }));
+    setMessage(`Created ${newQueues.length} focused practice ${newQueues.length === 1 ? "queue" : "queues"} and ${schedules.length} section ${schedules.length === 1 ? "reminder" : "reminders"} for tomorrow.`);
+  };
 
   useEffect(() => {
     if (!open || !dialog.current) return;
@@ -91,6 +132,16 @@ export function SongLiveSetlistMode({ state, songs, setlist, save }: { state: So
     <p>Run this order from one stage view. Each entry keeps its section, part, tempo target, and count-in; mark the result as you go.</p>
     <div className="song-actions"><button type="button" disabled={!entries.length || !!resumable} onClick={startRun}>{resumable ? "Resume or finish the current run first" : "Start live run"}</button>{resumable && <button type="button" onClick={resumeRun}>Resume run from {new Date(resumable.startedAt).toLocaleString()}</button>}</div>
     {run && <p>Latest run: {Object.entries(runSummary).map(([key, count]) => count + " " + key).join(" · ") || "in progress"}{run.completedAt ? " · completed " + new Date(run.completedAt).toLocaleString() : " · unfinished"}</p>}
+    {latestCompletedRun && <section className="song-setlist-debrief" aria-labelledby="song-setlist-debrief-heading">
+      <h4 id="song-setlist-debrief-heading">Rehearsal debrief · {new Date(latestCompletedRun.completedAt!).toLocaleString()}</h4>
+      <p>{Object.entries(latestCounts).map(([outcome, count]) => `${count} ${outcome}`).join(" · ") || "No outcomes recorded"} across {latestCompletedRun.entries.length} entries. Elapsed time: {Math.max(0, Math.round((Date.parse(latestCompletedRun.completedAt!) - Date.parse(latestCompletedRun.startedAt)) / 60000))} min.</p>
+      {previousCompletedRun && <p>Compared with the previous completed run: {Object.keys({ ...latestCounts, ...previousCounts }).map(outcome => { const change = (latestCounts[outcome] ?? 0) - (previousCounts[outcome] ?? 0); return `${outcome} ${change > 0 ? `+${change}` : change} (now ${latestCounts[outcome] ?? 0}, was ${previousCounts[outcome] ?? 0})`; }).join(" · ")}.</p>}
+      {followUpEntries.length ? <><p>Suggested focused follow-up from entries marked wobbly, retry, or skipped:</p><button type="button" onClick={createFollowUpPlan} disabled={state.queues.length >= 100 && state.schedules.length >= 500}>Create practice queues and schedule them for tomorrow</button><ul>{followUpEntries.map((entry, entryIndex) => {
+        const entrySong = songs.find(item => item.id === entry.songId);
+        const entrySection = entrySong?.sections.find(item => item.id === entry.sectionId);
+        return <li key={`${entry.id}:${entryIndex}`}><strong>{entrySong?.title ?? "Unavailable song"}</strong>{entrySection ? ` · ${entrySection.name}` : ""}{entry.note ? ` · ${entry.note}` : ""}{onPractice && entrySong?.sections.length ? <button type="button" onClick={() => practiceEntry(entry)}>Practice this entry</button> : null}</li>;
+      })}</ul></> : <p>No entry was marked wobbly, retry, or skipped. Keep this run as a rehearsal checkpoint.</p>}
+    </section>}
     {recentRuns.length > 0 && <details className="song-live-history"><summary>Recent rehearsal outcomes ({recentRuns.length})</summary><ol>{recentRuns.map(history => {
       const counts = history.entries.reduce<Record<string, number>>((result, entry) => { if (entry.outcome) result[entry.outcome] = (result[entry.outcome] ?? 0) + 1; return result; }, {});
       return <li key={history.id}><strong>{new Date(history.startedAt).toLocaleString()}</strong> · {Object.entries(counts).map(([outcome, count]) => count + " " + outcome).join(" · ") || "in progress"}{history.completedAt ? " · complete" : " · resumable"}{history.entries.filter(entry => entry.note).map(entry => <p key={entry.id}>{songs.find(item => item.id === entry.songId)?.title ?? "Song"}: {entry.note}</p>)}</li>;
@@ -114,7 +165,7 @@ export function SongLiveSetlistMode({ state, songs, setlist, save }: { state: So
         <nav aria-label="Setlist entry navigation" className="song-live-navigation"><button type="button" disabled={index === 0} onClick={() => setIndex(current => Math.max(0, current - 1))}>Previous entry</button><button type="button" disabled={index >= run.entries.length - 1} onClick={() => setIndex(current => Math.min(run.entries.length - 1, current + 1))}>Next entry</button></nav>
         <fieldset className="song-live-outcomes"><legend>Mark this entry</legend>{outcomes.map(item => <button type="button" key={item.id} onClick={() => mark(item.id)}>{item.label}</button>)}</fieldset>
         <ol className="song-live-run-list">{run.entries.map((entry, entryIndex) => <li key={entry.id} aria-current={entryIndex === index ? "step" : undefined}><button type="button" onClick={() => setIndex(entryIndex)}>{songs.find(item => item.id === entry.songId)?.title ?? "Unavailable song"} · {entry.outcome ?? "pending"}</button></li>)}</ol>
-      </> : <div className="song-live-complete"><h2>Setlist run complete</h2><p>{Object.entries(runSummary).map(([key, count]) => count + " " + key).join(" · ")}</p>{run?.entries.filter(entry => entry.outcome === "wobbly" || entry.outcome === "retry").map(entry => <p key={entry.id}>{songs.find(item => item.id === entry.songId)?.title ?? "Song"}{entry.note ? ": " + entry.note : " needs another focused pass."}</p>)}</div>}
+      </> : <div className="song-live-complete"><h2>Setlist run complete</h2><p>{Object.entries(runSummary).map(([key, count]) => count + " " + key).join(" · ")}</p>{run?.entries.filter(entry => entry.outcome === "wobbly" || entry.outcome === "retry").map(entry => <p key={entry.id}>{songs.find(item => item.id === entry.songId)?.title ?? "Song"}{entry.note ? ": " + entry.note : " needs another focused pass."}{onPractice && <button type="button" onClick={() => practiceEntry(entry)}>Practice this entry</button>}</p>)}</div>}
       <p role="status" aria-live="polite">{message}</p>
     </dialog>}
   </section>;

@@ -62,6 +62,8 @@ final class DrumHeroUITests: XCTestCase {
         app.buttons["Save goal"].tap()
         XCTAssertTrue(app.staticTexts["sight-goal-status"].label.contains("saved"))
         app.buttons["New exercise"].tap()
+        XCTAssertTrue(app.buttons["Create seeded assignment"].waitForExistence(timeout: 5))
+        app.buttons["Create seeded assignment"].tap()
         XCTAssertTrue(app.buttons["Share assignment code"].waitForExistence(timeout: 3))
         app.buttons["Prepare printable score"].tap()
         XCTAssertTrue(app.buttons["Print or share PDF"].waitForExistence(timeout: 5))

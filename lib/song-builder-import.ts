@@ -189,11 +189,11 @@ export function createSongFromMidiPreview(preview: MidiImportPreview, options: {
   const ignoredNoteCount = preview.notes.length - mappedNotes.length;
   const lastIncludedTick = mappedNotes.reduce((latest, note) => Math.max(latest, note.tick), 0);
   const bars = midiBars(preview, lastIncludedTick);
-  const subdivision = [4, 8, 12, 16].reduce((best, candidate) => {
+  const subdivision = [4, 8, 12, 16, 20].reduce((best, candidate) => {
     const error = mappedNotes.reduce((sum, note) => { const step = note.tick * candidate / (preview.ppq * 4); return sum + Math.abs(step - Math.round(step)); }, 0);
     const bestError = mappedNotes.reduce((sum, note) => { const step = note.tick * best / (preview.ppq * 4); return sum + Math.abs(step - Math.round(step)); }, 0);
     return error < bestError - 0.0001 || (Math.abs(error - bestError) < 0.0001 && candidate < best) ? candidate : best;
-  }, 16 as 4 | 8 | 12 | 16) as 4 | 8 | 12 | 16;
+  }, 16 as 4 | 8 | 12 | 16 | 20) as 4 | 8 | 12 | 16 | 20;
   const notesByBar: typeof mappedNotes[] = Array.from({ length: bars.length }, () => []);
   let barIndex = 0;
   for (const note of mappedNotes) {
@@ -214,14 +214,14 @@ export function createSongFromMidiPreview(preview: MidiImportPreview, options: {
     for (let firstBar = segmentStart; firstBar < segmentEnd;) {
       let count = Math.min(barsPerPart, segmentEnd - firstBar);
       let noteCount = notesByBar.slice(firstBar, firstBar + count).reduce((sum, items) => sum + items.length, 0);
-      while ((noteCount > 256 || !Number.isInteger(first.beats * count * subdivision / 4)) && count > 1) {
+      while ((noteCount > 256 || (subdivision !== 20 && !Number.isInteger(first.beats * count * subdivision / 4))) && count > 1) {
         count -= 1;
         noteCount = notesByBar.slice(firstBar, firstBar + count).reduce((sum, items) => sum + items.length, 0);
       }
       if (noteCount > 256) throw new Error("A MIDI pattern contains more than 256 drum hits. Reduce the note density and import again.");
       let patternSubdivision = subdivision;
-      if (!Number.isInteger(first.beats * count * patternSubdivision / 4)) {
-        const compatible = ([4, 8, 12, 16] as const).filter(candidate => Number.isInteger(first.beats * count * candidate / 4));
+      if (patternSubdivision !== 20 && !Number.isInteger(first.beats * count * patternSubdivision / 4)) {
+        const compatible = ([4, 8, 12, 16, 20] as const).filter(candidate => candidate === 20 || Number.isInteger(first.beats * count * candidate / 4));
         const patternNotes = notesByBar.slice(firstBar, firstBar + count).flatMap((items, localBar) => items.map(note => ({ note, beat: localBar * first.beats + (note.tick - bars[firstBar + localBar]!.start) / preview.ppq })));
         patternSubdivision = compatible.sort((left, right) => {
           const error = (candidate: number) => patternNotes.reduce((sum, item) => {
@@ -232,7 +232,7 @@ export function createSongFromMidiPreview(preview: MidiImportPreview, options: {
         })[0] ?? 16;
       }
       const beats = first.beats * count;
-      const stepCount = Math.round(beats * patternSubdivision / 4);
+      const stepCount = Math.ceil(beats * patternSubdivision / 4);
       const hits = notesByBar.slice(firstBar, firstBar + count).flatMap((items, localBar) => items.map(note => {
         const beat = localBar * first.beats + (note.tick - bars[firstBar + localBar]!.start) / preview.ppq;
         const step = Math.round(beat * patternSubdivision / 4);

@@ -5,12 +5,12 @@ import { meterBeats, partStepCount, sectionClips } from './song-builder';
 
 export function previewGridChange(part: DrumPart, subdivision: DrumPart['subdivision']) {
   const steps = part.beats * subdivision / 4;
-  if (!Number.isInteger(steps)) return { part, moved: 0, collisions: 0, error: 'This grid cannot represent the current pattern length. Choose a compatible length first.' };
+  if (!Number.isInteger(steps) && subdivision !== 20) return { part, moved: 0, collisions: 0, error: 'This grid cannot represent the current pattern length. Choose a compatible length first.' };
   let moved = 0, collisions = 0;
   const hits = new Map<string, SongPartHit>();
   for (const hit of part.hits) {
     const exact = hit.step * subdivision / part.subdivision;
-    const step = Math.min(steps - 1, Math.max(0, Math.round(exact)));
+    const step = Math.min(Math.ceil(steps) - 1, Math.max(0, Math.round(exact)));
     if (Math.abs(step - exact) > 0.00001) moved++;
     const next = { ...hit, step };
     const key = `${hit.instrument}:${step}`;
@@ -68,10 +68,13 @@ export function makeClipIndependent(song: DrumSong, sectionId: string, clipId: s
     if (section.id !== sectionId) return section;
     const clips = sectionClips(section), clip = clips.find(c => c.id === clipId);
     const source = section.parts.find(p => p.id === clip?.partId);
-    if (!clip || !source || section.parts.length >= 256) return section;
+    const sourceLayers = (clip?.layers ?? []).flatMap(id => { const layer = section.parts.find(part => part.id === id); return layer ? [layer] : []; });
+    if (!clip || !source || section.parts.length + 1 + sourceLayers.length > 256) return section;
     const part = { ...structuredClone(source), id: crypto.randomUUID(), sourceId: undefined, linkedBaseId: undefined, linkOverrides: undefined, linkRemoved: undefined, name: `${source.name} · independent`.slice(0,80) };
+    const layerCopies = sourceLayers.map(layer => ({ ...structuredClone(layer), id: crypto.randomUUID(), sourceId: undefined, linkedBaseId: undefined, linkOverrides: undefined, linkRemoved: undefined, name: `${layer.name} · independent`.slice(0,80) }));
+    const layerIdMap = new Map(sourceLayers.map((layer,index) => [layer.id, layerCopies[index]!.id]));
     partId = part.id;
-    return { ...section, parts: [...section.parts, part], clips: clips.map(c => c.id === clipId ? { ...c, partId: part.id } : c) };
+    return { ...section, parts: [...section.parts, part, ...layerCopies], clips: clips.map(c => c.id === clipId ? { ...c, partId: part.id, layers: c.layers?.map(id => layerIdMap.get(id) ?? id), overrides: c.overrides ? { ...c.overrides, mutedLayers: c.overrides.mutedLayers?.map(id => layerIdMap.get(id) ?? id), soloLayer: c.overrides.soloLayer ? layerIdMap.get(c.overrides.soloLayer) ?? c.overrides.soloLayer : undefined } : undefined } : c) };
   });
   return { song: { ...song, sections }, partId };
 }
@@ -83,15 +86,34 @@ export function moveClipToSection(song: DrumSong, sourceSectionId: string, clipI
   const part = source?.parts.find(p => p.id === clip?.partId);
   if (!target || !clip || !part || target.parts.length >= 256 || sectionClips(target).length >= 512) return song;
   const copied = { ...structuredClone(part), id: crypto.randomUUID() };
+  const copiedLayers = (clip.layers ?? []).flatMap(layerId => { const sourceLayer = source?.parts.find(item => item.id === layerId); return sourceLayer ? [{ sourceId: layerId, part: { ...structuredClone(sourceLayer), id: crypto.randomUUID() } }] : []; });
   const copiedVariants = (clip.repeatVariants ?? []).flatMap(variant => {
     const sourcePart = source?.parts.find(item => item.id === variant.partId);
     if (!sourcePart) return [];
     const copy = { ...structuredClone(sourcePart), id: crypto.randomUUID() };
     return [{ repeat: variant.repeat, partId: copy.id, part: copy }];
   });
-  if (target.parts.length + 1 + copiedVariants.length > 256) return song;
+  if (target.parts.length + 1 + copiedVariants.length + copiedLayers.length > 256) return song;
   const repeatVariants = copiedVariants.map(({ repeat, partId }) => ({ repeat, partId }));
-  return { ...song, sections: song.sections.map(s => s.id === sourceSectionId ? { ...s, clips: sectionClips(s).filter(c => c.id !== clipId) } : s.id === targetSectionId ? { ...s, parts: [...s.parts, copied, ...copiedVariants.map(item=>item.part)], clips: [...sectionClips(s), { ...clip, partId: copied.id, repeatVariants }] } : s) };
+  const layerIdMap = new Map(copiedLayers.map(item => [item.sourceId, item.part.id]));
+  const movedClip = { ...clip, partId: copied.id, layers: clip.layers?.map(id => layerIdMap.get(id) ?? id), overrides: clip.overrides ? { ...clip.overrides, mutedLayers: clip.overrides.mutedLayers?.map(id => layerIdMap.get(id) ?? id), soloLayer: clip.overrides.soloLayer ? layerIdMap.get(clip.overrides.soloLayer) ?? clip.overrides.soloLayer : undefined } : undefined, repeatVariants };
+  return { ...song, sections: song.sections.map(s => s.id === sourceSectionId ? { ...s, clips: sectionClips(s).filter(c => c.id !== clipId) } : s.id === targetSectionId ? { ...s, parts: [...s.parts, copied, ...copiedVariants.map(item=>item.part), ...copiedLayers.map(item=>item.part)], clips: [...sectionClips(s), movedClip] } : s) };
+}
+
+/** Split one repeated clip before the selected pass without changing its pattern data. */
+export function splitClipAtRepeat(song: DrumSong, sectionId: string, clipId: string, repeat: number): { song: DrumSong; nextClipId: string } | null {
+  const section = song.sections.find(item => item.id === sectionId);
+  const clip = section && sectionClips(section).find(item => item.id === clipId);
+  if (!section || !clip || !Number.isInteger(repeat) || repeat < 2 || repeat > clip.repeats) return null;
+  const nextClipId = crypto.randomUUID();
+  const before = { ...clip, repeats: repeat - 1, repeatVariants: clip.repeatVariants?.filter(variant => variant.repeat < repeat) };
+  const after = { ...clip, id: nextClipId, repeats: clip.repeats - repeat + 1, repeatVariants: clip.repeatVariants?.filter(variant => variant.repeat >= repeat).map(variant => ({ ...variant, repeat: variant.repeat - repeat + 1 })) };
+  const next = song.sections.map(item => {
+    if (item.id !== sectionId) return item;
+    const clips = sectionClips(item), index = clips.findIndex(candidate => candidate.id === clipId);
+    return { ...item, clips: [...clips.slice(0, index), before, after, ...clips.slice(index + 1)] };
+  });
+  return { song: { ...song, sections: next }, nextClipId };
 }
 
 export type RecordedBuilderHit = { sectionId: string; partId: string; instrument: SongInstrument; step: number; velocity: number; bpm: number; subdivision?: DrumPart["subdivision"]; atMs: number };
@@ -164,13 +186,13 @@ export function applyBuilderTake(song: DrumSong, take: BuilderTake, strength: nu
 
 export function partToSavedGroove(part: DrumPart, name: string, tags: string, fill: boolean, startStep = 0, endStep = partStepCount(part)-1): Groove {
   const first = Math.max(0,startStep), last = Math.min(partStepCount(part)-1,endStep);
-  const beats=(last-first+1)*4/part.subdivision;
+  const beats=Math.min(part.beats,(last+1)*4/part.subdivision)-first*4/part.subdivision;
   if(beats<=0||!Number.isInteger(beats*2))throw new Error('Select a measure range that aligns with this pattern’s grid and duration.');
   const hits = part.hits.filter(h => h.step >= first && h.step <= last).map(h => ({ ...h, step: h.step-first }));
   const voices: Record<SongInstrument, Instrument> = { kick:'kick', snare:'snare',hihat:'hihat',openhat:'hihat',ride:'crash',rimshot:'snare',tom:'tom',crash:'crash',cowbell:'crash',shaker:'hihat',tambourine:'hihat',custom1:'kick',custom2:'snare',custom3:'tom',custom4:'crash',custom5:'kick',custom6:'snare',custom7:'tom',custom8:'crash' };
   const compatible = new Map<string, { step: number; instrument: Instrument; accent?: boolean }>();
   hits.forEach(hit => compatible.set(`${voices[hit.instrument]}:${hit.step}`,{ ...hit,instrument:voices[hit.instrument] }));
-  return { id:`custom-${crypto.randomUUID()}`, name:name.trim().slice(0,60) || part.name.slice(0,60), description:part.notes?.slice(0,240) || 'Created in Song Builder', style:fill?'Custom fill':'Custom groove', focus:tags.slice(0,120), tags:tags.split(',').map(t=>t.trim()).filter(Boolean).slice(0,12), level:'Intermediate', beats:(last-first+1)*4/part.subdivision, subdivision:part.subdivision, defaultBpm:part.bpm,tempoRange:[40,200],meter:part.meter || `${meterBeats('4/4')}/4`,feel:part.subdivision===12?'triplet':'straight',hits:[...compatible.values()],songPattern:{hits} };
+  return { id:`custom-${crypto.randomUUID()}`, name:name.trim().slice(0,60) || part.name.slice(0,60), description:part.notes?.slice(0,240) || 'Created in Song Builder', style:fill?'Custom fill':'Custom groove', focus:tags.slice(0,120), tags:tags.split(',').map(t=>t.trim()).filter(Boolean).slice(0,12), level:'Intermediate', beats, subdivision:part.subdivision, defaultBpm:part.bpm,tempoRange:[40,200],meter:part.meter || `${meterBeats('4/4')}/4`,feel:part.subdivision===12?'triplet':'straight',hits:[...compatible.values()],songPattern:{hits} };
 }
 
 export function arrangementStartTimes(bars:Array<{beats:number;bpm:number}>){

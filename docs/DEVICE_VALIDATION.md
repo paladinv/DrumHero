@@ -2,6 +2,8 @@
 
 Drum Hero records a latency correction per Trainer input profile and provides an in-app compatibility summary. Browser feature detection and eight-beat calibration describe the current device; neither one certifies that a device has stable timing. The Trainer's **Record repeatability trials** panel can save three corrections for the same input profile, setup label, browser/platform version, and output route, then report their spread. Exporting creates a local JSON log after a review checkbox; entries are not uploaded. Individual MIDI device IDs are removed from the exported log. The setup label is user-entered and can contain identifying details, so review it before sharing. The comparison is a practical aid, not a calibrated laboratory measurement.
 
+After explicitly exporting trial logs, combine and summarize them locally with `npm run device-validation:summary -- ./device-log-1.json ./device-log-2.json`. The summary groups matching browser, platform, input profile, setup label and output route, reports consecutive three-trial correction spreads, and omits the user-entered setup labels and trial IDs. Inspect the original files and physical setup notes before comparing groups; the summary is descriptive evidence, not device certification.
+
 ## Device matrix
 
 | Platform | Browser | Input path | Check |

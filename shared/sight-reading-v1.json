@@ -504,28 +504,123 @@
     "fingerprint": "7/8:16:0/snare/1,3/tom/0,10/crash/0,13/snare/0,20/snare/0,22/snare/0,25/crash/0,26/crash/0"
   },
   {
-    "settings": { "level": "Advanced", "bpm": 100, "bars": 2, "meter": "4/4", "triplets": false, "snareOnly": false, "focusVoice": "mixed", "focusRhythm": "mixed", "style": "rock" },
+    "settings": {
+      "level": "Advanced",
+      "bpm": 100,
+      "bars": 2,
+      "meter": "4/4",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "mixed",
+      "style": "rock"
+    },
     "seed": 101,
     "fingerprint": "4/4:16:0/kick/1,0/hihat/0,2/hihat/0,4/snare/1,4/hihat/0,6/hihat/0,8/kick/0,8/hihat/0,10/hihat/0,12/snare/1,12/hihat/0,14/hihat/0,16/kick/1,16/hihat/0,18/hihat/0,20/snare/1,20/hihat/0,22/hihat/0,24/kick/0,24/hihat/0,26/hihat/0,28/snare/1,28/hihat/0,30/hihat/0"
   },
   {
-    "settings": { "level": "Advanced", "bpm": 110, "bars": 1, "meter": "4/4", "triplets": false, "snareOnly": false, "focusVoice": "mixed", "focusRhythm": "mixed", "style": "shuffle" },
+    "settings": {
+      "level": "Advanced",
+      "bpm": 110,
+      "bars": 1,
+      "meter": "4/4",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "mixed",
+      "style": "shuffle"
+    },
     "seed": 202,
     "fingerprint": "4/4:12:0/kick/1,0/hihat/0,2/hihat/0,3/snare/1,3/hihat/0,5/hihat/0,6/kick/0,6/hihat/0,8/hihat/0,9/snare/1,9/hihat/0,11/hihat/0"
   },
   {
-    "settings": { "level": "Intermediate", "bpm": 92, "bars": 2, "meter": "3/4", "triplets": false, "snareOnly": false, "focusVoice": "mixed", "focusRhythm": "mixed", "style": "fill" },
+    "settings": {
+      "level": "Intermediate",
+      "bpm": 92,
+      "bars": 2,
+      "meter": "3/4",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "mixed",
+      "style": "fill"
+    },
     "seed": 303,
     "fingerprint": "3/4:16:0/kick/1,0/hihat/0,2/hihat/0,4/snare/1,4/hihat/0,6/hihat/0,8/kick/0,8/hihat/0,10/hihat/0,12/kick/1,12/hihat/0,14/hihat/0,16/snare/1,16/hihat/0,17/tom/0,18/snare/0,18/hihat/0,19/tom/0,20/snare/1,20/hihat/0,21/tom/0,22/snare/0,22/hihat/0,23/tom/0"
   },
   {
-    "settings": { "level": "Advanced", "bpm": 90, "bars": 2, "meter": "5/4", "triplets": false, "snareOnly": false, "focusVoice": "tom", "focusRhythm": "sixteenths", "style": "varied" },
+    "settings": {
+      "level": "Advanced",
+      "bpm": 90,
+      "bars": 2,
+      "meter": "5/4",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "tom",
+      "focusRhythm": "sixteenths",
+      "style": "varied"
+    },
     "seed": 404,
     "fingerprint": "5/4:16:1/tom/0,2/tom/0,4/tom/0,5/tom/0,7/tom/0,10/tom/1,14/tom/1,17/tom/0,18/tom/0,20/tom/0,23/tom/0,25/tom/1,26/tom/0,30/tom/0,32/tom/1,35/tom/0,38/tom/1"
   },
   {
-    "settings": { "level": "Beginner", "bpm": 80, "bars": 1, "meter": "4/4", "triplets": false, "snareOnly": false, "focusVoice": "snare", "focusRhythm": "eighths", "style": "varied" },
+    "settings": {
+      "level": "Beginner",
+      "bpm": 80,
+      "bars": 1,
+      "meter": "4/4",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "snare",
+      "focusRhythm": "eighths",
+      "style": "varied"
+    },
     "seed": 505,
     "fingerprint": "4/4:8:0/snare/0,1/snare/0,2/snare/0,5/snare/0,6/snare/0,7/snare/0"
+  },
+  {
+    "settings": {
+      "level": "Advanced",
+      "bpm": 80,
+      "bars": 2,
+      "meter": "4/4",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "mixed",
+      "style": "half-time"
+    },
+    "seed": 606,
+    "fingerprint": "4/4:16:0/kick/1,0/hihat/1,2/hihat/0,4/hihat/0,6/hihat/0,8/snare/0,8/hihat/1,10/hihat/0,12/hihat/0,14/hihat/0,16/kick/1,16/hihat/1,18/hihat/0,20/hihat/0,22/hihat/0,24/snare/0,24/hihat/1,26/hihat/0,28/hihat/0,30/hihat/0"
+  },
+  {
+    "settings": {
+      "level": "Intermediate",
+      "bpm": 80,
+      "bars": 2,
+      "meter": "4/4",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "mixed",
+      "style": "funk"
+    },
+    "seed": 607,
+    "fingerprint": "4/4:16:0/kick/1,0/hihat/1,2/hihat/0,4/snare/1,4/hihat/0,6/hihat/0,8/kick/0,8/hihat/1,10/hihat/0,12/snare/1,12/hihat/0,14/kick/0,14/hihat/0,16/kick/1,16/hihat/1,18/hihat/0,20/snare/1,20/hihat/0,22/hihat/0,24/kick/0,24/hihat/1,26/hihat/0,28/snare/1,28/hihat/0,30/kick/0,30/hihat/0"
+  },
+  {
+    "settings": {
+      "level": "Advanced",
+      "bpm": 80,
+      "bars": 2,
+      "meter": "7/8",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "mixed",
+      "style": "latin"
+    },
+    "seed": 608,
+    "fingerprint": "7/8:16:0/kick/1,0/hihat/1,3/hihat/0,4/snare/1,4/hihat/0,7/hihat/0,8/hihat/1,10/snare/0,11/hihat/0,12/kick/0,12/snare/1,12/hihat/0,14/kick/1,14/hihat/1,17/hihat/0,18/snare/1,18/hihat/0,21/hihat/0,22/hihat/1,24/snare/0,25/hihat/0,26/kick/0,26/snare/1,26/hihat/0"
   }
 ]

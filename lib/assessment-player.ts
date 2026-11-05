@@ -31,7 +31,7 @@ export class AssessmentPlayer {
     if (round && at >= round.start-100 && at <= round.end+100 && round.hits.length < 10000) round.hits.push({ instrument, atMs: at-round.start-round.correction, velocity });
     if (!round && this.phase === 'idle') this.audio?.hit(instrument, false, velocity);
   }
-  async play(probe: AssessmentProbe, adaptation: AssessmentAdaptation, correction: number, variant = 0, complete?: (result: AssessmentAttempt) => void) {
+  async play(probe: AssessmentProbe, adaptation: AssessmentAdaptation, correction: number, variant = 0, complete?: (result: AssessmentAttempt) => void, options: { dropoutAfterBars?: number } = {}) {
     const ready = await this.prepare(); if (!ready) return;
     const { audio, generation }=ready;
     const selected = assessmentProbeVariant(probe, variant);
@@ -42,7 +42,8 @@ export class AssessmentPlayer {
     for(const h of pattern.hits) audio.scheduleHit(h.instrument,base+h.step*beatMs*4/probe.subdivision,h.accent,h.accent?110:55);
     if(!complete) { schedule(demoEnd+100,()=>this.stop()); return; }
     const start=demoEnd+4*beatMs, end=start+16*beatMs;
-    for(let i=0;i<20;i++)audio.scheduleClick(demoEnd+i*beatMs,i%4===0);
+    const clickBeats = options.dropoutAfterBars === undefined ? 20 : 4 + Math.max(0, Math.min(4, options.dropoutAfterBars)) * 4;
+    for(let i=0;i<clickBeats;i++)audio.scheduleClick(demoEnd+i*beatMs,i%4===0);
     schedule(demoEnd,()=>this.set('count-in',1));
     schedule(start-100,()=>{this.capture={start,end,correction,hits:[]};});
     schedule(start,()=>this.set('playing',1));

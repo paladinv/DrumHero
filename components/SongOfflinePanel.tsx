@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 type OfflineStatus = { name: string; version: string; savedAt: string; count: number; bytes?: number; routes?: string[] };
 type Verification = { checked: number; missing: string[]; corrupt: string[]; bytes: number; verifiedAt: string };
 type AssetManifest = { version?: string; totalBytes?: number; routes?: string[] };
+type SiteStorageEstimate = { usage?: number; quota?: number };
 
 export function SongOfflinePanel() {
   const [verification, setVerification] = useState<Verification | null>(null);
@@ -16,6 +17,7 @@ export function SongOfflinePanel() {
   const [message, setMessage] = useState("Download the app pages and built-in sounds for offline practice.");
   const [busy, setBusy] = useState(false);
   const [storage, setStorage] = useState("");
+  const [storageEstimate, setStorageEstimate] = useState<SiteStorageEstimate | null>(null);
   const [online, setOnline] = useState(true);
 
   const request = async (type: "status" | "download" | "remove" | "verify") => {
@@ -64,6 +66,7 @@ export function SongOfflinePanel() {
       void navigator.storage?.estimate().then((estimate) => {
         if (!live || estimate.usage === undefined) return;
         const free = estimate.quota !== undefined ? Math.max(0, estimate.quota - estimate.usage) : undefined;
+        setStorageEstimate({ usage: estimate.usage, quota: estimate.quota });
         setStorage(`${(estimate.usage / 1048576).toFixed(1)} MB used by this site${estimate.quota ? ` of ${(estimate.quota / 1048576).toFixed(0)} MB available${free !== undefined ? ` · ${(free / 1048576).toFixed(1)} MB remaining` : ""}` : ""}.`);
       }).catch(() => {});
     };
@@ -84,7 +87,7 @@ export function SongOfflinePanel() {
 
   const updateStorage = async () => {
     const estimate = await navigator.storage?.estimate().catch(() => undefined);
-    if (estimate?.usage !== undefined) { const free = estimate.quota !== undefined ? Math.max(0, estimate.quota - estimate.usage) : undefined; setStorage(`${(estimate.usage / 1048576).toFixed(1)} MB used by this site${estimate.quota ? ` of ${(estimate.quota / 1048576).toFixed(0)} MB available${free !== undefined ? ` · ${(free / 1048576).toFixed(1)} MB remaining` : ""}` : ""}.`); }
+    if (estimate?.usage !== undefined) { const free = estimate.quota !== undefined ? Math.max(0, estimate.quota - estimate.usage) : undefined; setStorageEstimate({ usage: estimate.usage, quota: estimate.quota }); setStorage(`${(estimate.usage / 1048576).toFixed(1)} MB used by this site${estimate.quota ? ` of ${(estimate.quota / 1048576).toFixed(0)} MB available${free !== undefined ? ` · ${(free / 1048576).toFixed(1)} MB remaining` : ""}` : ""}.`); }
   };
 
   const act = async (type: "download" | "remove" | "verify") => {
@@ -102,6 +105,11 @@ export function SongOfflinePanel() {
     finally { setBusy(false); }
   };
 
+  const freeBytes = storageEstimate?.quota !== undefined && storageEstimate.usage !== undefined
+    ? Math.max(0, storageEstimate.quota - storageEstimate.usage)
+    : undefined;
+  const stagedUpdateEstimate = estimatedBytes * 1.15 + 1_048_576;
+
   return <details className="song-tool-panel app-offline-panel">
     <summary>Offline app download and storage</summary>
     <p>{status ? `Downloaded ${new Date(status.savedAt).toLocaleString()} · ${status.count} resources · build ${status.version}` : "No offline app download saved yet."}</p>
@@ -109,9 +117,10 @@ export function SongOfflinePanel() {
     {status && currentVersion && currentVersion === status.version && <p>Offline download matches the current app build.</p>}
     {!online && <p>Offline now. Saved pages and sounds remain available; reconnect before downloading an update.</p>}
     <p>{storage}</p>
-    <p>{status ? `Saved download: ${((status.bytes ?? estimatedBytes) / 1048576).toFixed(1)} MB including ${status.routes?.length ?? routes.length} page shells.` : `Estimated download: ${(estimatedBytes / 1048576).toFixed(1)} MB of static assets plus ${routes.length} page shells.`}{estimatedBytes > 0 && storage && /remaining/.test(storage) && Number(storage.match(/([\d.]+) MB remaining/)?.[1] ?? 0) < estimatedBytes / 1048576 ? " Browser storage looks tight; remove old downloads or free space before updating." : ""}</p>
+    <p>{status ? `Saved download: ${((status.bytes ?? estimatedBytes) / 1048576).toFixed(1)} MB including ${status.routes?.length ?? routes.length} page shells.` : `Estimated download: ${(estimatedBytes / 1048576).toFixed(1)} MB of static assets plus ${routes.length} page shells.`}</p>
+    {status && online && freeBytes !== undefined && estimatedBytes > 0 && freeBytes < stagedUpdateEstimate && <p className="offline-update-notice">The browser reports {(freeBytes / 1048576).toFixed(1)} MB free. An update needs room for a second complete copy while it downloads (rough estimate: {(stagedUpdateEstimate / 1048576).toFixed(1)} MB). You can still try; an incomplete update is removed and the saved copy is kept.</p>}
     {verification && <p>{verification.checked} resources checked · {verification.missing.length} missing · {verification.corrupt.length} corrupt · {(verification.bytes / 1048576).toFixed(1)} MB verified at {new Date(verification.verifiedAt).toLocaleString()}</p>}
-    <p>Offline pages include Home, Learn, Practice Pad, Trainer, Rudiments, Grooves, Kit Guide, Song Library, Song Builder, Progress, About, and Play-alongs. Built-in drum sounds and 3D kit models are included. Cloud sync needs a connection; local progress, saved songs, and imported backing audio stay on this device. Removing this download does not remove that local audio.</p>
+    <p>Offline pages include Home, Learn, Practice Pad, guided sessions, Trainer, Rudiments, Grooves, Kit Guide, Song Library, Song Builder, Progress, About, and Play-alongs. Built-in drum sounds and 3D kit models are included. Cloud sync needs a connection; local progress, saved songs, and imported backing audio stay on this device. Removing this download does not remove that local audio.</p>
     <div className="song-actions"><button type="button" disabled={busy || !status} onClick={() => void act("verify")}>Verify offline readiness</button><button type="button" disabled={busy || !online} onClick={() => void act("download")}>{status ? "Update offline download" : "Download app for offline use"}</button><button type="button" disabled={busy || !status} onClick={() => void act("remove")}>Remove offline download</button><button type="button" onClick={() => void navigator.storage?.persist().then((granted) => setMessage(granted ? "Persistent storage granted. Keep a backup for device loss." : "Browser manages storage retention. Export a backup for important work.")).catch(() => setMessage("Storage persistence is unavailable."))}>Keep storage on this device</button></div>
     <p role="status">{message}</p>
   </details>;

@@ -1,4 +1,7 @@
 import { lessons } from "./curriculum";
+import { localDateKey } from "./progress";
+import { parseDailyPracticeSession, pauseDailyPracticeSession, type DailyPracticeSession } from "./daily-practice-session";
+import { parseWeeklyGoal, type WeeklyGoal } from "./weekly-practice-goal";
 import type { ProgressState, SessionResult } from "./types";
 
 export const PROGRESS_TRANSFER_FORMAT = "drum-hero-progress-transfer-v1";
@@ -14,6 +17,8 @@ export type PortableProgressTransfer = {
   practiceSessions: SessionResult[];
   bestScores: Record<string, number>;
   preferredBpm: number;
+  guidedPracticeSession?: DailyPracticeSession;
+  weeklyGoal?: WeeklyGoal;
 };
 
 export type ProgressTransferMerge = {
@@ -25,17 +30,24 @@ export type ProgressTransferMerge = {
 
 const isDate = (value: unknown): value is string => typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value));
 
-export function createProgressTransfer(progress: ProgressState, exportedAt = new Date().toISOString()): PortableProgressTransfer {
-  return {
+export function createProgressTransfer(
+  progress: ProgressState,
+  exportedAt = new Date().toISOString(),
+  extras: { guidedPracticeSession?: DailyPracticeSession | null; weeklyGoal?: WeeklyGoal } = {}
+): PortableProgressTransfer {
+  const transfer: PortableProgressTransfer = {
     application: "Drum Hero",
     format: PROGRESS_TRANSFER_FORMAT,
     version: 1,
     exportedAt,
-    completedLessons: progress.completedLessons.map((id) => ({ id })),
-    practiceSessions: progress.sessions.slice(0, 100),
+    completedLessons: progress.completedLessons.map((id) => ({ id, completedAt: progress.lessonCompletedAt?.[id] })),
+    practiceSessions: progress.sessions.slice(0, 50),
     bestScores: progress.bestScores,
     preferredBpm: progress.settings.preferredBpm
   };
+  if (extras.guidedPracticeSession) transfer.guidedPracticeSession = pauseDailyPracticeSession(extras.guidedPracticeSession);
+  if (extras.weeklyGoal) transfer.weeklyGoal = extras.weeklyGoal;
+  return transfer;
 }
 
 export function parseProgressTransfer(raw: string): PortableProgressTransfer {
@@ -62,6 +74,12 @@ export function parseProgressTransfer(raw: string): PortableProgressTransfer {
     }
     lessonIds.add(lesson.id);
   }
+  if (value.guidedPracticeSession !== undefined && !parseDailyPracticeSession(JSON.stringify(value.guidedPracticeSession))) {
+    throw new Error("The progress transfer contains an invalid guided practice session.");
+  }
+  if (value.weeklyGoal !== undefined && !parseWeeklyGoal(value.weeklyGoal)) {
+    throw new Error("The progress transfer contains an invalid weekly practice goal.");
+  }
   const sessionIds = new Set<string>();
   for (const session of value.practiceSessions) {
     if (!session || typeof session.id !== "string" || !session.id || session.id.length > 120 || sessionIds.has(session.id) ||
@@ -82,6 +100,8 @@ export function mergeProgressTransfer(current: ProgressState, transfer: Portable
   const validLessonIds = new Set(lessons.map((lesson) => lesson.id));
   const incomingLessons = transfer.completedLessons.filter((lesson) => validLessonIds.has(lesson.id));
   const completedLessons = [...new Set([...current.completedLessons, ...incomingLessons.map((lesson) => lesson.id)])];
+  const lessonCompletedAt = { ...current.lessonCompletedAt };
+  for (const lesson of incomingLessons) if (lesson.completedAt && !lessonCompletedAt[lesson.id]) lessonCompletedAt[lesson.id] = lesson.completedAt;
   const sessionsById = new Map(current.sessions.map((session) => [session.id, session]));
   const existingIds = new Set(sessionsById.keys());
   for (const session of transfer.practiceSessions) {
@@ -93,12 +113,13 @@ export function mergeProgressTransfer(current: ProgressState, transfer: Portable
   for (const session of transfer.practiceSessions) bestScores[session.patternId] = Math.max(bestScores[session.patternId] ?? 0, session.score);
   const practiceDates = [...new Set([
     ...current.practiceDates,
-    ...transfer.practiceSessions.map((session) => session.playedAt.slice(0, 10))
+    ...transfer.practiceSessions.map((session) => localDateKey(session.playedAt))
   ])].sort();
   return {
     progress: {
       ...current,
       completedLessons,
+      lessonCompletedAt,
       sessions,
       bestScores,
       practiceDates,

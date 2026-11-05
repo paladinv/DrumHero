@@ -1,10 +1,14 @@
 {
-  "version": 2,
+  "version": 7,
   "rules": {
     "score": 85,
     "meanAbsoluteMs": 60,
     "dynamicsAccuracy": 80,
-    "dynamicsContrast": 20
+    "dynamicsContrast": 20,
+    "pulseDropoutAccuracy": 80,
+    "pulseDropoutDriftMs": 60,
+    "fastTrackScore": 95,
+    "fastTrackMeanAbsoluteMs": 40
   },
   "probes": [
     {
@@ -12,7 +16,7 @@
       "domain": "pulse",
       "tier": 1,
       "name": "Steady quarters",
-      "bpm": 60,
+      "bpm": 72,
       "subdivision": 4,
       "hits": [
         {
@@ -42,7 +46,7 @@
       "domain": "pulse",
       "tier": 2,
       "name": "Even eighths",
-      "bpm": 75,
+      "bpm": 72,
       "subdivision": 8,
       "hits": [
         {
@@ -92,7 +96,7 @@
       "domain": "pulse",
       "tier": 3,
       "name": "Pulse through rests",
-      "bpm": 90,
+      "bpm": 72,
       "subdivision": 8,
       "hits": [
         {
@@ -156,7 +160,7 @@
       "domain": "subdivisions",
       "tier": 1,
       "name": "Eighth-note groups",
-      "bpm": 60,
+      "bpm": 72,
       "subdivision": 8,
       "hits": [
         {
@@ -230,7 +234,7 @@
       "domain": "subdivisions",
       "tier": 2,
       "name": "Sixteenth-note groups",
-      "bpm": 75,
+      "bpm": 72,
       "subdivision": 16,
       "hits": [
         {
@@ -364,7 +368,7 @@
       "domain": "subdivisions",
       "tier": 3,
       "name": "Triplet groups",
-      "bpm": 90,
+      "bpm": 72,
       "subdivision": 12,
       "hits": [
         {
@@ -434,7 +438,7 @@
       "domain": "coordination",
       "tier": 1,
       "name": "First backbeat",
-      "bpm": 60,
+      "bpm": 72,
       "subdivision": 8,
       "hits": [
         {
@@ -504,7 +508,7 @@
       "domain": "coordination",
       "tier": 2,
       "name": "Offbeat kicks",
-      "bpm": 75,
+      "bpm": 72,
       "subdivision": 8,
       "hits": [
         {
@@ -658,7 +662,7 @@
       "domain": "coordination",
       "tier": 3,
       "name": "Independent layers",
-      "bpm": 90,
+      "bpm": 72,
       "subdivision": 16,
       "hits": [
         {
@@ -832,7 +836,7 @@
       "domain": "dynamics",
       "tier": 1,
       "name": "Soft strokes and accents",
-      "bpm": 75,
+      "bpm": 72,
       "subdivision": 4,
       "hits": [
         {
@@ -879,6 +883,190 @@
             "accent": false
           }
         ]
+      ]
+    },
+    {
+      "id": "transfer-1",
+      "domain": "transfer",
+      "tier": 1,
+      "name": "Fresh groove",
+      "bpm": 72,
+      "subdivision": 16,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 0,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 4,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 6,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 7,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 8,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 8,
+          "instrument": "kick",
+          "accent": false
+        },
+        {
+          "step": 10,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 12,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 12,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 14,
+          "instrument": "hihat",
+          "accent": false
+        },
+        {
+          "step": 15,
+          "instrument": "kick",
+          "accent": false
+        }
+      ],
+      "alternates": [
+        [
+          {
+            "step": 0,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 0,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 2,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 3,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 4,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 5,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 6,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 8,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 8,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 10,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 11,
+            "instrument": "kick",
+            "accent": false
+          },
+          {
+            "step": 12,
+            "instrument": "hihat",
+            "accent": false
+          },
+          {
+            "step": 12,
+            "instrument": "snare",
+            "accent": false
+          },
+          {
+            "step": 14,
+            "instrument": "hihat",
+            "accent": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "internal-pulse-1",
+      "domain": "internal-pulse",
+      "tier": 1,
+      "name": "Keep the pulse without the click",
+      "bpm": 72,
+      "subdivision": 4,
+      "hits": [
+        {
+          "step": 0,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 1,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 2,
+          "instrument": "snare",
+          "accent": false
+        },
+        {
+          "step": 3,
+          "instrument": "snare",
+          "accent": false
+        }
       ]
     }
   ],
@@ -986,6 +1174,214 @@
         "Eight"
       ],
       "answer": 1
+    },
+    {
+      "id": "listen-5",
+      "kind": "listening",
+      "prompt": "On which beats does the snare play?",
+      "probeId": "coordination-1",
+      "choices": [
+        "Beats 1 and 3",
+        "Beats 2 and 4",
+        "Every beat",
+        "Only the offbeats"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "listen-6",
+      "kind": "listening",
+      "prompt": "Which drum adds notes between the main beats?",
+      "probeId": "coordination-2",
+      "choices": [
+        "Kick",
+        "Snare",
+        "Hi-hat",
+        "Tom"
+      ],
+      "answer": 0
+    },
+    {
+      "id": "listen-7",
+      "kind": "listening",
+      "prompt": "Which two voices play together at the start?",
+      "probeId": "coordination-3",
+      "choices": [
+        "Kick and hi-hat",
+        "Snare and hi-hat",
+        "Kick and snare",
+        "All three voices"
+      ],
+      "answer": 0
+    },
+    {
+      "id": "listen-8",
+      "kind": "listening",
+      "prompt": "How many snare notes are played in one bar?",
+      "probeId": "subdivisions-2",
+      "choices": [
+        "Four",
+        "Six",
+        "Eight",
+        "Twelve"
+      ],
+      "answer": 2
+    },
+    {
+      "id": "read-5",
+      "kind": "reading",
+      "prompt": "Which beats have a snare in this backbeat?",
+      "probeId": "coordination-1",
+      "choices": [
+        "Beats 1 and 3",
+        "Beats 2 and 4",
+        "All four beats",
+        "No quarter-note beats"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "read-6",
+      "kind": "reading",
+      "prompt": "How many snare notes are shown in this bar?",
+      "probeId": "subdivisions-1",
+      "choices": [
+        "Four",
+        "Six",
+        "Eight",
+        "Twelve"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "read-7",
+      "kind": "reading",
+      "prompt": "Which voice plays between the main beats?",
+      "probeId": "coordination-2",
+      "choices": [
+        "Kick",
+        "Snare",
+        "Hi-hat",
+        "Crash"
+      ],
+      "answer": 0
+    },
+    {
+      "id": "read-8",
+      "kind": "reading",
+      "prompt": "How many snare notes are shown in this bar?",
+      "probeId": "pulse-3",
+      "choices": [
+        "Four",
+        "Five",
+        "Six",
+        "Eight"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "listen-9",
+      "kind": "listening",
+      "prompt": "How many snare strokes do you hear in the bar?",
+      "probeId": "subdivisions-2",
+      "choices": [
+        "Four",
+        "Six",
+        "Twelve",
+        "Sixteen"
+      ],
+      "answer": 2
+    },
+    {
+      "id": "listen-10",
+      "kind": "listening",
+      "prompt": "Which voice keeps the even eighth-note pulse?",
+      "probeId": "coordination-1",
+      "choices": [
+        "Kick",
+        "Snare",
+        "Hi-hat",
+        "Tom"
+      ],
+      "answer": 2
+    },
+    {
+      "id": "listen-11",
+      "kind": "listening",
+      "prompt": "When do the extra kick notes happen?",
+      "probeId": "coordination-2",
+      "choices": [
+        "Only on the downbeats",
+        "On downbeats and between beats",
+        "Only with the snare",
+        "On every eighth note"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "listen-12",
+      "kind": "listening",
+      "prompt": "How many voices sound together at the very start?",
+      "probeId": "coordination-3",
+      "choices": [
+        "One",
+        "Two",
+        "Three",
+        "Four"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "read-9",
+      "kind": "reading",
+      "prompt": "How many even notes fit into each beat in this rhythm?",
+      "probeId": "subdivisions-3",
+      "choices": [
+        "Two",
+        "Three",
+        "Four",
+        "Six"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "read-10",
+      "kind": "reading",
+      "prompt": "Which counting includes the extra kick strokes?",
+      "probeId": "coordination-2",
+      "choices": [
+        "1 and 3 only",
+        "1, 2&, 3, and 4&",
+        "2 and 4 only",
+        "Every eighth note"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "read-11",
+      "kind": "reading",
+      "prompt": "Which positions are rests in the shown bar?",
+      "probeId": "pulse-3",
+      "choices": [
+        "Beat 1 and beat 2",
+        "1&, beat 3, and 4&",
+        "Beats 2 and 4",
+        "There are no rests"
+      ],
+      "answer": 1
+    },
+    {
+      "id": "read-12",
+      "kind": "reading",
+      "prompt": "On which beats do kick and snare land together?",
+      "probeId": "coordination-3",
+      "choices": [
+        "Beats 1 and 3",
+        "Beats 2 and 4",
+        "Every beat",
+        "No beats"
+      ],
+      "answer": 1
     }
   ],
   "lessons": {
@@ -1004,5 +1400,18 @@
     "syncopated-pocket": "syncopated-funk",
     "limb-independence": "quarter-kick-backbeat",
     "dynamic-arc": "six-stroke"
+  },
+  "tempoCheck": {
+    "probeId": "pulse-1",
+    "bpms": [
+      60,
+      72,
+      84,
+      90
+    ],
+    "minimumScore": 85,
+    "minimumAccuracy": 85,
+    "maximumMeanAbsoluteMs": 60,
+    "retriesPerTempo": 1
   }
 }

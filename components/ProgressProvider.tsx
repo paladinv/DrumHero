@@ -1,8 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { addSession, defaultProgress, parseProgress, STORAGE_KEY } from "@/lib/progress";
-import { updateTrainerPreferredBpm } from "@/lib/trainer";
+import { addSession, defaultProgress, localDateKey, parseProgress, STORAGE_KEY } from "@/lib/progress";
+import { parseTrainerState, trainerStorageKey, updateTrainerPreferredBpm } from "@/lib/trainer";
 import { ACTIVE_LEARNER_PROFILE_KEY, learnerProfileIdFromBrowser, learnerStorageKey, LEARNER_PROFILE_CHANGE_EVENT, LEARNER_PROFILES_KEY, readLearnerProfiles } from "@/lib/learner-profiles";
 import { LocalizationProvider } from "@/components/LocalizationProvider";
 import type { Catalog, LanguagePreference, Locale } from "@/lib/locale-core";
@@ -22,6 +22,17 @@ type ProgressContextValue = {
 
 const ProgressContext = createContext<ProgressContextValue | null>(null);
 
+function localizeRecordedPracticeDays(progress: ProgressState, profileId: string): ProgressState {
+  try {
+    const trainerRounds = parseTrainerState(window.localStorage.getItem(trainerStorageKey(profileId))).rounds;
+    const instants = [...progress.sessions.map((session) => session.playedAt), ...trainerRounds.map((round) => round.playedAt)]
+      .filter((value) => Number.isFinite(Date.parse(value)));
+    const previousUtcDays = new Set(instants.map((value) => value.slice(0, 10)));
+    const localDays = instants.map(localDateKey).filter(Boolean);
+    return { ...progress, practiceDates: [...new Set([...progress.practiceDates.filter((day) => !previousUtcDays.has(day)), ...localDays])].sort() };
+  } catch { return progress; }
+}
+
 export function ProgressProvider({ children, initialLocale, initialPreference, initialCatalog }: { children: React.ReactNode; initialLocale: Locale; initialPreference: LanguagePreference; initialCatalog: Catalog }) {
   const [progress, setProgress] = useState<ProgressState>(defaultProgress);
   const [profileId, setProfileId] = useState("default");
@@ -30,7 +41,7 @@ export function ProgressProvider({ children, initialLocale, initialPreference, i
     const hydrationTask = window.setTimeout(() => {
       const nextProfileId = learnerProfileIdFromBrowser();
       setProfileId(nextProfileId);
-      setProgress(parseProgress(window.localStorage.getItem(learnerStorageKey(STORAGE_KEY, nextProfileId))));
+      setProgress(localizeRecordedPracticeDays(parseProgress(window.localStorage.getItem(learnerStorageKey(STORAGE_KEY, nextProfileId))), nextProfileId));
       setHydrated(true);
     }, 0);
     return () => window.clearTimeout(hydrationTask);
@@ -40,7 +51,7 @@ export function ProgressProvider({ children, initialLocale, initialPreference, i
       const requested = (event as CustomEvent<{ profileId?: string }>).detail?.profileId;
       const profiles = readLearnerProfiles(window.localStorage.getItem(LEARNER_PROFILES_KEY));
       const nextProfileId = requested && profiles.some((profile) => profile.id === requested) ? requested : learnerProfileIdFromBrowser();
-      setProgress(parseProgress(window.localStorage.getItem(learnerStorageKey(STORAGE_KEY, nextProfileId))));
+      setProgress(localizeRecordedPracticeDays(parseProgress(window.localStorage.getItem(learnerStorageKey(STORAGE_KEY, nextProfileId))), nextProfileId));
       setProfileId(nextProfileId);
     };
     const syncActiveProfile = (event: StorageEvent) => {
@@ -52,10 +63,28 @@ export function ProgressProvider({ children, initialLocale, initialPreference, i
     window.addEventListener("storage", syncActiveProfile);
     return () => { window.removeEventListener(LEARNER_PROFILE_CHANGE_EVENT, changeProfile); window.removeEventListener("storage", syncActiveProfile); };
   }, []);
+  useEffect(() => {
+    const refreshPracticeDates = () => setProgress((current) => localizeRecordedPracticeDays(current, profileId));
+    const syncTrainerStorage = (event: StorageEvent) => {
+      if (event.key === trainerStorageKey(profileId)) refreshPracticeDates();
+    };
+    window.addEventListener("drum-hero:trainer-state-import", refreshPracticeDates);
+    window.addEventListener("storage", syncTrainerStorage);
+    return () => {
+      window.removeEventListener("drum-hero:trainer-state-import", refreshPracticeDates);
+      window.removeEventListener("storage", syncTrainerStorage);
+    };
+  }, [profileId]);
   useEffect(() => { if (hydrated) window.localStorage.setItem(learnerStorageKey(STORAGE_KEY, profileId), JSON.stringify(progress)); }, [hydrated, profileId, progress]);
-  const completeLesson = useCallback((id: string) => setProgress((state) => ({ ...state, completedLessons: state.completedLessons.includes(id) ? state.completedLessons : [...state.completedLessons, id] })), []);
+  const completeLesson = useCallback((id: string) => setProgress((state) => {
+    if (state.completedLessons.includes(id)) return state;
+    return { ...state, completedLessons: [...state.completedLessons, id], lessonCompletedAt: { ...state.lessonCompletedAt, [id]: new Date().toISOString() } };
+  }), []);
   const recordSession = useCallback((result: SessionResult) => setProgress((state) => addSession(state, result)), []);
-  const recordTrainerRound = useCallback((date: string) => setProgress((state) => ({ ...state, practiceDates: [...new Set([...state.practiceDates, date])].sort() })), []);
+  const recordTrainerRound = useCallback((playedAt: string) => setProgress((state) => {
+    const date = localDateKey(playedAt);
+    return date ? { ...state, practiceDates: [...new Set([...state.practiceDates, date])].sort() } : state;
+  }), []);
   const setSound = useCallback((sound: boolean) => setProgress((state) => ({ ...state, settings: { ...state.settings, sound } })), []);
   const setPreferredBpm = useCallback((bpm: number) => {
     const preferredBpm = Math.min(200, Math.max(40, Math.round(bpm)));

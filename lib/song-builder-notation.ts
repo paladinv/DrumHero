@@ -57,15 +57,15 @@ export function percussionRhythm(bar:ArrangementBar,lane:'hands'|'feet',options:
   if(!voices.length)return [{step:0,duration:total,hits:[],group:0,measureRest:true}];
   const precise=(value:number)=>Math.round(value*1000000)/1000000;
   const byStep=new Map<number,ArrangedHit[]>();
-  voices.forEach(hit=>{const step=precise(Math.max(0,Math.min(total-0.000001,hit.step-bar.partBeatOffset*bar.subdivision/4)));byStep.set(step,[...(byStep.get(step)??[]),hit]);});
-  const phase=precise((( -bar.partBeatOffset*bar.subdivision/4)%1+1)%1);
+  voices.forEach(hit=>{const step=precise(Math.max(0,Math.min(total-0.000001,hit.beat*bar.subdivision/4)));byStep.set(step,[...(byStep.get(step)??[]),hit]);});
+  const phase=0;
   const boundaries=new Set<number>([0,precise(total),...byStep.keys()]);
   for(let step=phase;step<total-0.000001;step++)boundaries.add(precise(step));
   const points=[...boundaries].sort((a,b)=>a-b),events:RhythmEvent[]=[];
   for(let index=0;index<points.length-1;){
     const step=points[index],hits=byStep.get(step)??[],group=beamGroup(bar,step,options);let end=index+1;
     if(!hits.length){let possibleEnd=end;while(possibleEnd<points.length-1&&!byStep.has(points[possibleEnd])&&beamGroup(bar,points[possibleEnd],options)===group)possibleEnd++;
-      const candidates=bar.subdivision===12?[3,1]:[16,8,4,2,1];
+      const candidates=bar.subdivision===12?[3,1]:bar.subdivision===20?[5,1]:[16,8,4,2,1];
       for(const length of candidates){const at=points.findIndex((value,candidate)=>candidate>index&&candidate<=possibleEnd&&Math.abs(value-step-length)<0.00001);if(at>=0&&Math.abs(step%length)<0.00001){end=at;break;}}
     }
     events.push({step,duration:precise(points[end]-step),hits,group});index=end;
@@ -110,7 +110,7 @@ function drawStaff(c:CanvasRenderingContext2D,bar:ArrangementBar,x:number,y:numb
   for(const lane of ['hands','feet'] as const){
     const events=percussionRhythm(bar,lane,options),down=lane==='feet',stemY=center+(down?61:-65)*scale;
     const noteEvents=events.filter(event=>event.hits.length>0);
-    const flagsFor=(event:RhythmEvent)=>Math.max(0,Math.round(Math.log2(bar.subdivision/notationQuarterScale(bar)/event.duration*(bar.subdivision===12&&notationQuarterScale(bar)===1?2/3:1)/4)));
+    const flagsFor=(event:RhythmEvent)=>Math.max(0,Math.round(Math.log2(bar.subdivision/notationQuarterScale(bar)/event.duration*(bar.subdivision===12&&notationQuarterScale(bar)===1?2/3:bar.subdivision===20?4/5:1)/4)));
     const beamed=new Map<RhythmEvent,number>();
     if(options.beamGrouping!=='off'){for(let i=1;i<noteEvents.length;i++){const previous=noteEvents[i-1],next=noteEvents[i],flags=Math.min(flagsFor(previous),flagsFor(next));if(!flags||previous.group!==next.group||Math.abs(next.step-previous.step-previous.duration)>0.00001)continue;beamed.set(previous,Math.max(beamed.get(previous)??0,flags));beamed.set(next,Math.max(beamed.get(next)??0,flags));for(let beam=0;beam<flags;beam++)line(c,xAt(previous.step)+(down?-4:4)*scale,stemY+(down?-1:1)*beam*5*scale,xAt(next.step)+(down?-4:4)*scale,stemY+(down?-1:1)*beam*5*scale,3*scale);}}
     for(const event of events){const hitX=event.measureRest?x+width/2:xAt(event.step);
@@ -122,7 +122,7 @@ function drawStaff(c:CanvasRenderingContext2D,bar:ArrangementBar,x:number,y:numb
       if(options.showArticulationMarks!==false&&event.hits.some(hit=>(hit.articulation==='buzz'||hit.articulation==='roll')))for(let i=0;i<3;i++)line(c,stemX-4*scale,fromY+(down?1:-1)*(15+i*4)*scale,stemX+4*scale,fromY+(down?1:-1)*(20+i*4)*scale,1.5);
     }
   }
-  if(bar.subdivision===12&&notationQuarterScale(bar)===1){c.fillStyle=ink;c.font=`${10*scale}px Arial`;for(let step=0;step+3<=count;step+=3){const left=xAt(step),right=xAt(step+2),top=center-82*scale;line(c,left,top,left,top+4);line(c,left,top,(left+right)/2-6,top);line(c,(left+right)/2+6,top,right,top);line(c,right,top,right,top+4);c.fillText('3',(left+right)/2-3,top+3);}}
+  if((bar.subdivision===12&&notationQuarterScale(bar)===1)||bar.subdivision===20){const size=bar.subdivision===20?5:3;c.fillStyle=ink;c.font=`${10*scale}px Arial`;for(let step=0;step+size<=count;step+=size){const left=xAt(step),right=xAt(step+size-1),top=center-82*scale;line(c,left,top,left,top+4);line(c,left,top,(left+right)/2-6,top);line(c,(left+right)/2+6,top,right,top);line(c,right,top,right,top+4);c.fillText(String(size),(left+right)/2-3,top+3);}}
   line(c,x,center-20*scale,x,center+20*scale);line(c,x+width,center-20*scale,x+width,center+20*scale);
 }
 export function drawNotationPage(song:DrumSong,bars:ArrangementBar[],view:NotationView,pageIndex:number,cursor?:{barIndex:number;fraction:number}|null,options:NotationOptions=DEFAULT_NOTATION_OPTIONS){
@@ -139,5 +139,5 @@ export function drawNotationPage(song:DrumSong,bars:ArrangementBar[],view:Notati
     }
     if(cursor?.barIndex===rect.barIndex){c.strokeStyle=coral;c.save();c.setLineDash([5,4]);const cx=x+18+cursor.fraction*(width-38);line(c,cx,y+32,cx,y+height-3,2);c.restore();}
   }
-  c.fillStyle=muted;c.font='11px Arial';c.fillText('Kick: bottom space · snare/rim: middle space · tom: upper line · hats/ride/crash: above staff',48,canvas.height-93,canvas.width-96);c.fillText('○ ghost · > accent · 3 triplet · R/L sticking · open circle: open hat · drum tab dot size: velocity',48,canvas.height-70,canvas.width-96);c.fillText('Drum Hero Song Builder',48,canvas.height-34);return canvas;
+  c.fillStyle=muted;c.font='11px Arial';c.fillText('Kick: bottom space · snare/rim: middle space · tom: upper line · hats/ride/crash: above staff',48,canvas.height-93,canvas.width-96);c.fillText('○ ghost · > accent · 3 triplet · 5 quintuplet · R/L sticking · open circle: open hat · drum tab dot size: velocity',48,canvas.height-70,canvas.width-96);c.fillText('Drum Hero Song Builder',48,canvas.height-34);return canvas;
 }

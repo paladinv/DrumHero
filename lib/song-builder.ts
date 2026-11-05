@@ -1,8 +1,9 @@
 import { mappedSeconds } from "./song-builder-tools";
 import { SONG_INSTRUMENTS, type Groove, type SongHitArticulation, type SongInstrument } from "./types";
 import type { DrumPart, DrumSong, SongArrangementAutomationPoint, SongClip, SongClipOverrides, SongFeel, SongPlaybackFeel, SongSection, SongSectionAutomation } from "./song-library";
+import type { DrumMixSettings } from "./audio";
 
-export type ArrangedHit = { beat: number; fraction: number; instrument: SongInstrument; accent: boolean; velocity: number; ghost: boolean; step: number; articulation?: SongHitArticulation; sticking?: "R" | "L" };
+export type ArrangedHit = { beat: number; fraction: number; instrument: SongInstrument; accent: boolean; velocity: number; ghost: boolean; step: number; sourceSubdivision?: DrumPart["subdivision"]; sourcePartId?: string; articulation?: SongHitArticulation; sticking?: "R" | "L" };
 export type ArrangementBar = {
   index: number;
   number: number;
@@ -11,6 +12,7 @@ export type ArrangementBar = {
   sectionKind: SongSection["kind"];
   feel?: SongFeel;
   playbackFeel?: SongPlaybackFeel;
+  kitMix?: DrumMixSettings;
   sectionRepeat: number;
   sectionBar: number;
   sectionBars: number;
@@ -27,6 +29,8 @@ export type ArrangementBar = {
   marker?: string;
   partId: string;
   partName: string;
+  layerPartIds?: string[];
+  layerPartNames?: string[];
   annotation?: string;
   dynamics?: string;
   meter: string;
@@ -79,7 +83,7 @@ export function arrangementAutomationValue(bar: Pick<ArrangementBar, "arrangemen
 }
 
 export function partStepCount(part: Pick<DrumPart, "beats" | "subdivision">) {
-  return Math.max(1, Math.round(part.beats * part.subdivision / 4));
+  return Math.max(1, Math.ceil(part.beats * part.subdivision / 4));
 }
 
 export function cleanMeterLabel(meter: string) {
@@ -87,7 +91,7 @@ export function cleanMeterLabel(meter: string) {
 }
 
 export function sectionClips(section: SongSection): SongClip[] {
-  if (Array.isArray(section.clips)) return section.clips.filter((clip) => section.parts.some((part) => part.id === clip.partId));
+  if (Array.isArray(section.clips)) return section.clips.filter((clip) => section.parts.some((part) => part.id === clip.partId)).map(clip => ({ ...clip, layers: clip.layers?.filter(id => id !== clip.partId && section.parts.some(part => part.id === id)) }));
   return section.parts.map((part) => ({ id: `legacy-${part.id}`, partId: part.id, repeats: 1 }));
 }
 
@@ -128,6 +132,7 @@ export function gridBeatLabel(meter: string, subdivision: number, step: number, 
 }
 
 export function grooveToPart(groove: Groove, bpm: number): DrumPart {
+
   return {
     id: crypto.randomUUID(),
     name: groove.name,
@@ -227,10 +232,10 @@ export function humanizeArrangementBars(bars: ArrangementBar[], amount: number, 
       const strength = Math.max(0, Math.min(100, bar.clipOverrides?.humanizeAmount ?? bar.playbackFeel?.humanizeAmount ?? amount)) / 100;
       const velocityStrength = Math.max(0, Math.min(100, bar.clipOverrides?.humanizeVelocityAmount ?? bar.playbackFeel?.humanizeVelocityAmount ?? velocityAmount)) / 100;
       if (!strength && !velocityStrength) return hit;
-      const random = variation(`${bar.index}:${bar.partId}:${hit.step}:${hit.instrument}`);
+      const random = variation(`${bar.index}:${hit.sourcePartId ?? bar.partId}:${hit.step}:${hit.instrument}`);
       const timingRangeBeats = (60 / bar.bpm) * 0.18 * strength;
       const beat = Math.max(0, Math.min(Math.max(0, bar.beats - 0.001), hit.beat + random * timingRangeBeats));
-      const velocity = Math.max(1, Math.min(127, Math.round(hit.velocity + variation(`${bar.index}:${hit.step}:${hit.instrument}:velocity`) * 24 * velocityStrength)));
+      const velocity = Math.max(1, Math.min(127, Math.round(hit.velocity + variation(`${bar.index}:${hit.sourcePartId ?? bar.partId}:${hit.step}:${hit.instrument}:velocity`) * 24 * velocityStrength)));
       return { ...hit, beat, fraction: beat / Math.max(0.001, bar.measureBeats), velocity };
     })
   }));
@@ -278,7 +283,8 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
       return total + Array.from({ length: repeats }, (_, index) => section.parts.find(item => item.id === (clip.repeatVariants?.find(variant => variant.repeat === index + 1)?.partId ?? clip.partId))).reduce((sum, part) => {
         if (!part) return sum;
         const measureLength = meterBeats(part.meter || section.meter || song.meter, part.beats);
-        return sum + Math.max(1, Math.min(32, Math.ceil(part.beats / measureLength - 0.00001)));
+        const longestLayer = Math.max(part.beats, ...(clip.layers ?? []).map(layerId => section.parts.find(layer => layer.id === layerId)?.beats ?? 0));
+        return sum + Math.max(1, Math.min(32, Math.ceil(longestLayer / measureLength - 0.00001)));
       }, 0);
     }, 0);
     const baseBpm = Math.max(40, Math.min(200, Math.round(section.bpm ?? song.bpm)));
@@ -291,9 +297,14 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
           const partId = clip.repeatVariants?.find(variant=>variant.repeat===clipRepeat+1)?.partId ?? clip.partId;
           const part = section.parts.find((item) => item.id === partId);
           if (!part) continue;
+          const layerParts = [part, ...(clip.layers ?? []).flatMap(layerId => {
+            const layer = section.parts.find(item => item.id === layerId);
+            return layer ? [layer] : [];
+          })];
           const meter = part.meter || section.meter || song.meter;
           const measureLength = meterBeats(meter, part.beats);
-          const barCount = Math.max(1, Math.min(32, Math.ceil(part.beats / measureLength - 0.00001)));
+          const longestLayer = Math.max(...layerParts.map(layer => layer.beats));
+          const barCount = Math.max(1, Math.min(32, Math.ceil(longestLayer / measureLength - 0.00001)));
           for (let barIndex = 0; barIndex < barCount; barIndex += 1) {
             const ramp = section.tempoRamp;
             const rampProgress = ramp ? Math.min(1, (repeatBarCursor + 1) / ramp.bars) : 0;
@@ -302,13 +313,18 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               ? Math.min(measureLength, Math.max(0.5, section.pickupBeats))
               : 0;
             const startBeat = barIndex * measureLength + (pickup ? measureLength - pickup : 0);
-            const remaining = Math.max(0.001, Math.min(measureLength, part.beats - startBeat));
-            const hits = part.hits.flatMap((hit): ArrangedHit[] => {
-              const beat = hit.step * 4 / part.subdivision;
-              const localBeat = beat - startBeat;
-              if (localBeat < -0.00001 || localBeat >= remaining - 0.00001) return [];
-              const performanceBeat = Math.max(0, Math.min(remaining - 0.001, localBeat + (hit.timingOffsetMs ?? 0) * bpm / 60000));
-              return [{ beat: performanceBeat, fraction: localBeat / (pickup ? remaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, articulation: hit.articulation, sticking: hit.sticking }];
+            const remaining = Math.max(0.001, Math.min(measureLength, longestLayer - startBeat));
+            const mutedLayers = new Set(clip.overrides?.mutedLayers ?? []);
+            const hits = layerParts.flatMap((layer): ArrangedHit[] => {
+              if (mutedLayers.has(layer.id) || (clip.overrides?.soloLayer && clip.overrides.soloLayer !== layer.id)) return [];
+              const layerRemaining = Math.max(0.001, Math.min(measureLength, layer.beats - startBeat));
+              return layer.hits.flatMap((hit): ArrangedHit[] => {
+                const beat = hit.step * 4 / layer.subdivision;
+                const localBeat = beat - startBeat;
+                if (localBeat < -0.00001 || localBeat >= layerRemaining - 0.00001) return [];
+                const performanceBeat = Math.max(0, Math.min(layerRemaining - 0.001, localBeat + (hit.timingOffsetMs ?? 0) * bpm / 60000));
+                return [{ beat: performanceBeat, fraction: localBeat / (pickup ? layerRemaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, sourceSubdivision: layer.subdivision, sourcePartId: layer.id, articulation: hit.articulation, sticking: hit.sticking }];
+              });
             });
             const measureCues = section.rehearsalCues?.filter(cue => cue.measure === repeatBarCursor + 1) ?? [];
             const cueText = measureCues.map(cue => `${cue.kind === "chord" ? "Chord" : cue.kind === "lyric" ? "Lyric" : "Band"}: ${cue.text}`).join(" · ");
@@ -320,6 +336,7 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               sectionKind: section.kind,
               feel: section.feel,
               playbackFeel: section.playbackFeel,
+              kitMix: section.kitMix,
               sectionRepeat,
               sectionBar: repeatBarCursor,
               sectionBars: Math.max(1, sectionBars),
@@ -334,12 +351,14 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
               rehearsalCue: cueText || undefined,
               partId: part.id,
               partName: part.name,
-            annotation: [section.notes,part.notes,cueText ? `Cue: ${cueText}` : undefined].filter(Boolean).join(" · "),
+              layerPartIds: layerParts.map(layer => layer.id),
+              layerPartNames: layerParts.map(layer => layer.name),
+            annotation: [section.notes, ...layerParts.map((layer,index) => index === 0 ? layer.notes : `Layer: ${layer.name}${layer.notes ? ` · ${layer.notes}` : ""}`), cueText ? `Cue: ${cueText}` : undefined].filter(Boolean).join(" · "),
             dynamics: part.dynamics,
               meter,
               bpm,
               subdivision: part.subdivision,
-              partBeats: part.beats,
+              partBeats: longestLayer,
               beats: remaining,
               measureBeats: measureLength,
               partBeatOffset: startBeat,

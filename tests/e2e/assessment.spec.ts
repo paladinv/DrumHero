@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 const key='drum-hero:assessment:v1';
+const draftKey='drum-hero:assessment-draft:v1';
 async function begin(page: import('@playwright/test').Page) {
   await page.goto('/assessment');
   await page.getByRole('button',{name:'Enable sound and check input',exact:true}).click();
@@ -13,20 +14,31 @@ test.describe('initial skill assessment',()=>{
   await begin(page);
   await page.getByRole('button',{name:'End assessment and view results'}).click();
   await expect(page.getByRole('heading',{name:'Assessment results',exact:true})).toBeFocused();
+  await expect(page.getByLabel('Measurement quality')).toBeVisible();
   await expect(page.getByRole('button',{name:'Use this starting plan'})).toHaveCount(0);
   const stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)!),key);
   expect(stored.results[0].attempts).toEqual([]);expect(stored.appliedId).toBeNull();
+  expect(await page.evaluate(key=>localStorage.getItem(key),draftKey)).toBeNull();
   const violations=(await new AxeBuilder({page}).analyze()).violations.filter(v=>['serious','critical'].includes(v.impact??''));expect(violations).toEqual([]);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.screenshot({path:testInfo.outputPath('assessment-results.png'),fullPage:true});
   page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Delete',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Assessment results',exact:true})).toHaveCount(0);
  });
+ test('resumes only completed assessment tasks after a reload',async({page})=>{
+  await begin(page);await page.getByRole('button',{name:'Skip this domain'}).click();
+  const checkpoint=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)!),draftKey);expect(checkpoint.result.skipped).toContain('pulse-1');
+  await page.reload();await expect(page.getByRole('button',{name:'Resume saved assessment'})).toBeVisible();await page.getByRole('button',{name:'Resume saved assessment'}).click();
+  await expect(page.getByRole('heading',{name:/Eighth-note groups/})).toBeVisible();
+  await page.getByRole('button',{name:'End assessment and view results'}).click();expect(await page.evaluate(key=>localStorage.getItem(key),draftKey)).toBeNull();
+ });
  test('quiz answer produces an opt-in recommendation, survives retake, and updates Home',async({page})=>{
   await begin(page);
   for(let i=0;i<3;i++)await page.getByRole('button',{name:'Skip this domain'}).click();
-  const quizChoice=page.getByRole('button',{name:/^(Four even quarter notes|Eight even eighth notes|A triplet on every beat|Silence on beat one|Two notes per beat|Three even notes per beat|Four notes per beat|One note per beat|Four|Six|Eight|Twelve|1 & 2 &|1 e & a|1 trip let 2 trip let|Only the downbeats|Five|Five notes with rests between some beats)$/}).first();
-  await quizChoice.click();
+  const quizHeading=page.getByRole('heading',{name:/^(Listening|Notation) question$/});await expect(quizHeading).toBeVisible();
+  const quizCard=page.locator('section.card').filter({has:quizHeading});
+  const listening=await quizCard.getByRole('button',{name:'Play rhythm'}).count();
+  await quizCard.getByRole('button').nth(listening?1:0).click();
   await page.getByRole('button',{name:'End assessment and view results'}).click();
   let stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)!),key);expect(stored.appliedId).toBeNull();
   await page.getByRole('button',{name:'Use this starting plan'}).click();
@@ -70,5 +82,9 @@ test.describe('initial skill assessment',()=>{
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('drum-hero:learner-profile-change',{detail:{profileId:'two'}})));
   await expect(page.getByRole('button',{name:'Begin assessment'})).toBeVisible();await expect(page.getByRole('button',{name:'Begin assessment'})).toBeDisabled();
   expect(await page.evaluate(key=>localStorage.getItem(key+':profile:one'),key)).toBeNull();expect(await page.evaluate(key=>localStorage.getItem(key+':profile:two'),key)).toBeNull();
+  expect(await page.evaluate(key=>localStorage.getItem(key+':profile:one'),draftKey)).not.toBeNull();expect(await page.evaluate(key=>localStorage.getItem(key+':profile:two'),draftKey)).toBeNull();
+ });
+ test('trainer provides a return path for the assessment practice-and-recheck loop',async({page})=>{
+  await page.goto('/trainer?pattern=first-beat&assessmentFollowUp=1');await expect(page.getByText('Assessment practice',{exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'Return to assessment'})).toHaveAttribute('href','/assessment');
  });
 });

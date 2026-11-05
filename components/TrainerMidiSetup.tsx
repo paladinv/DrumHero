@@ -5,7 +5,7 @@ import type { Instrument, MidiArticulation } from "@/lib/types";
 
 type KitPreset = { id: string; name: string; midiMap: Record<number, Instrument | null>; midiArticulations: Record<number, MidiArticulation | null> };
 const VOICES: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
-const ARTICULATIONS: Array<[MidiArticulation | "", string]> = [["", "No articulation"], ["closed-hat", "Closed hi-hat"], ["open-hat", "Open hi-hat"], ["pedal-hat", "Hi-hat pedal"], ["foot-splash", "Foot splash"], ["ride", "Ride"], ["crash", "Crash cymbal"]];
+const ARTICULATIONS: Array<[MidiArticulation | "", string]> = [["", "No articulation"], ["closed-hat", "Closed hi-hat"], ["open-hat", "Open hi-hat"], ["pedal-hat", "Hi-hat pedal"], ["foot-splash", "Foot splash"], ["ride", "Ride"], ["crash", "Crash cymbal"], ["rimshot", "Rimshot"]];
 const PRESET_LIMIT = 20;
 
 function parsePresets(raw: string | null): KitPreset[] {
@@ -104,7 +104,7 @@ export function TrainerMidiSetup({ profileKey, lastMidiNote, lastMidiNoteVersion
 
   const noteRows = [...new Set([...Object.keys(midiMap).map(Number), ...Object.keys(midiArticulations).map(Number)])].filter(note => Number.isInteger(note) && note >= 0 && note <= 127).sort((a, b) => a - b);
   const renderMapping = (note: number) => <div className="trainer-midi-map-row" key={note}><strong>MIDI {note}</strong><select aria-label={`Voice for MIDI note ${note}`} value={midiMap[note] ?? ""} disabled={disabled} onChange={event => onMapNote(note, event.target.value ? event.target.value as Instrument : null)}><option value="">Unmapped</option>{VOICES.map(voice => <option key={voice} value={voice}>{voice}</option>)}</select><select aria-label={`Articulation for MIDI note ${note}`} value={midiArticulations[note] ?? ""} disabled={disabled} onChange={event => onMapArticulation(note, event.target.value ? event.target.value as MidiArticulation : null)}>{ARTICULATIONS.map(([value, label]) => <option key={value || "none"} value={value}>{label}</option>)}</select></div>;
-  return <div className="trainer-midi-setup">
+  return <div id="trainer-midi-setup" className="trainer-midi-setup">
     <div className="trainer-midi-soundcheck" role="status"><strong>MIDI input check</strong><p>{lastMidiNote === null ? "Connect your kit, then strike one pad. The latest note and its mapped drum will appear here." : midiMap[lastMidiNote] ? `Input received: MIDI ${lastMidiNote} maps to ${midiMap[lastMidiNote]}${midiArticulations[lastMidiNote] ? ` · ${midiArticulations[lastMidiNote]?.replaceAll("-", " ")}` : ""}.` : `Input received: MIDI ${lastMidiNote} is not mapped yet. Assign its drum voice below.`}</p></div>
     <section className="trainer-midi-guide" aria-label="Guided MIDI kit mapping">
       <strong>Guided kit mapping</strong>
@@ -113,7 +113,7 @@ export function TrainerMidiSetup({ profileKey, lastMidiNote, lastMidiNoteVersion
     <div className="trainer-midi-presets"><strong>Kit maps for this device</strong><div className="transport"><select aria-label="Saved kit maps" value={selectedId} disabled={disabled || !presetsReady || !presets.length} onChange={event => loadPreset(event.target.value)}><option value="">Choose saved map</option>{presets.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button type="button" disabled={disabled || !presetsReady || !selectedPresetExists} onClick={updateSelected}>Update map</button><button type="button" disabled={disabled || !presetsReady || !selectedPresetExists || presets.length >= PRESET_LIMIT} onClick={duplicateSelected}>Duplicate</button><button type="button" disabled={disabled || !presetsReady || !selectedPresetExists} onClick={() => { if (persist(presets.filter(item => item.id !== selectedId), "Deleted kit map.")) setSelectedId(""); }}>Delete</button></div><div className="transport"><input aria-label="New kit map name" maxLength={60} value={name} disabled={disabled || !presetsReady} onChange={event => setName(event.target.value)} placeholder="Name this kit map" /><button type="button" disabled={disabled || !presetsReady || presets.length >= PRESET_LIMIT} onClick={savePreset}>Save current map</button></div></div>
     {lastMidiNote !== null && <fieldset className="trainer-midi-current"><legend>Latest note · MIDI {lastMidiNote}</legend>{renderMapping(lastMidiNote)}</fieldset>}
     <details><summary>All mapped notes · quick edit</summary><div className="trainer-midi-map-list">{noteRows.map(renderMapping)}</div></details>
-    <small>Maps are saved per MIDI device. Articulation tags retain closed/open hi-hat, pedal, foot splash, ride, or crash details with each hit.</small>
+    <small>Maps are saved per MIDI device. Articulation tags retain closed/open hi-hat, pedal, foot splash, ride, crash, or rimshot details with each hit.</small>
     {message && <p role="status">{message}</p>}
   </div>;
 }

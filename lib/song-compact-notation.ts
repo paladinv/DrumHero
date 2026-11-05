@@ -1,9 +1,9 @@
-import { drawNotationPage,notationGeometry,DEFAULT_NOTATION_OPTIONS,type NotationView } from './song-builder-notation';
+import { drawNotationPage,notationGeometry,DEFAULT_NOTATION_OPTIONS,type NotationOptions,type NotationView } from './song-builder-notation';
 import type { ArrangementBar } from './song-builder';
 import type { DrumSong } from './song-library';
 export type CompactMeasure={barIndex:number;x:number;y:number;width:number;height:number};
-export function compactNotation(song:DrumSong,bars:ArrangementBar[],view:NotationView,page:number,cursor?:{barIndex:number;fraction:number}){
- const source=drawNotationPage(song,bars,view,page,undefined,DEFAULT_NOTATION_OPTIONS),geometry=notationGeometry(bars,page,DEFAULT_NOTATION_OPTIONS),rows=[...new Set(geometry.map(rect=>rect.y))];
+export function compactNotation(song:DrumSong,bars:ArrangementBar[],view:NotationView,page:number,cursor?:{barIndex:number;fraction:number},options:NotationOptions=DEFAULT_NOTATION_OPTIONS){
+ const source=drawNotationPage(song,bars,view,page,undefined,options),geometry=notationGeometry(bars,page,options),rows=[...new Set(geometry.map(rect=>rect.y))];
  const bands=rows.map(y=>{const rect=geometry.find(rect=>rect.y===y)!,scale=Math.max(.65,Math.min(1.25,(rect.height-25)/190));return {y,rect,top:view==='staff'?Math.max(y+32,y+16+(rect.height-25)*.54-98*scale):y+32,height:view==='staff'?Math.min(rect.height-32,190*scale):Math.min(rect.height-32,280)};});
  const canvas=document.createElement('canvas');canvas.width=1100;canvas.height=Math.ceil(110+bands.reduce((sum,band)=>sum+band.height+52,0)+58);const context=canvas.getContext('2d');if(!context)throw Error('Notation could not be rendered.');context.fillStyle='#fffdf8';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(source,0,0,1100,105,0,0,1100,105);
  const measures:CompactMeasure[]=[];let targetY=110;

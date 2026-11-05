@@ -3,12 +3,14 @@ export type Instrument = "kick" | "snare" | "hihat" | "tom" | "crash";
 export type SongInstrument = Instrument | "openhat" | "ride" | "rimshot" | "cowbell" | "shaker" | "tambourine" | "custom1" | "custom2" | "custom3" | "custom4" | "custom5" | "custom6" | "custom7" | "custom8";
 export const SONG_INSTRUMENTS: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4", "custom5", "custom6", "custom7", "custom8"];
 export type SongHitArticulation = "normal" | "flam" | "drag" | "buzz" | "roll" | "choke" | "foot-splash";
-export type MidiArticulation = "closed-hat" | "open-hat" | "pedal-hat" | "foot-splash" | "ride" | "crash";
+export type MidiArticulation = "closed-hat" | "open-hat" | "pedal-hat" | "foot-splash" | "ride" | "crash" | "rimshot";
 export type SongPartHit = Omit<PatternHit, "instrument" | "articulation"> & { instrument: SongInstrument; velocity?: number; ghost?: boolean; articulation?: SongHitArticulation; sticking?: "R" | "L"; timingOffsetMs?: number };
 
 export type PatternHit = {
   step: number;
   instrument: Instrument;
+  /** Optional right/left hand target, used by rudiment practice and notation. */
+  sticking?: "R" | "L";
   accent?: boolean;
   /** Target MIDI-like strike strength for a Trainer dynamics exercise. */
   velocityTarget?: number;
@@ -20,7 +22,7 @@ export type PracticePattern = {
   name: string;
   level: Level;
   description: string;
-  subdivision: 4 | 8 | 12 | 16;
+  subdivision: 4 | 8 | 12 | 16 | 20;
   beats: number;
   defaultBpm: number;
   tempoRange: [number, number];
@@ -67,6 +69,9 @@ export type RatedHit = {
   /** Grid step and repetition identify a weak spot for targeted drills. */
   step?: number;
   repetition?: number;
+  /** Hand target and hand key used during optional keyboard rudiment checking. */
+  handTarget?: "R" | "L";
+  handPlayed?: "R" | "L";
 };
 
 export type SessionResult = {
@@ -87,6 +92,7 @@ export type SessionResult = {
 export type ProgressState = {
   version: 1;
   completedLessons: string[];
+  lessonCompletedAt?: Record<string, string>;
   sessions: SessionResult[];
   bestScores: Record<string, number>;
   practiceDates: string[];

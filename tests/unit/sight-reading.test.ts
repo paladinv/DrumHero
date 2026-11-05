@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { DEFAULT_SIGHT_SETTINGS, generateSightExercise, matchingSightGoalAttempts, normalizeSightSettings, parseSightGoal, parseSightHistory, recommendSightSettings, scoreSightAttempt, sightClassification, sightDuration, sightFingerprint, sightMeters, sightNotationBars, type SightAttempt, type SightGoal, type SightSettings } from '../../lib/sight-reading';
+import { DEFAULT_SIGHT_SETTINGS, SIGHT_LEARNING_PATH, createSightBarDrill, generateSightExercise, matchingSightGoalAttempts, nextSightLearningPathStep, normalizeSightSettings, parseSightGoal, parseSightHistory, recommendSightSettings, scoreSightAttempt, sightClassification, sightDuration, sightFingerprint, sightMeters, sightNotationBars, weakestSightBar, type SightAttempt, type SightGoal, type SightSettings } from '../../lib/sight-reading';
 import { parseLocalBackup } from '../../lib/local-backup';
 import { learnerStorageKey } from '../../lib/learner-profiles';
 const settings = DEFAULT_SIGHT_SETTINGS;
 describe('sight reading', () => {
   it('generates playable phrases across every supported meter and subdivision', () => {
-    for (const level of ['Beginner','Intermediate','Advanced'] as const) for (const meter of sightMeters(level)) for (const triplets of [false,true]) for (const bars of [1,2,4] as const) for (let seed=0;seed<40;seed++) {
+    for (const level of ['Beginner','Intermediate','Advanced'] as const) for (const meter of sightMeters(level)) for (const triplets of [false,true]) for (const bars of [1,2,4,8] as const) for (let seed=0;seed<40;seed++) {
       const exercise = generateSightExercise({ ...settings, level, meter, triplets, bars },seed);
       const seen = new Set<string>();
       for (const hit of exercise.hits) { expect(Number.isInteger(hit.step)).toBe(true); expect(hit.step).toBeGreaterThanOrEqual(0); expect(hit.step).toBeLessThan(exercise.stepsPerBar*bars); const id = `${hit.step}-${hit.instrument}`; expect(seen.has(id)).toBe(false); seen.add(id); }
@@ -49,6 +49,9 @@ describe('sight reading', () => {
     expect(sightClassification(false,false)).toBe('reading'); expect(sightClassification(true,false)).toBe('practice'); expect(sightClassification(false,true)).toBe('assisted');
     const row: SightAttempt={id:'1',playedAt:new Date().toISOString(),version:1,seed:1,settings,source:'keyboard',inputProfile:'keyboard',classification:'reading',score:80,accuracy:80,meanOffsetMs:0,misses:2,extras:0};
     expect(parseSightHistory(JSON.stringify({version:1,attempts:Array.from({length:110},()=>row)}))).toHaveLength(100);
+    expect(parseSightHistory(JSON.stringify({version:1,attempts:[row,{...row,id:'assisted',classification:'assisted',targetPlayback:true}]})).map(attempt=>attempt.targetPlayback)).toEqual([undefined,true]);
+    expect(parseSightHistory(JSON.stringify({version:1,attempts:[{...row,targetPlayback:'yes'}]}))).toEqual([]);
+    expect(parseSightHistory(JSON.stringify({version:1,attempts:[{...row,targetPlayback:true}]}))).toEqual([]);
     expect(parseSightHistory(JSON.stringify({version:1,attempts:[{...row,score:NaN},{...row,seed:-1},{...row,settings:{...settings,meter:'7/8'}}]}))).toEqual([]);
     expect(parseSightHistory('bad')).toEqual([]);
     expect(learnerStorageKey('drum-hero:sight-reading:v1','a')).not.toBe(learnerStorageKey('drum-hero:sight-reading:v1','b'));
@@ -71,6 +74,30 @@ describe('sight reading', () => {
     expect(fill.hits.some(hit => hit.step >= fill.stepsPerBar && hit.instrument === 'tom')).toBe(true);
     const seen = new Set<string>();
     for (const hit of fill.hits) { const key = `${hit.step}/${hit.instrument}`; expect(seen.has(key)).toBe(false); seen.add(key); }
+    for (const style of ['half-time','funk','latin'] as const) {
+      const groove = generateSightExercise({ ...settings, level:'Advanced', bars:2, style }, 24);
+      expect(groove.hits.length).toBeGreaterThan(0);
+      const seen = new Set<string>();
+      for (const hit of groove.hits) { expect(hit.step).toBeLessThan(groove.stepsPerBar * 2); const key = `${hit.step}/${hit.instrument}`; expect(seen.has(key)).toBe(false); seen.add(key); }
+      for (const step of new Set(groove.hits.map(hit => hit.step))) expect(groove.hits.filter(hit => hit.step === step).length).toBeLessThanOrEqual(3);
+    }
+  });
+  it('builds repeated-bar drills and records rhythm fluency without changing first-read classification', () => {
+    const exercise = generateSightExercise({ ...settings, level:'Advanced', bars:2, focusRhythm:'sixteenths' }, 91);
+    const wrong = scoreSightAttempt(exercise, []);
+    const bar = weakestSightBar(exercise, wrong.rated);
+    const drill = createSightBarDrill(exercise, bar);
+    const barHits = exercise.hits.filter(hit => Math.floor(hit.step / exercise.stepsPerBar) === bar);
+    expect(drill.settings.bars).toBe(2);
+    expect(drill.hits).toHaveLength(barHits.length * 2);
+    expect(drill.hits.filter(hit => hit.step < drill.stepsPerBar).map(hit => hit.instrument)).toEqual(barHits.map(hit => hit.instrument));
+    const perfect = scoreSightAttempt(exercise, exercise.hits.map(hit => ({ instrument: hit.instrument, atMs: hit.step * 60000 / exercise.settings.bpm * 4 / exercise.subdivision })));
+    expect(Object.keys(perfect.fluency).length).toBeGreaterThan(0);
+    expect(Object.values(perfect.fluency).every(value => value === 100)).toBe(true);
+    expect(nextSightLearningPathStep([])).toBe(0);
+    const first = SIGHT_LEARNING_PATH[0];
+    const row: SightAttempt = { id:'path',playedAt:new Date().toISOString(),version:1,seed:3,settings:normalizeSightSettings({...settings,...first.settings}),source:'keyboard',inputProfile:'keyboard',classification:'reading',score:85,accuracy:85,meanOffsetMs:0,misses:1,extras:0 };
+    expect(nextSightLearningPathStep([row])).toBe(1);
   });
   it('keeps older histories readable and tracks goals and adaptive suggestions', () => {
     const base: SightAttempt = { id:'legacy',playedAt:new Date().toISOString(),version:1,seed:4,settings,source:'keyboard',inputProfile:'keyboard',classification:'reading',score:90,accuracy:90,meanOffsetMs:3,misses:1,extras:0 };
@@ -89,5 +116,8 @@ describe('sight reading', () => {
     expect(parseSightGoal(JSON.stringify(goal))).toEqual(goal);
     expect(parseSightGoal(JSON.stringify({...goal,accuracy:101}))).toBeNull();
     expect(matchingSightGoalAttempts([...recent,{...base,id:'practice',classification:'practice'}],goal)).toHaveLength(3);
+    const enriched = { ...base, previewSeconds:0 as const, countInBars:2 as const, fluency:{quarters:96,rests:100}, assignmentTitle:'Odd meter reading', assignmentDueDate:'2026-10-31', assignmentMinimumAccuracy:85 };
+    expect(parseSightHistory(JSON.stringify({version:1,attempts:[enriched]}))[0]).toMatchObject({previewSeconds:0,countInBars:2,fluency:{quarters:96,rests:100},assignmentTitle:'Odd meter reading',assignmentDueDate:'2026-10-31',assignmentMinimumAccuracy:85});
+    expect(parseSightHistory(JSON.stringify({version:1,attempts:[{...enriched,assignmentMinimumAccuracy:101}]}))).toEqual([]);
   });
 });

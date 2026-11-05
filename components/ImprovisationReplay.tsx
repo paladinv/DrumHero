@@ -2,16 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createDrumAudio, type DrumAudio } from '@/lib/audio';
-import { demonstrationPhrase, phraseDuration, playerPhraseStart, promptForPhrase, virtualDrummerPhrase, type ImprovisationTake } from '@/lib/improvisation';
+import { demonstrationPhrase, improvisationScoreGrid, improvisationSoundInstrument, meterParts, notationFlagCount, phraseDuration, playerPhraseStart, promptForPhrase, stepDuration, virtualDrummerResponse, type ImprovisationTake } from '@/lib/improvisation';
+import { ImprovisationTimingReview } from './ImprovisationTimingReview';
+import { DrumStaffNotation, type DrumNotationEvent, type DrumNotationFrame } from './TrainerNotationView';
+import { createImprovisationMidi } from '@/lib/improvisation-midi';
 import { useLocalization } from './LocalizationProvider';
 import styles from './ImprovisationStudio.module.css';
 
 type Material = ImprovisationTake & { demo?: boolean };
+function monotonicNow() { return performance.now(); }
 export function ImprovisationReplay({ take, disabled, onSave, saved }: { take: Material; disabled: boolean; saved: boolean; onSave: (name: string) => void }) {
   const { t } = useLocalization();
   const [phrase, setPhrase] = useState(0), [speed, setSpeed] = useState(1), [name, setName] = useState(take.name);
   const [playing, setPlaying] = useState(false), [status, setStatus] = useState('');
   const [part, setPart] = useState('');
+  const [playback, setPlayback] = useState<{ segment: number; atMs: number } | null>(null);
   const audio = useRef<DrumAudio | null>(null), token = useRef(0), timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const stop = useCallback(() => {
     token.current++; if (timer.current) clearInterval(timer.current); timer.current = null;
@@ -19,18 +24,30 @@ export function ImprovisationReplay({ take, disabled, onSave, saved }: { take: M
   }, []);
   useEffect(() => {
     const generation = token;
-    const hidden = () => { if (document.hidden) { stop(); setPlaying(false); setStatus(t('Replay paused because the page was hidden.')); } };
+    const hidden = () => { if (document.hidden) { stop(); setPlayback(null); setPlaying(false); setPart(''); setStatus(t('Replay paused because the page was hidden.')); } };
     document.addEventListener('visibilitychange', hidden);
     return () => { generation.current++; document.removeEventListener('visibilitychange', hidden); stop(); };
   }, [stop, t]);
-  useEffect(() => { if (disabled) { const task = setTimeout(() => { stop(); setPlaying(false); }, 0); return () => clearTimeout(task); } }, [disabled, stop]);
+  useEffect(() => { if (disabled) { const task = setTimeout(() => { stop(); setPlayback(null); setPlaying(false); }, 0); return () => clearTimeout(task); } }, [disabled, stop]);
   const duration = phraseDuration(take.settings), start = playerPhraseStart(take.settings, phrase);
   const response = take.hits.filter(hit => hit.atMs >= start && hit.atMs < start + duration).map(hit => ({ ...hit, atMs: hit.atMs - start }));
   const referenceLabel = take.settings.mode === 'guided' ? 'Example phrase' : 'Virtual drummer';
-  const referenceHits = take.settings.mode === 'guided' ? demonstrationPhrase({ ...take.settings, prompt: promptForPhrase(take.settings, phrase) }) : virtualDrummerPhrase(phrase, take.settings);
-  const partner = referenceHits.map(hit => ({ instrument: hit.instrument, atMs: hit.step * 60000 / take.settings.bpm / 4, velocity: hit.velocityTarget }));
-  const handlePlay = useCallback(async (which: 'partner' | 'response' | 'compare') => {
-    stop(); const request = token.current; setPlaying(true); setStatus(t('Loading replay…'));
+  const responseLabel = take.settings.mode === 'duet' ? (phrase % 2 === 0 ? take.settings.playerOneName : take.settings.playerTwoName) : 'Your response';
+  const previousStart = phrase > 0 ? playerPhraseStart(take.settings, phrase - 1) : -1;
+  const previousHits = phrase > 0 ? take.hits.filter(hit => hit.atMs >= previousStart && hit.atMs < previousStart + duration).map(hit => ({ ...hit, atMs: hit.atMs - previousStart })) : [];
+  const referenceHits = take.settings.mode === 'guided' ? demonstrationPhrase({ ...take.settings, prompt: promptForPhrase(take.settings, phrase) }) : take.settings.mode === 'trading' ? virtualDrummerResponse(phrase, take.drummerSettings?.[phrase] ?? take.settings, previousHits) : [];
+  const partner = referenceHits.map(hit => ({ instrument: hit.instrument, atMs: hit.step * stepDuration(take.settings), velocity: hit.velocityTarget }));
+  const { stepsPerBar, stepsPerPulse } = meterParts(take.settings);
+  const totalSteps = take.settings.bars * stepsPerBar;
+  const grid = improvisationScoreGrid(take.settings);
+  const frameFor = (label: string, notes: typeof referenceHits | typeof response, played: boolean, activeSegment: number) => {
+    const events: DrumNotationEvent[] = notes.map(note => { const step = 'step' in note ? note.step : note.atMs / stepDuration(take.settings); return { step, instrument: note.instrument, source: played ? 'played' : 'reference', flagCount: notationFlagCount(take.settings, step), velocity: 'velocity' in note ? note.velocity : undefined, velocityTarget: 'velocityTarget' in note ? note.velocityTarget : undefined, articulation: 'articulation' in note ? note.articulation : undefined }; });
+    const current = playback && playback.segment === activeSegment ? playback.atMs / stepDuration(take.settings) : undefined;
+    const frame: DrumNotationFrame = { name: label, meter: take.settings.meter, bars: take.settings.bars, stepsPerBar, totalSteps, stepsPerPulse, flagCount: take.settings.subdivision === 'sixteenth' ? 2 : 1, grid, events, ...(current === undefined ? {} : { playheadStep: current, playheadTransitionMs: 0 }), autoFollow: current !== undefined, emptyCountLabel: t('No note at this count') };
+    return frame;
+  };
+  const handlePlay = async (which: 'partner' | 'response' | 'compare') => {
+    stop(); const request = token.current; setPlayback(null); setPlaying(true); setStatus(t('Loading replay…'));
     try {
     const player = createDrumAudio(undefined, undefined, () => { stop(); setPlaying(false); setStatus(t('Replay audio was interrupted. Start it again when ready.')); }); audio.current = player;
     if (!player || !await player.ready) { if (request === token.current) { stop(); setPlaying(false); setStatus(t('Replay sounds could not load. Try again.')); } return; }
@@ -38,23 +55,39 @@ export function ImprovisationReplay({ take, disabled, onSave, saved }: { take: M
     const segments = which === 'compare' ? [partner, response] : [which === 'partner' ? partner : response];
     const notes = segments.flatMap((notes, i) => notes.map(note => ({ ...note, atMs: (i * (duration + 600) + note.atMs) / speed })));
     const scheduled = new Set<number>();
-    const epoch = performance.now() + 80;
+    const epoch = monotonicNow() + 80;
     const total = (segments.length * duration + (segments.length - 1) * 600) / speed;
     setStatus(t('Replay uses synthesized drum sounds; no microphone audio was recorded.'));
+    let lastVisualUpdate = 0;
     const tick = () => {
       if (request !== token.current) return;
       const now = performance.now();
-      setPart(t(which === 'compare' && now - epoch >= (duration + 600) / speed ? 'Your response' : which === 'response' ? take.demo ? 'Demonstration' : 'Your response' : referenceLabel));
+      const segment = which === 'compare' && now - epoch >= (duration + 600) / speed ? 1 : 0;
+      const atMs = Math.max(0, (now - epoch) * speed - (segment ? duration + 600 : 0));
+      setPart(t(segment === 1 || which === 'response' ? take.demo ? 'Demonstration' : responseLabel : referenceLabel));
+      if (now - lastVisualUpdate >= 90) { lastVisualUpdate = now; setPlayback({ segment: which === 'partner' ? -1 : which === 'response' ? 1 : segment, atMs: which === 'partner' ? (now - epoch) * speed : atMs }); }
       notes.forEach((note, index) => {
         const at = epoch + note.atMs;
         if (scheduled.has(index) || at < now - 30 || at > now + 120) return;
-        scheduled.add(index); player.scheduleHit(note.instrument, at, false, note.velocity);
+        scheduled.add(index); player.scheduleHit(improvisationSoundInstrument(note), at, false, note.velocity);
       });
-      if (now >= epoch + total + 250) { stop(); setPlaying(false); setPart(''); setStatus(t('Replay complete.')); }
+      if (now >= epoch + total + 250) { stop(); setPlayback(null); setPlaying(false); setPart(''); setStatus(t('Replay complete.')); }
     };
     tick(); timer.current = setInterval(tick, 20);
     } catch { if (request === token.current) { stop(); setPlaying(false); setStatus(t('Replay sounds could not load. Try again.')); } }
-  }, [duration, partner, referenceLabel, response, speed, stop, t, take.demo]);
+  };
+  const exportMidi = () => {
+    const bytes = createImprovisationMidi(take);
+    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer], { type: 'audio/midi' }));
+    const link = document.createElement('a'); link.href = url; link.download = `${take.name.trim().replace(/[^a-z0-9-_]+/gi, '-').replace(/^-|-$/g, '') || 'improvisation'}.mid`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus(t('MIDI file exported. It contains drum notes and no microphone audio.'));
+  };
+  const partnerFrame = frameFor(take.settings.mode === 'guided' ? t('Example phrase') : t('Virtual drummer'), referenceHits, false, -1);
+  const responseFrame = frameFor(take.demo ? t('Demonstration') : responseLabel, response, true, 1);
+  const partnerPlayback = playback && (playback.segment === -1 || playback.segment === 0) ? playback.atMs / stepDuration(take.settings) : undefined;
+  if (partnerPlayback !== undefined) { partnerFrame.playheadStep = partnerPlayback; partnerFrame.playheadTransitionMs = 0; partnerFrame.autoFollow = true; }
+
   return <section id="improvisation-replay" className="card" aria-label={t('Phrase replay')}>
     <h2 tabIndex={-1}>{t(take.demo ? 'Listen to the idea' : 'Listen and compare')}</h2>
     <p>{t('Replay is available for this visit. Saving a take is optional and stores drum events locally. Acoustic practice has no captured response.')}</p>
@@ -62,15 +95,15 @@ export function ImprovisationReplay({ take, disabled, onSave, saved }: { take: M
       <label>{t('Replay phrase')}<select value={phrase} onChange={event => setPhrase(Number(event.target.value))}>{Array.from({ length: take.phrases }, (_, i) => <option value={i} key={i}>{i + 1}</option>)}</select></label>
       <label>{t('Replay speed')}<select value={speed} onChange={event => setSpeed(Number(event.target.value))}>{[0.5, 0.75, 1].map(value => <option value={value} key={value}>{value * 100}%</option>)}</select></label>
     </fieldset>
-    <div className={styles.replayLanes}>
-      {!take.demo && <div><strong>{t(referenceLabel)}</strong><div className={styles.replayLane} role="img" aria-label={t('Reference phrase: {count} hits', { count: partner.length })}>{partner.slice(0, 256).map((hit, i) => <span key={i} style={{ left: `${Math.min(99, hit.atMs / duration * 100)}%` }} aria-hidden="true" />)}</div></div>}
-      <div><strong>{t(take.demo ? 'Demonstration' : 'Your response')}</strong><div className={styles.replayLane} role="img" aria-label={t('Response phrase: {count} hits', { count: response.length })}>{response.slice(0, 256).map((hit, i) => <span key={i} style={{ left: `${Math.min(99, hit.atMs / duration * 100)}%` }} aria-hidden="true" />)}</div></div>
-    </div>
+    {!take.demo && take.settings.mode !== 'duet' && <DrumStaffNotation frame={partnerFrame} showRhythmStems />}
+    <DrumStaffNotation frame={responseFrame} showRhythmStems />
+    {!take.demo && <ImprovisationTimingReview settings={take.settings} phrase={phrase} hits={response} />}
     <div className={styles.transport}>
-      {!take.demo && <button className="button-secondary" disabled={playing || disabled} onClick={() => void handlePlay('partner')}>{t(take.settings.mode === 'guided' ? 'Play example' : 'Play partner')}</button>}
-      <button className="button-secondary" disabled={playing || disabled || !response.length} onClick={() => void handlePlay('response')}>{t(take.demo ? 'Play demonstration' : 'Play response')}</button>
-      {!take.demo && <button className="button-secondary" disabled={playing || disabled || !response.length} onClick={() => void handlePlay('compare')}>{t('Compare phrases')}</button>}
-      {playing && <button className="button-secondary" onClick={() => { stop(); setPlaying(false); setPart(''); setStatus(t('Replay stopped.')); }}>{t('Stop replay')}</button>}
+      {!take.demo && take.settings.mode !== 'duet' && <button className="button-secondary" disabled={playing || disabled} onClick={() => void handlePlay('partner')}>{t(take.settings.mode === 'guided' ? 'Play example' : 'Play partner')}</button>}
+      <button className="button-secondary" disabled={playing || disabled || !response.length} onClick={() => void handlePlay('response')}>{t(take.demo ? 'Play demonstration' : take.settings.mode === 'duet' ? 'Play phrase' : 'Play response')}</button>
+      {!take.demo && take.settings.mode !== 'duet' && <button className="button-secondary" disabled={playing || disabled || !response.length} onClick={() => void handlePlay('compare')}>{t('Compare phrases')}</button>}
+      {!take.demo && <button className="button-secondary" disabled={disabled || !take.hits.length} onClick={exportMidi}>{t('Export take as MIDI')}</button>}
+      {playing && <button className="button-secondary" onClick={() => { stop(); setPlayback(null); setPlaying(false); setPart(''); setStatus(t('Replay stopped.')); }}>{t('Stop replay')}</button>}
     </div><p role="status">{playing ? `${part} · ${status}` : status}</p>
     {!take.demo && <div className={styles.settings}><label>{t('Take name')}<input maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label><button className="button-secondary" disabled={disabled || saved || !name.trim() || !take.hits.length || take.hits.length > 10000} onClick={() => onSave(name.trim())}>{t(saved ? 'Take saved' : 'Save this take')}</button></div>}
   </section>;

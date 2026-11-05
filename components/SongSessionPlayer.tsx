@@ -30,7 +30,7 @@ const calibrationRepeatability = (samples: number[][]) => {
 };
 const keyVoices: Record<string, SongInstrument> = { Space: "kick", KeyF: "snare", KeyJ: "hihat", KeyK: "tom", KeyL: "crash", KeyH: "openhat", KeyR: "ride", KeyG: "rimshot", KeyY: "cowbell", KeyU: "shaker", KeyI: "tambourine", Digit1: "custom1", Digit2: "custom2", Digit3: "custom3", Digit4: "custom4", Digit5: "custom5", Digit6: "custom6", Digit7: "custom7", Digit8: "custom8" };
 const voiceKeys: Record<SongInstrument, string> = { kick: "Space", snare: "F", hihat: "J", tom: "K", crash: "L", openhat: "H", ride: "R", rimshot: "G", cowbell: "Y", shaker: "U", tambourine: "I", custom1: "1", custom2: "2", custom3: "3", custom4: "4", custom5: "5", custom6: "6", custom7: "7", custom8: "8" };
-export function SongSessionPlayer({ song, sectionId, partId, repetitions = 1, targetBpm, startBar, endBar, practiceLayer = "all", leadHand = "R", footVoices = ["kick"], countInBeats: initialCountInBeats = 4, preview = false, stage = false, autoStart = false, soloPartId, guideOtherParts = false, cues = [], onResults, onComplete, initialSettings, onSettingsChange, recoveryKey, recoveryPreset }: SongPracticeOptions & { song: DrumSong; initialSettings?:PlayerSettings;onSettingsChange?:(settings:PlayerSettings)=>void;recoveryKey?:string;recoveryPreset?:PracticePreset;countInBeats?: number; soloPartId?: string; guideOtherParts?: boolean; preview?: boolean; stage?: boolean; autoStart?: boolean; cues?: SongNote[]; onResults?: (results: SongRunResult[]) => void; onComplete?: () => void }) {
+export function SongSessionPlayer({ song, sectionId, partId, repetitions = 1, targetBpm, startBar, endBar, practiceLayer = "all", leadHand = "R", footVoices = ["kick"], countInBeats: initialCountInBeats = 4, preview = false, stage = false, autoStart = false, soloPartId, guideOtherParts = false, cues = [], onResults, onComplete, onPosition, initialSettings, onSettingsChange, recoveryKey, recoveryPreset }: SongPracticeOptions & { song: DrumSong; initialSettings?:PlayerSettings;onSettingsChange?:(settings:PlayerSettings)=>void;recoveryKey?:string;recoveryPreset?:PracticePreset;countInBeats?: number; soloPartId?: string; guideOtherParts?: boolean; preview?: boolean; stage?: boolean; autoStart?: boolean; cues?: SongNote[]; onResults?: (results: SongRunResult[]) => void; onComplete?: () => void; onPosition?: (barIndex: number, fraction: number) => void }) {
   const playerId = useId();
   const timeline = useMemo(() => buildSongTimeline(song, { sectionId, partId: soloPartId ?? partId, repetitions, targetBpm, startBar, endBar, allowUnclippedPart: !stage }), [song, sectionId, partId, soloPartId, repetitions, targetBpm, startBar, endBar, stage]);
   const roleGuides = useMemo(() => {
@@ -94,8 +94,8 @@ export function SongSessionPlayer({ song, sectionId, partId, repetitions = 1, ta
   const signature=useMemo(()=>`${timelineSignature(timeline)}:${practiceLayer}:${leadHand}:${footVoices.join(",")}`,[timeline,practiceLayer,leadHand,footVoices]);
   useEffect(()=>{if(preview||stage)return;const timer=setTimeout(()=>setRecovery(readRecovery(recoveryId)),0);return()=>clearTimeout(timer);},[recoveryId,preview,stage]);
   useEffect(()=>{onSettingsChange?.({mode,guide,click,notation,countInBeats,countInSubdivision,countInVoice});},[mode,guide,click,notation,countInBeats,countInSubdivision,countInVoice,onSettingsChange]);
-  const callbacks = useRef({ onResults, onComplete });
-  useEffect(() => { callbacks.current = { onResults, onComplete }; }, [onResults, onComplete]);
+  const callbacks = useRef({ onResults, onComplete, onPosition });
+  useEffect(() => { callbacks.current = { onResults, onComplete, onPosition }; }, [onResults, onComplete, onPosition]);
   const panel = useRef<HTMLDivElement>(null);
   useEffect(()=>{if(preview||stage)return;const save=()=>{const active=run.current;if(!active||!['count-in','playing','paused'].includes(statusRef.current))return;const time=Math.max(0,active.elapsed,active.resumeAt??0);const index=Math.max(0,timeline.bars.findIndex(bar=>time>=bar.startsAtMs&&time<bar.startsAtMs+bar.durationMs));try{localStorage.setItem(recoveryStorageKey(recoveryId),JSON.stringify({version:1,signature,barIndex:index,savedAt:new Date().toISOString(),settings:{mode,guide,click,notation},preset:recoveryPreset}));}catch{/* Existing progress remains usable. */}};const timer=setInterval(save,1000);window.addEventListener('pagehide',save);return()=>{save();clearInterval(timer);window.removeEventListener('pagehide',save);};},[preview,stage,recoveryId,signature,timeline,recoveryPreset,mode,guide,click,notation]);
   const clearRecovery=useCallback(()=>{if(!preview&&!stage)try{localStorage.removeItem(recoveryStorageKey(recoveryId));}catch{}setRecovery(null);},[preview,stage,recoveryId]);
@@ -197,7 +197,7 @@ export function SongSessionPlayer({ song, sectionId, partId, repetitions = 1, ta
       if ((guide || mode === "preview") && time - target.atMs < 120) audio.current?.hit(target.instrument, target.accent, target.velocity);
     }
     currentRun.targets.forEach((target) => { if (!target.matched && time - target.atMs > 100) target.rating = "miss"; });
-    if (now - currentRun.lastView > 80) { currentRun.lastView = now; setElapsed(Math.min(time, timeline.durationMs)); if(bar)setBeatFraction(Math.max(0,Math.min(1,(time-bar.startsAtMs)/bar.durationMs))); setBarIndex(time >= timeline.durationMs ? Math.max(0, timeline.bars.length - 1) : index); }
+    if (now - currentRun.lastView > 80) { currentRun.lastView = now; const displayedBar = time >= timeline.durationMs ? Math.max(0, timeline.bars.length - 1) : index; const fraction = bar ? Math.max(0, Math.min(1, (time - bar.startsAtMs) / bar.durationMs)) : 0; setElapsed(Math.min(time, timeline.durationMs)); if(bar)setBeatFraction(fraction); setBarIndex(displayedBar); callbacks.current.onPosition?.(displayedBar, fraction); }
     if (time >= timeline.durationMs + 125) finish();
   }, [click, countInBeats, countInSubdivision, countInVoice, finish, guide, guideOtherParts, haptic, mode, setStatus, song.bpm, timeline]);
   useEffect(() => { if (!["playing", "count-in"].includes(status)) return; const timer = window.setInterval(tick, 20); return () => window.clearInterval(timer); }, [status, tick]);
@@ -303,7 +303,7 @@ export function SongSessionPlayer({ song, sectionId, partId, repetitions = 1, ta
     window.dispatchEvent(new CustomEvent("drum-hero:song-player-start", { detail: playerId }));
     window.dispatchEvent(new CustomEvent("drum-hero:song-reference-control", { detail: { action: "prime", songId: song.id, sectionId: referenceSectionId, offsetMs: referenceOffsetMs } }));
     const request = ++startRequest.current;
-    setStatus("loading"); setRecap(null); setElapsed(0); setBarIndex(0);
+    setStatus("loading"); setRecap(null); setElapsed(0); setBarIndex(0); callbacks.current.onPosition?.(0, 0);
     try { if (!audio.current) audio.current = createDrumAudio(); if (audio.current) await audio.current.ready; } catch { setMessage("Audio unavailable. Visual practice remains available."); }
     if (request !== startRequest.current) return;
     if (!audio.current) setMessage("Audio unavailable. Visual practice remains available.");
@@ -321,7 +321,7 @@ export function SongSessionPlayer({ song, sectionId, partId, repetitions = 1, ta
     const timer = window.setTimeout(() => { void startRef.current(); }, 0);
     return () => window.clearTimeout(timer);
   }, [autoStart, stage, song.id, timeline.bars.length]);
-  const reset = () => { window.dispatchEvent(new CustomEvent("drum-hero:song-reference-control", { detail: { action: "stop", songId: song.id, sectionId: run.current?.referenceSectionId } })); clearRecovery(); startRequest.current++; audio.current?.close(); audio.current = null; run.current = null; setStatus("idle"); setElapsed(0); setBarIndex(0); setFeedback(""); setRecap(null); };
+  const reset = () => { window.dispatchEvent(new CustomEvent("drum-hero:song-reference-control", { detail: { action: "stop", songId: song.id, sectionId: run.current?.referenceSectionId } })); clearRecovery(); startRequest.current++; audio.current?.close(); audio.current = null; run.current = null; setStatus("idle"); setElapsed(0); setBarIndex(0); callbacks.current.onPosition?.(0, 0); setFeedback(""); setRecap(null); };
   return <div ref={panel} className={`song-session-player${stage ? " song-stage-view" : ""}`}>
     <div className="song-session-heading"><h3>{stage ? "Performance" : mode === "preview" ? "Listen" : "Song practice"} · {song.title}</h3><span>{status}</span></div>
     {!preview&&!stage&&recovery&&<div className="song-recovery"><p>Interrupted round at bar {recovery.barIndex+1}. Resume restarts that bar and scores only the remaining portion.</p><button type="button" disabled={active||recovery.signature!==signature||recovery.barIndex>=timeline.bars.length} onClick={()=>void start(recovery.barIndex)}>Resume interrupted round</button><button type="button" onClick={clearRecovery}>Discard interrupted round</button>{recovery.signature!==signature&&<p>Restore the saved settings first. Edited arrangements require a new round.</p>}</div>}

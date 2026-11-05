@@ -6,23 +6,41 @@ import { compactNotation, type CompactMeasure } from '@/lib/song-compact-notatio
 import type { DrumSong } from '@/lib/song-library';
 import { defaultTrainerDeviceProfile, getTrainerDeviceProfile, parseTrainerState, trainerStorageKey } from '@/lib/trainer';
 import { learnerStorageKey } from '@/lib/learner-profiles';
-import { DEFAULT_SIGHT_SETTINGS, SIGHT_GOAL_KEY, SIGHT_HISTORY_KEY, SIGHT_VOICES, generateSightExercise, matchingSightGoalAttempts, normalizeSightSettings, parseSightGoal, parseSightHistory, recommendSightSettings, scoreSightAttempt, sightClassification, sightDuration, sightFingerprint, sightMeters, sightNotationBars, type SightAttempt, type SightExercise, type SightGoal, type SightHit, type SightInput, type SightPhase, type SightRhythmFocus, type SightSettings, type SightStyle } from '@/lib/sight-reading';
+import { adaptiveSightPreviewSeconds, adaptiveSightSettings, buildSightGoalPath, createSightBarDrill, createSightErrorDrill, DEFAULT_SIGHT_SETTINGS, leastPracticedSightSettings, SIGHT_GOAL_KEY, SIGHT_HISTORY_KEY, SIGHT_LEARNING_PATH, SIGHT_SEEN_KEY, SIGHT_VOICES, describeSightExercise, generateFreshSightExercise, generateSightExercise, matchingSightGoalAttempts, nextSightLearningPathStep, normalizeSightSettings, parseSightFingerprints, parseSightGoal, parseSightHistory, recentSightFingerprints, recommendSightSettings, scoreSightAttempt, sightClassification, sightDuration, sightFingerprint, sightMeterGroupStarts, sightMeters, sightNotationBars, sightVarietySummary, weakestSightBar, type SightAttempt, type SightCountSubdivision, type SightExercise, type SightGoal, type SightHit, type SightInput, type SightPhase, type SightRhythmFocus, type SightSettings, type SightStyle } from '@/lib/sight-reading';
 import { useProgress } from './ProgressProvider';
 import styles from './SightReading.module.css';
 const keys = ['Space', 'KeyF', 'KeyJ', 'KeyK', 'KeyL'];
 const labels = ['Kick', 'Snare', 'Hi-hat', 'Tom', 'Crash'];
 const notationSong: DrumSong = { id: 'sight', title: 'Sight-reading exercise', artist: 'Drum Hero', difficulty: 'Beginner', bpm: 80, meter: '4/4', tags: [], notes: '', sections: [], createdAt: '', updatedAt: '' };
+const countSyllables: Record<SightCountSubdivision, string[]> = { quarter: [''], eighth: ['', '&'], sixteenth: ['', 'e', '&', 'a'] };
+const countDivisions: Record<SightCountSubdivision, number> = { quarter: 1, eighth: 2, sixteenth: 4 };
 function savedInputState(profileId: string) {
   try { return parseTrainerState(localStorage.getItem(trainerStorageKey(profileId))); }
   catch { return parseTrainerState(null); }
 }
-function encodeAssignmentCode(exercise: SightExercise) {
-  const payload = btoa(JSON.stringify(exercise.settings)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
-  return `${exercise.seed}.${payload}`;
+type ReadingAssignment = { seed: number; settings: SightSettings; title?: string; dueDate?: string; minimumAccuracy?: number };
+function validAssignmentDate(value: string) { return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value); }
+function encodeAssignmentCode(exercise: SightExercise, metadata: Omit<ReadingAssignment, 'seed' | 'settings'> = {}) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ version: 1, seed: exercise.seed, settings: exercise.settings, ...metadata }));
+  const payload = btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  return `DH-SA1:${payload}`;
 }
-function decodeAssignmentCode(code: string): { seed: number; settings: SightSettings } | null {
+function decodeAssignmentCode(code: string): ReadingAssignment | null {
   try {
-    const [seedText, payload, ...extra] = code.trim().replace(/^DH-SR1:/, '').split('.');
+    const value = code.trim();
+    if (value.startsWith('DH-SA1:')) {
+      const payload = value.slice(7).replaceAll('-', '+').replaceAll('_', '/');
+      const padded = payload.padEnd(payload.length + ((4 - payload.length % 4) % 4), '=');
+      const parsed = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), c => c.charCodeAt(0)))) as Partial<ReadingAssignment> & { version?: number };
+      const seed = parsed.seed;
+      if (parsed.version !== 1 || !Number.isInteger(seed) || (seed as number) < 0 || (seed as number) > 0xffffffff || !parsed.settings) return null;
+      const minimumAccuracy = parsed.minimumAccuracy;
+      if (minimumAccuracy !== undefined && (!Number.isInteger(minimumAccuracy) || minimumAccuracy < 50 || minimumAccuracy > 100)) return null;
+      const dueDate = parsed.dueDate;
+      if (dueDate !== undefined && (typeof dueDate !== 'string' || !validAssignmentDate(dueDate))) return null;
+      return { seed: seed as number, settings: normalizeSightSettings(parsed.settings), title: typeof parsed.title === 'string' ? parsed.title.slice(0, 80) : undefined, dueDate, minimumAccuracy };
+    }
+    const [seedText, payload, ...extra] = value.replace(/^DH-SR1:/, '').split('.');
     const seed = Number(seedText);
     if (extra.length || !payload || !Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) return null;
     const raw = payload.replaceAll('-', '+').replaceAll('_', '/');
@@ -31,31 +49,53 @@ function decodeAssignmentCode(code: string): { seed: number; settings: SightSett
     return { seed, settings: normalizeSightSettings(settings) };
   } catch { return null; }
 }
+function encodeJSONCode(prefix: string, value: unknown) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  return `${prefix}${btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')}`;
+}
+function decodeJSONCode<T>(code: string, prefix: string): T | null {
+  try {
+    const payload = code.trim().slice(prefix.length).replaceAll('-', '+').replaceAll('_', '/');
+    const padded = payload.padEnd(payload.length + ((4 - payload.length % 4) % 4), '=');
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), c => c.charCodeAt(0)))) as T;
+  } catch { return null; }
+}
+function scheduleMidiTimingClicks(player: DrumAudio, bpm: number) {
+  const beatMs = 60000 / bpm, first = performance.now() + 2000;
+  const expected = Array.from({ length: 8 }, (_, index) => first + index * beatMs);
+  player.setClickSound('woodblock');
+  for (let click = 0; click < 12; click++) player.scheduleClick(first - 4 * beatMs + click * beatMs, click % 4 === 0);
+  return { expected, timeoutMs: expected[expected.length - 1] - performance.now() + 900 };
+}
 function Notation({ exercise, cursor }: { exercise: SightExercise; cursor?: { barIndex: number; fraction: number } }) {
   const host = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  const measures = useRef<CompactMeasure[]>([]);
+  const manualScrollAt = useRef(0);
+  const [layout, setLayout] = useState<{ measures: CompactMeasure[]; height: number }>({ measures: [], height: 1 });
   const [zoom, setZoom] = useState(100);
   const bars = useMemo(() => sightNotationBars(exercise), [exercise]);
+  const activeBar = cursor?.barIndex;
   useEffect(() => {
     if (!host.current) return;
-    const { canvas, measures: layout } = compactNotation({ ...notationSong, bpm: exercise.settings.bpm, meter: bars[0].meter }, bars, 'staff', 0, cursor);
-    canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', 'Percussion staff notation; counted notes available below');
-    host.current.replaceChildren(canvas); measures.current = layout;
-  }, [bars, exercise, cursor]);
+    const { canvas, measures } = compactNotation({ ...notationSong, bpm: exercise.settings.bpm, meter: bars[0].meter }, bars, 'staff', 0, undefined, { barsPerPage: 8, barsPerLine: 2, cymbalNoteheads: 'cross', showSticking: false, beamGrouping: 'auto' });
+    canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', `${exercise.settings.meter} drum notation for ${exercise.settings.bars} bars; detailed beat-by-beat description follows`);
+    host.current.replaceChildren(canvas); setLayout({ measures, height: canvas.height });
+  }, [bars, exercise]);
   useEffect(() => {
     const canvas = host.current?.querySelector('canvas');
     const frame = scroller.current;
-    if (!canvas || !frame) return;
-    const target = measures.current.find(m => m.barIndex === (cursor?.barIndex ?? 0));
+    if (!canvas || !frame || activeBar === undefined || Date.now() - manualScrollAt.current < 3000) return;
+    const target = layout.measures.find(m => m.barIndex === activeBar);
     if (!target) return;
     const scale = canvas.getBoundingClientRect().width / canvas.width;
-    frame.scrollLeft = Math.max(0, target.x * scale - 20);
+    if (target.x * scale < frame.scrollLeft || (target.x + target.width) * scale > frame.scrollLeft + frame.clientWidth) frame.scrollTo({ left: Math.max(0, target.x * scale - 20), behavior: 'auto' });
     const top = canvas.getBoundingClientRect().top + target.y * scale;
     const bottom = top + target.height * scale;
     if (top < 60 || bottom > innerHeight - 60) window.scrollTo({ top: window.scrollY + top - 80, behavior: 'instant' });
-  }, [cursor?.barIndex, exercise]);
-  return <section><label>Notation zoom <select value={zoom} onChange={e => setZoom(Number(e.target.value))}>{[75,100,125,150,200].map(n => <option key={n} value={n}>{n}%</option>)}</select></label><div ref={scroller} className={styles.scroll}><div ref={host} className={styles.notation} style={{ width: `${zoom}%` }} /></div></section>;
+  }, [activeBar, exercise, layout]);
+  const current = layout.measures.find(m => m.barIndex === cursor?.barIndex);
+  const playheadX = current ? current.x + 18 + Math.max(0, Math.min(1, cursor?.fraction ?? 0)) * (current.width - 38) : 0;
+  return <section><label>Notation zoom <select value={zoom} onChange={e => setZoom(Number(e.target.value))}>{[75,100,125,150,200].map(n => <option key={n} value={n}>{n}%</option>)}</select></label><div ref={scroller} className={styles.scroll} onWheel={() => { manualScrollAt.current = Date.now(); }} onTouchStart={() => { manualScrollAt.current = Date.now(); }}><div className={styles.notationFrame} style={{ width: `${zoom}%` }}><div ref={host} className={styles.notation} />{current && <svg className={styles.playhead} viewBox={`0 0 1100 ${layout.height}`} preserveAspectRatio="none" aria-hidden="true"><rect x={current.x} y={current.y + 32} width={current.width} height={current.height - 32} fill="#d03b2d" fillOpacity=".06" /><line x1={playheadX} x2={playheadX} y1={current.y + 32} y2={current.y + current.height} stroke="#d03b2d" strokeWidth="3" /></svg>}</div></div></section>;
 }
 export function SightReading() {
   const { profileId, hydrated } = useProgress();
@@ -66,26 +106,62 @@ function ReadingSession({ profileId }: { profileId: string }) {
   const [exercise, setExercise] = useState<SightExercise | null>(null);
   const [phase, setPhase] = useState<SightPhase>('setup');
   const [source, setSource] = useState<SightInput>('keyboard');
+  const [playTargetDrums, setPlayTargetDrums] = useState(true);
   const [midiId, setMidiId] = useState('');
   const [inputs, setInputs] = useState<Array<{ id: string; name: string }>>([]);
   const [message, setMessage] = useState('');
   const [clock, setClock] = useState(0);
   const [history, setHistory] = useState<SightAttempt[]>([]);
+  const [clockNow, setClockNow] = useState(0);
   const [goal, setGoal] = useState<SightGoal | null>(null);
   const [goalDraft, setGoalDraft] = useState<SightGoal>({ level: 'Beginner', meter: '4/4', bpm: 100, focusRhythm: 'eighths', accuracy: 85, targetReads: 5 });
   const [goalMessage, setGoalMessage] = useState('');
   const [historyFilters, setHistoryFilters] = useState({ level: 'Any', meter: 'Any', source: 'Any', tempo: 'Any' });
   const [showSetupNotation, setShowSetupNotation] = useState(false);
   const [tempoLadder, setTempoLadder] = useState(false);
+  const [previewSeconds, setPreviewSeconds] = useState<0 | 5 | 10>(10);
+  const [countInBars, setCountInBars] = useState<0 | 1 | 2>(1);
+  const [countInSubdivision, setCountInSubdivision] = useState<SightCountSubdivision>('quarter');
+  const [countInSyllable, setCountInSyllable] = useState('1');
+  const [spokenCountIn, setSpokenCountIn] = useState(false);
+  const [adaptiveMode, setAdaptiveMode] = useState(false);
+  const [cueLevel, setCueLevel] = useState<'full' | 'compact' | 'standard'>('full');
+  const [focusMode, setFocusMode] = useState(false);
+  const [reviewCursor, setReviewCursor] = useState<{ barIndex: number; fraction: number } | null>(null);
+  const [sessionLength, setSessionLength] = useState<3 | 5 | 10>(5);
+  const [sessionQueue, setSessionQueue] = useState<SightExercise[]>([]);
+  const [sessionIndex, setSessionIndex] = useState(0);
+  const [sessionMetrics, setSessionMetrics] = useState<Array<{ accuracy: number; timingSpreadMs: number | null }>>([]);
+  const [sessionTotal, setSessionTotal] = useState(0);
+  const [sessionLabel, setSessionLabel] = useState('Practice set');
+  const [reviewSpeed, setReviewSpeed] = useState(1);
+  const [midiCheckRemaining, setMidiCheckRemaining] = useState<Array<typeof SIGHT_VOICES[number]>>([]);
+  const [midiCheckVerified, setMidiCheckVerified] = useState<Array<typeof SIGHT_VOICES[number]>>([]);
+  const [midiTimingStatus, setMidiTimingStatus] = useState('');
+  const [midiTimingActive, setMidiTimingActive] = useState(false);
+  const [drillParent, setDrillParent] = useState<SightExercise | null>(null);
+  const [midiMappingVoice, setMidiMappingVoice] = useState<typeof SIGHT_VOICES[number] | null>(null);
   const [sharedAssignment, setSharedAssignment] = useState(false);
   const [assignmentCode, setAssignmentCode] = useState('');
+  const [assignmentTitle, setAssignmentTitle] = useState('Reading assignment');
+  const [assignmentDueDate, setAssignmentDueDate] = useState('');
+  const [assignmentMinimumAccuracy, setAssignmentMinimumAccuracy] = useState(80);
+  const [loadedAssignment, setLoadedAssignment] = useState<ReadingAssignment | null>(null);
   const [result, setResult] = useState<ReturnType<typeof scoreSightAttempt> | null>(null);
+  const [confidenceRecorded, setConfidenceRecorded] = useState(true);
+  const [confidenceRating, setConfidenceRating] = useState<number | null>(null);
+  const [confidenceEntryId, setConfidenceEntryId] = useState<string | null>(null);
   const [classification, setClassification] = useState<SightAttempt['classification']>('reading');
+  const [transferSettings, setTransferSettings] = useState<SightSettings | null>(null);
+  const [transferCheck, setTransferCheck] = useState(false);
   const [reference, setReference] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const audio = useRef<DrumAudio | null>(null);
   const midi = useRef<MIDIAccess | null>(null);
   const selectedMidi = useRef('');
+  const midiMappingVoiceRef = useRef<typeof SIGHT_VOICES[number] | null>(null);
+  const midiCheckRemainingRef = useRef<Array<typeof SIGHT_VOICES[number]>>([]);
+  const midiTimingRef = useRef<{ expected: number[]; hits: number[]; next: number } | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
   const token = useRef(0);
@@ -93,20 +169,35 @@ function ReadingSession({ profileId }: { profileId: string }) {
   const attempted = useRef(false);
   const [hasAttempted, setHasAttempted] = useState(false);
   const assisted = useRef(false);
-  const capture = useRef<{ start: number; end: number; correction: number; hits: SightHit[] } | null>(null);
+  const capture = useRef<{ start: number; end: number; correction: number; calibrated: boolean; calibrationSpreadMs: number | null; calibrationAt: string | null; hits: SightHit[] } | null>(null);
   const historyRef = useRef<SightAttempt[]>([]);
   const heading = useRef<HTMLHeadingElement>(null);
+  const confidenceHeading = useRef<HTMLHeadingElement>(null);
   const historyKey = learnerStorageKey(SIGHT_HISTORY_KEY, profileId);
+  const seenKey = learnerStorageKey(SIGHT_SEEN_KEY, profileId);
   const goalKey = learnerStorageKey(SIGHT_GOAL_KEY, profileId);
-  const active = preparing || ['preview','count-in','playing'].includes(phase);
+  const active = preparing || midiTimingActive || ['preview','count-in','playing'].includes(phase);
+  const phraseMemory = () => {
+    let stored: string[] = [];
+    try { stored = parseSightFingerprints(localStorage.getItem(seenKey)); } catch { stored = []; }
+    return [...recentSightFingerprints(history), ...stored].slice(-32);
+  };
+  const rememberPhrase = (phrase: SightExercise) => {
+    try {
+      const fingerprint = sightFingerprint(phrase), seen = parseSightFingerprints(localStorage.getItem(seenKey)).filter(value => value !== fingerprint);
+      localStorage.setItem(seenKey, JSON.stringify([...seen, fingerprint].slice(-32)));
+    } catch { /* history remains available if browser storage is full */ }
+  };
   const stop = useCallback(() => {
     token.current++; running.current = false; capture.current = null;
+    midiTimingRef.current = null; setMidiTimingActive(false);
     timers.current.forEach(clearTimeout); timers.current = [];
     if (ticker.current) clearInterval(ticker.current); ticker.current = null;
     audio.current?.close(); audio.current = null;
     window.speechSynthesis?.cancel();
   }, []);
-  const cancel = useCallback(() => { stop(); setPreparing(false); setPhase('setup'); setReference(false); setMessage('Attempt ended. Restarting this exercise counts as practice.'); }, [stop]);
+  const cancel = useCallback(() => { stop(); setPreparing(false); setPhase('setup'); setReference(false); setSessionQueue([]); setSessionTotal(0); setSessionIndex(0); setSessionMetrics([]); setMessage('Attempt ended. Restarting this exercise counts as practice.'); }, [stop]);
+  useEffect(() => { const timer = window.setTimeout(() => setClockNow(Date.now()), 0); return () => clearTimeout(timer); }, []);
   useEffect(() => {
     const timer = setTimeout(() => {
       try { historyRef.current = parseSightHistory(localStorage.getItem(historyKey)); setHistory(historyRef.current); } catch { setMessage('Local history unavailable. You can still practice.'); }
@@ -118,7 +209,7 @@ function ReadingSession({ profileId }: { profileId: string }) {
           if (encoded) {
             const assignment = decodeAssignmentCode(encoded);
             if (assignment) {
-              setAssignmentCode(encoded);
+              setAssignmentCode(encoded); setLoadedAssignment(assignment);
               setSettings(assignment.settings); setExercise(generateSightExercise(assignment.settings, assignment.seed)); setSharedAssignment(true); setMessage('A shared reading assignment is ready. Preview it before you start.');
             }
           }
@@ -143,13 +234,49 @@ function ReadingSession({ profileId }: { profileId: string }) {
     };
     window.addEventListener('keydown', down); return () => window.removeEventListener('keydown', down);
   }, [hit, source]);
-  useEffect(() => { if (phase === 'results') heading.current?.focus(); }, [phase]);
+  useEffect(() => { if (phase === 'results') (confidenceRecorded ? heading : confidenceHeading).current?.focus(); }, [phase, confidenceRecorded]);
   const bindMidi = (access: MIDIAccess, selected: string) => {
     access.inputs.forEach(input => { input.onmidimessage = input.id === selected ? event => {
       const data = event.data;
       if (!data || (data[0] & 0xf0) !== 0x90 || data[2] === 0) return;
+      const mappingVoice = midiMappingVoiceRef.current;
+      if (mappingVoice) {
+        const state = savedInputState(profileId), key = `midi:${input.id}`, current = getTrainerDeviceProfile(state, key);
+        const conflict = current.midiMap[data[1]];
+        if (conflict && conflict !== mappingVoice) { setMessage(`MIDI note ${data[1]} is already mapped to ${conflict}. Choose another pad or edit its mapping in Trainer.`); return; }
+        const midiMap = { ...current.midiMap };
+        const previous = Object.entries(midiMap).find(([, voice]) => voice === mappingVoice);
+        if (previous && Number(previous[0]) !== data[1]) midiMap[Number(previous[0])] = null;
+        midiMap[data[1]] = mappingVoice;
+        state.deviceProfiles[key] = { ...current, midiMap };
+        try { localStorage.setItem(trainerStorageKey(profileId), JSON.stringify(state)); setMessage(`Mapped MIDI note ${data[1]} to ${mappingVoice}.`); }
+        catch { setMessage('Could not save this pad mapping.'); }
+        midiMappingVoiceRef.current = null; setMidiMappingVoice(null); return;
+      }
       const state = savedInputState(profileId);
       const voice = getTrainerDeviceProfile(state, `midi:${input.id}`).midiMap[data[1]];
+      const timingCheck = midiTimingRef.current;
+      if (timingCheck) {
+        if (voice !== 'snare') { setMidiTimingStatus('Use the mapped snare pad for each timing click.'); return; }
+        while (timingCheck.next < timingCheck.expected.length && event.timeStamp > timingCheck.expected[timingCheck.next] + 240) timingCheck.next++;
+        const expectedAt = timingCheck.expected[timingCheck.next];
+        if (expectedAt !== undefined && Math.abs(event.timeStamp - expectedAt) <= 240) {
+          timingCheck.hits.push(event.timeStamp - expectedAt); timingCheck.next++;
+          setMidiTimingStatus(`Timing taps: ${timingCheck.hits.length} of ${timingCheck.expected.length}.`);
+          if (timingCheck.hits.length === timingCheck.expected.length) finishMidiTimingCheck(timingCheck);
+        }
+        return;
+      }
+      const expectedVoice = midiCheckRemainingRef.current[0];
+      if (expectedVoice) {
+        if (voice === expectedVoice) {
+          const next = midiCheckRemainingRef.current.slice(1);
+          midiCheckRemainingRef.current = next; setMidiCheckRemaining(next);
+          setMidiCheckVerified(previous => [...previous, expectedVoice]);
+          setMessage(next.length ? `${expectedVoice} pad confirmed. Now strike ${next[0]}.` : 'All five mapped voices responded. MIDI is ready for this learner profile.');
+        } else setMessage(voice ? `Detected ${voice}; strike the requested ${expectedVoice} pad.` : `This MIDI note is unmapped. Strike the requested ${expectedVoice} pad or learn its mapping first.`);
+        return;
+      }
       if (voice) hit(voice, 'midi', event.timeStamp);
     } : null; });
   };
@@ -169,16 +296,71 @@ function ReadingSession({ profileId }: { profileId: string }) {
       access.onstatechange = refresh; refresh(); setMessage('MIDI uses your saved Trainer mapping and timing correction.');
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not connect MIDI.'); }
   };
-  const update = (next: Partial<SightSettings>) => { setSettings(normalizeSightSettings({ ...settings, ...next })); setExercise(null); setShowSetupNotation(false); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setSharedAssignment(false); };
+  const update = (next: Partial<SightSettings>) => { setSettings(normalizeSightSettings({ ...settings, ...next })); setExercise(null); setDrillParent(null); setTransferSettings(null); setTransferCheck(false); setShowSetupNotation(false); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setSharedAssignment(false); setLoadedAssignment(null); setSessionQueue([]); setSessionTotal(0); setSessionIndex(0); setSessionMetrics([]); setReviewCursor(null); };
   const fresh = () => {
-    stop(); const next = generateSightExercise(settings, crypto.getRandomValues(new Uint32Array(1))[0], exercise ? sightFingerprint(exercise) : undefined);
-    setExercise(next); setShowSetupNotation(false); setSharedAssignment(false); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setReference(false); setMessage('New exercise ready. Start to reveal its notation.');
+    stop(); const next = generateFreshSightExercise(settings, crypto.getRandomValues(new Uint32Array(1))[0], phraseMemory());
+    setSessionQueue([]); setSessionTotal(0); setSessionIndex(0); setSessionMetrics([]);
+    setExercise(next); setReviewCursor(null); setDrillParent(null); setTransferSettings(null); setTransferCheck(false); setShowSetupNotation(false); setSharedAssignment(false); setLoadedAssignment(null); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setReference(false); setMessage('New exercise ready. Start to reveal its notation.');
     return next;
+  };
+  const beginPracticeSet = () => {
+    stop(); let recent = phraseMemory(); let seed = crypto.getRandomValues(new Uint32Array(1))[0];
+    const phrases = Array.from({ length: sessionLength }, () => {
+      const phrase = generateFreshSightExercise(settings, seed, recent); seed = (phrase.seed + 1) >>> 0; recent = [...recent, sightFingerprint(phrase)]; return phrase;
+    });
+    setExercise(phrases[0]); setReviewCursor(null); setSessionQueue(phrases.slice(1)); setSessionTotal(phrases.length); setSessionLabel('Practice set'); setSessionIndex(1); setSessionMetrics([]);
+    setDrillParent(null); setShowSetupNotation(false); setSharedAssignment(false); setLoadedAssignment(null); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setReference(false); setMessage(`Practice set ready: exercise 1 of ${phrases.length}.`);
+  };
+  const beginGoalPath = () => {
+    if (!goal) return;
+    stop(); let recent = phraseMemory(); let seed = crypto.getRandomValues(new Uint32Array(1))[0];
+    const path = buildSightGoalPath(goal, history);
+    const phrases = path.map(step => { const phrase = generateFreshSightExercise(step, seed, recent); seed = (phrase.seed + 1) >>> 0; recent = [...recent, sightFingerprint(phrase)]; return phrase; });
+    setExercise(phrases[0]); setSettings(phrases[0].settings); setReviewCursor(null); setSessionQueue(phrases.slice(1)); setSessionTotal(phrases.length); setSessionLabel('Goal study path'); setSessionIndex(1); setSessionMetrics([]);
+    setDrillParent(null); setTransferSettings(null); setTransferCheck(false); setShowSetupNotation(false); setSharedAssignment(false); setLoadedAssignment(null); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setReference(false); setMessage('Goal study path ready: warm-up, build, review, goal, and stretch phrases.');
+  };
+  const nextPracticeSetExercise = () => {
+    if (!sessionQueue.length) return;
+    stop(); const [next, ...remaining] = sessionQueue; setExercise(next); setSettings(next.settings); setSessionQueue(remaining); setSessionIndex(index => index + 1);
+    setDrillParent(null); setShowSetupNotation(false); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setReference(false); setMessage(`Exercise ${sessionIndex + 1} of ${sessionTotal}. Start when ready.`);
+  };
+  const startMidiReadinessCheck = () => {
+    const mapped = SIGHT_VOICES.filter(voice => Object.values(selectedMidiProfile.midiMap).includes(voice));
+    if (!midiId || !mapped.length) { setMessage('Connect a MIDI device and map at least one pad before checking it.'); return; }
+    midiCheckRemainingRef.current = mapped; setMidiCheckRemaining(mapped); setMidiCheckVerified([]);
+    setMessage(`Readiness check: strike the ${mapped[0]} pad.`);
+  };
+  const finishMidiTimingCheck = (check: { expected: number[]; hits: number[]; next: number }) => {
+    if (midiTimingRef.current !== check) return;
+    midiTimingRef.current = null;
+    stop();
+    if (check.hits.length < 4) { setMidiTimingStatus(`Only ${check.hits.length} usable taps; try again with a steady snare stroke.`); return; }
+    const ordered = [...check.hits].sort((a, b) => a - b);
+    const median = Math.round(ordered[Math.floor(ordered.length / 2)]);
+    const spread = Math.round([...check.hits].map(value => Math.abs(value - median)).sort((a, b) => a - b)[Math.floor(check.hits.length / 2)]);
+    saveMidiLatency(median, spread);
+    setMidiTimingStatus(`Measured ${median} ms correction with ±${spread} ms median variation from ${check.hits.length} snare taps.`);
+    setMessage(`MIDI timing check complete: ${median} ms correction from ${check.hits.length} taps.`);
+  };
+  const calibrateMidiTiming = async () => {
+    if (active) return;
+    if (!midiId || !inputs.some(input => input.id === midiId) || !Object.values(selectedMidiProfile.midiMap).includes('snare')) { setMessage('Connect a MIDI device and map the snare pad before timing calibration.'); return; }
+    stop(); const checkToken = token.current; setMidiTimingStatus('Preparing timing clicks…');
+    const player = createDrumAudio(); audio.current = player;
+    if (!player) { stop(); setMidiTimingStatus(''); setMessage('MIDI timing clicks are unavailable.'); return; }
+    const ready = await player.ready;
+    if (token.current !== checkToken) return;
+    if (!ready) { stop(); setMidiTimingStatus(''); setMessage('MIDI timing clicks are unavailable.'); return; }
+    const plan = scheduleMidiTimingClicks(player, settings.bpm);
+    const check = { expected: plan.expected, hits: [] as number[], next: 0 };
+    midiTimingRef.current = check; running.current = true; setMidiTimingActive(true);
+    setMidiTimingStatus('Listen to four count-in clicks, then tap the mapped snare on the next eight clicks.');
+    timers.current.push(setTimeout(() => finishMidiTimingCheck(check), plan.timeoutMs));
   };
   const applyRecommendedSettings = () => {
     const recommendation = recommendSightSettings(history, settings, source);
     if (!recommendation) return;
-    stop(); setSettings(recommendation.settings); setExercise(generateSightExercise(recommendation.settings, crypto.getRandomValues(new Uint32Array(1))[0], exercise ? sightFingerprint(exercise) : undefined));
+    stop(); setSettings(recommendation.settings); setExercise(generateFreshSightExercise(recommendation.settings, crypto.getRandomValues(new Uint32Array(1))[0], phraseMemory()));
     attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setMessage('Suggested setting applied. Start when ready.');
   };
   const saveGoal = () => {
@@ -190,7 +372,8 @@ function ReadingSession({ profileId }: { profileId: string }) {
   const shareExercise = async () => {
     const target = exercise ?? generateSightExercise(settings, crypto.getRandomValues(new Uint32Array(1))[0]);
     if (!exercise) setExercise(target);
-    const code = encodeAssignmentCode(target); setAssignmentCode(code);
+    const metadata = { title: assignmentTitle.trim().slice(0, 80) || 'Reading assignment', dueDate: assignmentDueDate || undefined, minimumAccuracy: assignmentMinimumAccuracy };
+    const code = encodeAssignmentCode(target, metadata); setAssignmentCode(code); setLoadedAssignment({ seed: target.seed, settings: target.settings, ...metadata });
     const url = new URL(window.location.href); url.search = ''; url.searchParams.set('exercise', code);
     try {
       if (navigator.share) await navigator.share({ title: 'Drum Hero sight-reading assignment', text: `${target.settings.level} · ${target.settings.meter} · ${target.settings.bpm} BPM`, url: url.toString() });
@@ -199,9 +382,55 @@ function ReadingSession({ profileId }: { profileId: string }) {
     } catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) setMessage('Could not share automatically. Use the browser address after previewing the exercise.'); }
   };
   const importAssignment = () => {
+    if (assignmentCode.trim().startsWith('DH-SUB1:')) {
+      const submission = decodeJSONCode<{ version: number; title?: string; dueDate?: string; minimumAccuracy?: number; meter: string; level: string; bpm: number; accuracy: number; score: number; classification: string }>(assignmentCode, 'DH-SUB1:');
+      if (!submission || submission.version !== 1 || !Number.isInteger(submission.accuracy) || submission.accuracy < 0 || submission.accuracy > 100 || !Number.isInteger(submission.score) || submission.score < 0 || submission.score > 100 || !Number.isInteger(submission.bpm) || submission.bpm < 40 || submission.bpm > 200 || !['4/4','3/4','5/4','7/8'].includes(submission.meter) || !['Beginner','Intermediate','Advanced'].includes(submission.level) || !['reading','practice','assisted'].includes(submission.classification) || (submission.minimumAccuracy !== undefined && (!Number.isInteger(submission.minimumAccuracy) || submission.minimumAccuracy < 50 || submission.minimumAccuracy > 100)) || (submission.dueDate !== undefined && !validAssignmentDate(submission.dueDate))) { setMessage('Student result code is invalid.'); return; }
+      const outcome = submission.minimumAccuracy === undefined ? 'no target set' : submission.accuracy >= submission.minimumAccuracy ? 'target met' : 'target not met';
+      setMessage(`${submission.title || 'Student assignment'} returned: ${submission.accuracy}% accuracy, ${submission.score} score (${outcome}; ${submission.classification}; ${submission.level}, ${submission.meter}, ${submission.bpm} BPM).`); return;
+    }
     const assignment = decodeAssignmentCode(assignmentCode);
     if (!assignment) { setMessage('Assignment code is invalid.'); return; }
-    stop(); setSettings(assignment.settings); setExercise(generateSightExercise(assignment.settings, assignment.seed)); setShowSetupNotation(false); setSharedAssignment(true); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setMessage('Shared reading assignment loaded. Preview it before you start.');
+    stop(); setSettings(assignment.settings); setExercise(generateSightExercise(assignment.settings, assignment.seed)); setLoadedAssignment(assignment); setShowSetupNotation(false); setSharedAssignment(true); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setMessage('Shared reading assignment loaded. Preview it before you start.');
+  };
+  const shareSubmission = async () => {
+    if (!result || !exercise) return;
+    const code = encodeJSONCode('DH-SUB1:', { version: 1, title: loadedAssignment?.title, dueDate: loadedAssignment?.dueDate, minimumAccuracy: loadedAssignment?.minimumAccuracy, meter: exercise.settings.meter, level: exercise.settings.level, bpm: exercise.settings.bpm, accuracy: result.summary.accuracy, score: result.summary.score, classification });
+    try { await navigator.clipboard.writeText(code); setMessage('Student result code copied. Send it to your teacher.'); }
+    catch { setMessage(`Share this result code with your teacher: ${code}`); }
+  };
+  const startWeakestBarDrill = () => {
+    if (!exercise || !result) return;
+    const bar = weakestSightBar(exercise, result.rated), drill = createSightBarDrill(exercise, bar);
+    stop(); setDrillParent(exercise); setExercise(drill); setSettings(drill.settings); attempted.current = true; setHasAttempted(true); assisted.current = false; setResult(null); setPhase('setup'); setReference(false); setMessage(`Bar ${bar + 1} repeats twice as practice. Return to the full phrase when ready.`);
+  };
+  const startErrorFocusDrill = () => {
+    if (!exercise || !result) return;
+    const drill = createSightErrorDrill(exercise, result.rated, crypto.getRandomValues(new Uint32Array(1))[0], phraseMemory(), history);
+    stop(); setTransferSettings(exercise.settings); setTransferCheck(false); setExercise(drill.exercise); setSettings(drill.exercise.settings); setDrillParent(null); attempted.current = true; setHasAttempted(true); assisted.current = false; setResult(null); setPhase('setup'); setReference(false);
+    setMessage(`Focused ${drill.focus} practice for ${drill.voice} at a gentler tempo. This drill is practice; an unseen transfer phrase follows it.`);
+  };
+  const startTransferCheck = () => {
+    if (!transferSettings) return;
+    stop(); const next = generateFreshSightExercise(transferSettings, crypto.getRandomValues(new Uint32Array(1))[0], phraseMemory());
+    setExercise(next); setSettings(next.settings); setTransferSettings(null); setTransferCheck(true); setDrillParent(null); attempted.current = true; setHasAttempted(true); assisted.current = false; setResult(null); setPhase('setup'); setReference(false); setMessage('Unseen transfer phrase ready. This check remains practice and does not change first-read trends.');
+  };
+  const startCoverageGap = () => {
+    const nextSettings = leastPracticedSightSettings(settings, history);
+    stop(); setSettings(nextSettings); setExercise(generateFreshSightExercise(nextSettings, crypto.getRandomValues(new Uint32Array(1))[0], phraseMemory()));
+    setSessionQueue([]); setSessionTotal(0); setSessionIndex(0); setSessionMetrics([]); setDrillParent(null); setTransferSettings(null); setTransferCheck(false); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setPhase('setup'); setReference(false); setMessage(`Coverage exercise ready: ${nextSettings.meter} ${nextSettings.focusRhythm} at ${nextSettings.bpm} BPM.`);
+  };
+  const recordConfidence = (value: number | null) => {
+    const entryId = confidenceEntryId;
+    if (entryId) {
+      historyRef.current = historyRef.current.map(row => row.id === entryId ? { ...row, confidence: value } : row);
+      setHistory(historyRef.current);
+      try { localStorage.setItem(historyKey, JSON.stringify({ version: 1, attempts: historyRef.current })); } catch { setMessage('Confidence note could not be saved; the score remains available.'); }
+    }
+    setConfidenceRating(value); setConfidenceRecorded(true);
+  };
+  const returnToFullPhrase = () => {
+    if (!drillParent) return;
+    stop(); setExercise(drillParent); setSettings(drillParent.settings); setDrillParent(null); attempted.current = true; setHasAttempted(true); setResult(null); setPhase('setup'); setMessage('Full phrase restored. The next pass counts as practice.');
   };
   const advanceTempoLadder = () => {
     if (!exercise || !result) return;
@@ -211,91 +440,215 @@ function ReadingSession({ profileId }: { profileId: string }) {
       setSettings(nextSettings); setExercise(generateSightExercise(nextSettings, crypto.getRandomValues(new Uint32Array(1))[0])); attempted.current = false; setHasAttempted(false); setResult(null); setPhase('setup'); setMessage(`Tempo ladder advanced to ${bpm} BPM.`);
     } else { setMessage(result.summary.accuracy >= 85 ? 'You reached the top of the 40–200 BPM ladder.' : 'Reach 85% accuracy to advance. Retry this phrase as practice.'); }
   };
+  const saveMidiMap = (voice: typeof SIGHT_VOICES[number], note: number) => {
+    if (!Number.isInteger(note) || note < 0 || note > 127 || !midiId) return;
+    const state = savedInputState(profileId), key = `midi:${midiId}`, current = getTrainerDeviceProfile(state, key);
+    const conflict = current.midiMap[note];
+    if (conflict && conflict !== voice) { setMessage(`MIDI note ${note} is already assigned to ${conflict}.`); return; }
+    const midiMap = { ...current.midiMap }, previous = Object.entries(midiMap).find(([, mapped]) => mapped === voice);
+    if (previous && Number(previous[0]) !== note) midiMap[Number(previous[0])] = null;
+    midiMap[note] = voice; state.deviceProfiles[key] = { ...current, midiMap };
+    try { localStorage.setItem(trainerStorageKey(profileId), JSON.stringify(state)); setMessage(`Mapped MIDI note ${note} to ${voice}.`); }
+    catch { setMessage('Could not save this pad mapping.'); }
+  };
+  const saveMidiLatency = (latencyMs: number, spreadMs?: number) => {
+    if (!midiId) return;
+    const state = savedInputState(profileId), key = `midi:${midiId}`, profile = getTrainerDeviceProfile(state, key);
+    state.deviceProfiles[key] = { ...profile, latencyMs: Math.max(-200, Math.min(200, Math.round(latencyMs))), latencyCalibrated: spreadMs !== undefined, latencySpreadMs: spreadMs ?? null, latencyCalibratedAt: spreadMs === undefined ? null : new Date().toISOString() };
+    try { localStorage.setItem(trainerStorageKey(profileId), JSON.stringify(state)); setMessage(spreadMs === undefined ? 'Manual MIDI timing correction saved. Run calibration to check input consistency.' : 'MIDI timing correction and consistency saved for this device.'); }
+    catch { setMessage('Could not save the MIDI timing correction.'); }
+  };
+  const startLearningPathStep = () => {
+    const index = nextSightLearningPathStep(history);
+    if (index < 0) return;
+    const step = SIGHT_LEARNING_PATH[index]; update(step.settings); setMessage(`Learning path step ${index + 1}: ${step.title}. Start when ready.`);
+  };
   const start = async () => {
     if (source === 'midi' && midi.current?.inputs.get(midiId)?.state !== 'connected') { setMessage('Connect and select a MIDI input first.'); return; }
     stop(); const roundToken = token.current;
     const current = exercise ?? fresh();
+    rememberPhrase(current);
     setSettings(current.settings);
     // fresh() cancels pending work; take the token after exercise creation.
     const sessionToken = exercise ? roundToken : token.current;
-    const kind = sightClassification(attempted.current, assisted.current); setClassification(kind); attempted.current = true; setHasAttempted(true);
-    setMessage('Preparing drum sounds…'); setResult(null); setPreparing(true); running.current = true;
+    const targetPlayback = playTargetDrums;
+    const kind = targetPlayback ? 'assisted' : sightClassification(attempted.current, assisted.current); setClassification(kind); attempted.current = true; setHasAttempted(true);
+    setMessage('Preparing drum sounds…'); setResult(null); setConfidenceRecorded(true); setConfidenceRating(null); setConfidenceEntryId(null); setPreparing(true); running.current = true;
     const player = createDrumAudio(); audio.current = player;
     if (!player) { cancel(); setMessage('Audio is unavailable. Enable browser audio and restart as practice.'); return; }
     player.setClickSound('woodblock');
     const ready = await player.ready;
     if (token.current !== sessionToken) return;
     if (!ready) { cancel(); setMessage('Drum sounds could not load. Check your connection or offline download.'); return; }
-    setPreparing(false); setPhase('preview'); setClock(10); setMessage('');
-    const previewEnd = performance.now() + 10000;
+    setPreparing(false); setPhase(previewSeconds > 0 ? 'preview' : countInBars > 0 ? 'count-in' : 'playing'); setClock(previewSeconds); setMessage('');
+    const previewEnd = performance.now() + previewSeconds * 1000;
     const beatMs = 60000 / current.settings.bpm;
-    const startAt = previewEnd + current.beatsPerBar * beatMs;
+    const countInDuration = countInBars * current.beatsPerBar * beatMs;
+    const startAt = previewEnd + countInDuration;
     const end = startAt + sightDuration(current);
     const state = savedInputState(profileId);
     const profile = source === 'midi' ? getTrainerDeviceProfile(state, `midi:${midiId}`) : state.deviceProfiles[source] ?? defaultTrainerDeviceProfile(state);
     const schedule = (fn: () => void, delay: number) => timers.current.push(setTimeout(() => { if (token.current === sessionToken) fn(); }, delay));
-    schedule(() => { setPhase('count-in'); }, previewEnd - performance.now());
-    for (let bar = -1; bar < current.settings.bars; bar++) {
+    if (previewSeconds > 0 && countInBars > 0) schedule(() => { setPhase('count-in'); }, previewEnd - performance.now());
+    if (previewSeconds === 0 && countInBars > 0) setPhase('count-in');
+    if (countInBars === 0) schedule(() => setPhase('playing'), previewEnd - performance.now());
+    const groupStarts = sightMeterGroupStarts(current.settings.meter);
+    for (let bar = -countInBars; bar < current.settings.bars; bar++) {
       const base = startAt + bar * current.beatsPerBar * beatMs;
-      for (let beat = 0; beat < current.beatsPerBar; beat++) player.scheduleClick(base + beat * beatMs, beat === 0);
+      if (bar < 0) {
+        const divisions = countDivisions[countInSubdivision];
+        for (let tick = 0; tick < Math.ceil(current.beatsPerBar * divisions); tick++) {
+          const beatPosition = tick / divisions;
+          const accent = groupStarts.some(start => Math.abs(start - beatPosition) < 0.001);
+          player.scheduleClick(base + beatPosition * beatMs, accent);
+        }
+      } else {
+        for (let beat = 0; beat < Math.ceil(current.beatsPerBar); beat++) {
+          if (beat < current.beatsPerBar) player.scheduleClick(base + beat * beatMs, groupStarts.includes(beat));
+        }
+      }
+      if (bar < 0 && spokenCountIn && 'speechSynthesis' in window) schedule(() => {
+        const words = current.settings.meter === '7/8' ? 'One, two, three, four' : Array.from({ length: Math.ceil(current.beatsPerBar) }, (_, index) => ['one','two','three','four','five','six','seven'][index]).join(', ');
+        const utterance = new SpeechSynthesisUtterance(words); utterance.rate = Math.min(2, Math.max(0.65, current.settings.bpm / 80)); speechSynthesis.speak(utterance);
+      }, base - performance.now());
     }
-    schedule(() => { capture.current = { start: startAt, end, correction: profile.latencyMs, hits: [] }; }, startAt - performance.now() - 100);
+    if (targetPlayback) for (const hit of current.hits) player.scheduleHit(hit.instrument, startAt + hit.step * beatMs * 4 / current.subdivision, !!hit.accent);
+    schedule(() => { capture.current = { start: startAt, end, correction: profile.latencyMs, calibrated: source === 'midi' && profile.latencyCalibrated === true, calibrationSpreadMs: source === 'midi' ? profile.latencySpreadMs ?? null : null, calibrationAt: source === 'midi' ? profile.latencyCalibratedAt ?? null : null, hits: [] }; }, startAt - performance.now() - 100);
     schedule(() => setPhase('playing'), startAt - performance.now());
     ticker.current = setInterval(() => {
       const now = performance.now(); setClock(now < previewEnd ? Math.max(0, Math.ceil((previewEnd - now) / 1000)) : (now - startAt) / beatMs);
+      if (now >= previewEnd && now < startAt) {
+        const elapsed = now - previewEnd, barDuration = current.beatsPerBar * beatMs, inBar = elapsed % barDuration;
+        const divisions = countDivisions[countInSubdivision], tick = Math.floor(inBar / beatMs * divisions);
+        const beat = Math.floor(tick / divisions) + 1, syllable = countSyllables[countInSubdivision][tick % divisions];
+        setCountInSyllable(`${beat}${syllable}`);
+      }
     }, 40);
     schedule(() => {
-      const scored = scoreSightAttempt(current, capture.current?.hits ?? []);
-      const entry: SightAttempt = { id: crypto.randomUUID(), playedAt: new Date().toISOString(), version: 1, seed: current.seed, settings: current.settings, source, inputProfile: source === 'midi' ? `midi:${midiId}` : source, classification: assisted.current ? 'assisted' : kind, score: scored.summary.score, accuracy: scored.summary.accuracy, meanOffsetMs: scored.meanOffsetMs, misses: scored.summary.miss, extras: scored.summary.extra };
+      const performed = capture.current?.hits ?? [];
+      const scored = scoreSightAttempt(current, performed);
+      const inputCapture = capture.current;
+      const entry: SightAttempt = { id: crypto.randomUUID(), playedAt: new Date().toISOString(), version: 1, seed: current.seed, settings: current.settings, source, inputProfile: source === 'midi' ? `midi:${midiId}` : source, classification: targetPlayback || assisted.current ? 'assisted' : kind, targetPlayback, score: scored.summary.score, accuracy: scored.summary.accuracy, meanOffsetMs: scored.meanOffsetMs, timingSpreadMs: scored.timingSpreadMs, pulseRecovery: scored.pulseRecovery, confidence: null, inputCalibrated: source === 'midi' ? inputCapture?.calibrated ?? false : undefined, inputCalibrationSpreadMs: source === 'midi' ? inputCapture?.calibrationSpreadMs ?? null : undefined, inputCalibrationAt: source === 'midi' ? inputCapture?.calibrationAt ?? null : undefined, inputTimingCorrectionMs: source === 'midi' ? Math.round(inputCapture?.correction ?? 0) : undefined, earlyHits: scored.earlyHits, lateHits: scored.lateHits, fingerprint: sightFingerprint(current), misses: scored.summary.miss, extras: scored.summary.extra, fluency: scored.fluency, previewSeconds, countInBars, assignmentTitle: loadedAssignment?.title, assignmentDueDate: loadedAssignment?.dueDate, assignmentMinimumAccuracy: loadedAssignment?.minimumAccuracy };
+      if (sessionTotal > 0 && entry.classification === 'reading') setSessionMetrics(rows => [...rows, { accuracy: entry.accuracy, timingSpreadMs: entry.timingSpreadMs ?? null }]);
       historyRef.current = [...historyRef.current, entry].slice(-100); setHistory(historyRef.current);
       try { localStorage.setItem(historyKey, JSON.stringify({ version: 1, attempts: historyRef.current })); } catch { setMessage('Result could not be saved.'); }
-      stop(); setResult(scored); setClassification(entry.classification); setPhase('results');
+      stop(); setResult(scored); setClassification(entry.classification); setConfidenceEntryId(entry.id); setConfidenceRecorded(false); setPhase('results');
     }, end - performance.now() + 110);
   };
-  const playReference = async () => {
+  const playReview = async (mode: 'reference' | 'learner' | 'compare' = 'reference', onlyBar?: number) => {
     if (!exercise) return;
     stop(); const roundToken = token.current; setReference(true); running.current = true;
     const player = createDrumAudio(); audio.current = player;
-    if (!player || !await player.ready) { stop(); setReference(false); setMessage('Reference audio unavailable.'); return; }
+    if (!player || !await player.ready) { stop(); setReference(false); setMessage('Review audio unavailable.'); return; }
     if (roundToken !== token.current) return;
     const base = performance.now() + 100;
-    for (const note of exercise.hits) player.scheduleHit(note.instrument, base + note.step * 60000 / exercise.settings.bpm * 4 / exercise.subdivision, note.accent);
-    timers.current.push(setTimeout(() => { stop(); setReference(false); }, sightDuration(exercise) + 600));
+    const scale = reviewSpeed;
+    const beatDurationMs = 60000 / exercise.settings.bpm;
+    const barDurationMs = exercise.beatsPerBar * beatDurationMs;
+    const segmentStartMs = onlyBar === undefined ? 0 : onlyBar * barDurationMs;
+    const segmentDurationMs = onlyBar === undefined ? sightDuration(exercise) : barDurationMs;
+    const passDuration = segmentDurationMs / scale;
+    const schedulePass = (kind: 'reference' | 'learner', offset: number) => {
+      const when = (relative: number) => base + offset + relative / scale;
+      const firstBar = onlyBar ?? 0, lastBar = onlyBar ?? exercise.settings.bars - 1;
+      for (let bar = firstBar; bar <= lastBar; bar++) for (let beat = 0; beat < Math.ceil(exercise.beatsPerBar); beat++) {
+        const relative = (bar * exercise.beatsPerBar + beat) * beatDurationMs - segmentStartMs;
+        if (relative >= 0 && relative < segmentDurationMs) player.scheduleClick(when(relative), sightMeterGroupStarts(exercise.settings.meter).includes(beat));
+      }
+      if (kind === 'reference') for (const note of exercise.hits) {
+        if (onlyBar !== undefined && Math.floor(note.step / exercise.stepsPerBar) !== onlyBar) continue;
+        const relative = note.step * beatDurationMs * 4 / exercise.subdivision - segmentStartMs;
+        if (relative >= 0 && relative < segmentDurationMs) player.scheduleHit(note.instrument, when(relative), note.accent);
+      } else for (const note of result?.rated ?? []) {
+        if (note.rating === 'miss' || note.atMs === undefined) continue;
+        if (onlyBar !== undefined && (note.atMs < segmentStartMs || note.atMs >= segmentStartMs + segmentDurationMs)) continue;
+        player.scheduleHit(note.instrument, when(note.atMs - segmentStartMs));
+      }
+    };
+    if (mode === 'reference') schedulePass('reference', 0);
+    else if (mode === 'learner') schedulePass('learner', 0);
+    else { schedulePass('reference', 0); schedulePass('learner', passDuration + 700); }
+    timers.current.push(setTimeout(() => { stop(); setReference(false); }, passDuration * (mode === 'compare' ? 2 : 1) + (mode === 'compare' ? 1300 : 600)));
   };
-  const noteText = exercise?.hits.map(h => `Bar ${Math.floor(h.step / exercise.stepsPerBar) + 1}, beat ${(h.step % exercise.stepsPerBar) * 4 / exercise.subdivision + 1}: ${h.instrument}${h.accent ? ', accent' : ''}`).join('. ') ?? '';
-  const cursor = exercise && phase === 'playing' ? { barIndex: Math.min(settings.bars - 1, Math.max(0, Math.floor(clock / exercise.beatsPerBar))), fraction: Math.max(0, clock % exercise.beatsPerBar) / exercise.beatsPerBar } : undefined;
+  const noteText = exercise ? describeSightExercise(exercise) : '';
+  const cursor = exercise && phase === 'playing' ? { barIndex: Math.min(settings.bars - 1, Math.max(0, Math.floor(clock / exercise.beatsPerBar))), fraction: Math.max(0, clock % exercise.beatsPerBar) / exercise.beatsPerBar } : reviewCursor ?? undefined;
   const currentRecommendation = recommendSightSettings(history, settings, source);
   const trendReadings = history.filter(h => h.classification === 'reading' && (historyFilters.level === 'Any' || h.settings.level === historyFilters.level) && (historyFilters.meter === 'Any' || h.settings.meter === historyFilters.meter) && (historyFilters.source === 'Any' || h.source === historyFilters.source) && (historyFilters.tempo === 'Any' || historyFilters.tempo === 'under80' && h.settings.bpm < 80 || historyFilters.tempo === '80to119' && h.settings.bpm >= 80 && h.settings.bpm < 120 || historyFilters.tempo === '120plus' && h.settings.bpm >= 120));
   const practiceReadings = history.filter(h => h.classification !== 'reading');
   const goalAttempts = goal ? matchingSightGoalAttempts(history, goal) : [];
-  const styleOptions: SightStyle[] = settings.level === 'Beginner' ? ['varied', 'rock'] : settings.level === 'Intermediate' ? ['varied', 'rock', 'fill'] : settings.meter === '7/8' ? ['varied', 'rock', 'fill'] : ['varied', 'rock', 'shuffle', 'fill'];
-  const recommendationAction = currentRecommendation ? currentRecommendation.settings.bpm !== settings.bpm ? 'Use suggested tempo' : currentRecommendation.settings.level !== settings.level ? 'Use suggested level' : 'Use suggested rhythm' : '';
-  return <div className={styles.root}>
-    {!active && <fieldset disabled={reference}><legend>Exercise setup</legend><div className={styles.controls}>
+  const pathIndex = nextSightLearningPathStep(history);
+  const selectedMidiProfile = getTrainerDeviceProfile(savedInputState(profileId), `midi:${midiId}`);
+  const midiCalibrationAgeDays = selectedMidiProfile.latencyCalibratedAt && clockNow > 0 ? Math.max(0, Math.floor((clockNow - Date.parse(selectedMidiProfile.latencyCalibratedAt)) / 86400000)) : null;
+  const midiCalibrationSummary = selectedMidiProfile.latencyCalibrated ? `calibrated ${midiCalibrationAgeDays === null ? 'previously' : `${midiCalibrationAgeDays} days ago`} · ${selectedMidiProfile.latencyMs} ms correction${selectedMidiProfile.latencySpreadMs == null ? '' : ` · ±${Math.round(selectedMidiProfile.latencySpreadMs)} ms tap variation`}${midiCalibrationAgeDays !== null && midiCalibrationAgeDays > 30 ? ' · recalibration recommended' : ''}` : 'not calibrated for this device';
+  const currentAttempt = history.find(row => row.id === confidenceEntryId);
+  const attemptCalibrationAgeDays = currentAttempt?.inputCalibrationAt ? Math.max(0, Math.floor((clockNow - Date.parse(currentAttempt.inputCalibrationAt)) / 86400000)) : null;
+  const attemptCalibrationSummary = currentAttempt?.inputCalibrated ? `calibrated ${attemptCalibrationAgeDays === null ? 'previously' : `${attemptCalibrationAgeDays} days ago`} · ${currentAttempt.inputTimingCorrectionMs ?? 0} ms correction${currentAttempt.inputCalibrationSpreadMs == null ? '' : ` · ±${Math.round(currentAttempt.inputCalibrationSpreadMs)} ms tap variation`}${attemptCalibrationAgeDays !== null && attemptCalibrationAgeDays > 30 ? ' · recalibration recommended' : ''}` : 'not calibrated for this device';
+  const rhythmFluency = ['quarters','eighths','sixteenths','triplets','syncopation','rests'].map(name => {
+    const rows = trendReadings.flatMap(row => row.fluency?.[name as keyof NonNullable<SightAttempt['fluency']>] === undefined ? [] : [row.fluency![name as keyof NonNullable<SightAttempt['fluency']>]!]);
+    return { name, average: rows.length ? Math.round(rows.reduce((sum, value) => sum + value, 0) / rows.length) : null, count: rows.length };
+  });
+  const timingTrend = trendReadings.filter(row => row.timingSpreadMs !== undefined && row.timingSpreadMs !== null);
+  const avgTimingSpread = timingTrend.length ? Math.round(timingTrend.reduce((sum, row) => sum + (row.timingSpreadMs ?? 0), 0) / timingTrend.length) : null;
+  const confidenceTrend = trendReadings.filter(row => row.confidence !== undefined && row.confidence !== null);
+  const confidenceBias = confidenceTrend.length ? Math.round(confidenceTrend.reduce((sum, row) => sum + ((row.confidence ?? 3) * 20 - row.accuracy), 0) / confidenceTrend.length) : null;
+  const pulseTrend = trendReadings.filter(row => row.pulseRecovery !== undefined && row.pulseRecovery !== null);
+  const avgPulseRecovery = pulseTrend.length ? Math.round(pulseTrend.reduce((sum, row) => sum + (row.pulseRecovery ?? 0), 0) / pulseTrend.length) : null;
+  const variety = sightVarietySummary(history);
+  const coverageGap = leastPracticedSightSettings(settings, history);
+  const timingDirection = trendReadings.reduce((acc, row) => ({ early: acc.early + (row.earlyHits ?? 0), late: acc.late + (row.lateHits ?? 0) }), { early: 0, late: 0 });
+  const setTimingRows = sessionMetrics.filter(item => item.timingSpreadMs !== null);
+  const setAvgTimingSpread = setTimingRows.length ? Math.round(setTimingRows.reduce((sum, item) => sum + (item.timingSpreadMs ?? 0), 0) / setTimingRows.length) : null;
+  const sessionStage = sessionLabel === 'Goal study path' ? ['Warm-up', 'Build', 'Review', 'Goal', 'Stretch'][sessionIndex - 1] ?? '' : '';
+  const adaptiveNext = adaptiveMode && result && exercise && classification === 'reading' ? adaptiveSightSettings(exercise.settings, result.summary.accuracy, result.timingSpreadMs) : null;
+  const adaptivePreview = adaptiveMode && result && classification === 'reading' ? adaptiveSightPreviewSeconds(previewSeconds, result.summary.accuracy, result.timingSpreadMs) : null;
+  const progressRows = [...new Set(trendReadings.map(row => `${row.settings.meter}|${row.settings.focusRhythm}`))].sort();
+  const tempoBands = [{ id: 'under80', label: '<80 BPM', matches: (bpm: number) => bpm < 80 }, { id: '80to119', label: '80–119 BPM', matches: (bpm: number) => bpm >= 80 && bpm < 120 }, { id: '120plus', label: '120+ BPM', matches: (bpm: number) => bpm >= 120 }];
+  const styleOptions: SightStyle[] = settings.level === 'Beginner' ? ['varied', 'rock'] : settings.level === 'Intermediate' ? ['varied', 'rock', 'fill', 'half-time', 'funk'] : settings.meter === '7/8' ? ['varied', 'rock', 'fill', 'half-time', 'funk', 'latin'] : ['varied', 'rock', 'shuffle', 'fill', 'half-time', 'funk', 'latin'];
+  const recommendationAction = currentRecommendation ? currentRecommendation.reason.startsWith('Spaced review:') ? 'Review overdue skill' : currentRecommendation.settings.bpm !== settings.bpm ? 'Use suggested tempo' : currentRecommendation.settings.level !== settings.level ? 'Use suggested level' : 'Use suggested rhythm' : '';
+  return <div className={`${styles.root} ${focusMode ? styles.focusMode : ''}`} data-focus-mode={focusMode}>
+    <div className={styles.actions}><button type="button" aria-pressed={focusMode} onClick={() => setFocusMode(value => !value)}>{focusMode ? 'Exit focus mode' : 'Enter focus mode'}</button></div>
+    {!active && <fieldset hidden={focusMode} disabled={reference}><legend>Exercise setup</legend><div className={styles.controls}>
       <label>Level<select value={settings.level} onChange={e => update({ level: e.target.value as SightSettings['level'] })}>{['Beginner','Intermediate','Advanced'].map(l => <option key={l}>{l}</option>)}</select></label>
       <label>Tempo (quarter-note BPM)<input type="number" min={40} max={200} value={settings.bpm} onChange={e => { setSettings({ ...settings, bpm: Number(e.target.value) }); setExercise(null); attempted.current = false; setHasAttempted(false); }} onBlur={() => update({ bpm: settings.bpm })} /></label>
-      <label>Bars<select value={settings.bars} onChange={e => update({ bars: Number(e.target.value) as SightSettings['bars'] })}>{[1,2,4].map(n => <option key={n}>{n}</option>)}</select></label>
+      <label>Bars<select value={settings.bars} onChange={e => update({ bars: Number(e.target.value) as SightSettings['bars'] })}>{[1,2,4,8].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
+      <p className={styles.chartCaption}>Performance length: about {Math.round((settings.meter === '7/8' ? 3.5 : Number(settings.meter[0])) * settings.bars * 60 / settings.bpm)} seconds at this tempo.</p>
       <label>Meter<select value={settings.meter} onChange={e => update({ meter: e.target.value as SightSettings['meter'] })}>{sightMeters(settings.level).map(m => <option key={m}>{m}</option>)}</select></label>
       {settings.level === 'Beginner' && <label><input type="checkbox" checked={settings.snareOnly} onChange={e => update({ snareOnly: e.target.checked })} /> Snare only</label>}
       {settings.level === 'Advanced' && settings.meter !== '7/8' && <label><input type="checkbox" checked={settings.triplets} onChange={e => update({ triplets: e.target.checked })} /> Triplets</label>}
       <label>Rhythm focus<select value={settings.focusRhythm} onChange={e => update({ focusRhythm: e.target.value as SightRhythmFocus })}>{(['mixed','quarters','eighths',...(settings.level === 'Beginner' ? [] : ['sixteenths']),...(settings.level === 'Advanced' && settings.meter !== '7/8' ? ['triplets'] : [])] as SightRhythmFocus[]).map(value => <option key={value} value={value}>{value === 'mixed' ? 'Mixed' : value[0].toUpperCase() + value.slice(1)}</option>)}</select></label>
       <label>Voice focus<select disabled={settings.snareOnly} value={settings.focusVoice} onChange={e => update({ focusVoice: e.target.value as SightSettings['focusVoice'] })}><option value="mixed">Mixed voices</option>{SIGHT_VOICES.map(voice => <option key={voice} value={voice}>{voice[0].toUpperCase() + voice.slice(1)}</option>)}</select></label>
-      <label>Groove and phrase<select value={settings.style} onChange={e => update({ style: e.target.value as SightStyle })}>{styleOptions.map(style => <option key={style} value={style}>{style === 'varied' ? 'Varied reading' : style === 'rock' ? 'Rock backbeat' : style === 'shuffle' ? 'Shuffle feel' : 'Groove with a fill'}</option>)}</select></label>
+      <label>Groove and phrase<select value={settings.style} onChange={e => update({ style: e.target.value as SightStyle })}>{styleOptions.map(style => <option key={style} value={style}>{style === 'varied' ? 'Varied reading' : style === 'rock' ? 'Rock backbeat' : style === 'shuffle' ? 'Shuffle feel' : style === 'fill' ? 'Groove with a fill' : style === 'half-time' ? 'Half-time groove' : style === 'funk' ? 'Funk syncopation' : 'Latin groove'}</option>)}</select></label>
+      {settings.style === 'varied' && <label>Phrase density<select value={settings.density} onChange={e => update({ density: e.target.value as SightSettings['density'] })}><option value="light">Light · fewer subdivisions</option><option value="balanced">Balanced</option><option value="dense">Dense · more subdivisions</option></select></label>}
+      <label>Reading cues<select value={cueLevel} onChange={e => setCueLevel(e.target.value as typeof cueLevel)}><option value="full">Full legend and pad labels</option><option value="compact">Compact legend</option><option value="standard">Standard notation · no legend</option></select></label>
+      <label>Practice set<select value={sessionLength} onChange={e => setSessionLength(Number(e.target.value) as 3 | 5 | 10)}>{[3,5,10].map(n => <option key={n} value={n}>{n} exercises</option>)}</select></label>
+      <label>Silent preview<select value={previewSeconds} onChange={e => setPreviewSeconds(Number(e.target.value) as 0 | 5 | 10)}><option value={0}>Cold read (0 seconds)</option><option value={5}>5 seconds</option><option value={10}>10 seconds</option></select></label>
+      <label>Count-in bars<select value={countInBars} onChange={e => setCountInBars(Number(e.target.value) as 0 | 1 | 2)}><option value={0}>None</option><option value={1}>1 bar</option><option value={2}>2 bars</option></select></label>
+      <label>Count-in subdivision<select value={countInSubdivision} onChange={e => setCountInSubdivision(e.target.value as SightCountSubdivision)}><option value="quarter">Quarter notes</option><option value="eighth">Eighth notes</option><option value="sixteenth">Sixteenth notes</option></select></label>
+      <label><input type="checkbox" checked={spokenCountIn} onChange={e => setSpokenCountIn(e.target.checked)} /> Speak the count-in</label>
+      <label><input type="checkbox" checked={adaptiveMode} onChange={e => setAdaptiveMode(e.target.checked)} /> Adaptive progression after first reads</label>
+      <label><input type="checkbox" checked={playTargetDrums} onChange={e => setPlayTargetDrums(e.target.checked)} /> Play target drums during the attempt (assisted)</label>
       <label>Input<select value={source} onChange={e => { setSource(e.target.value as SightInput); }}><option value="keyboard">Keyboard</option><option value="touch">Touch pads</option><option value="midi">MIDI</option></select></label>
       <label><input type="checkbox" checked={tempoLadder} onChange={e => setTempoLadder(e.target.checked)} /> Tempo ladder (+5 BPM after 85% accuracy)</label>
-      {source === 'midi' && <><button onClick={connectMidi}>Connect MIDI</button><label>MIDI device<select value={midiId} onChange={e => { setMidiId(e.target.value); selectedMidi.current = e.target.value; if (midi.current) bindMidi(midi.current, e.target.value); }}>{inputs.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></label></>}
+      {source === 'midi' && <><button onClick={connectMidi}>Connect MIDI</button><label>MIDI device<select value={midiId} onChange={e => { setMidiId(e.target.value); selectedMidi.current = e.target.value; if (midi.current) bindMidi(midi.current, e.target.value); setMidiCheckRemaining([]); midiCheckRemainingRef.current = []; midiTimingRef.current = null; }}>{inputs.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></label>{midiId && <section className={styles.midiCalibration}><h3>Pad mapping and timing</h3><p>Mappings and correction are saved for {inputs.find(i => i.id === midiId)?.name ?? 'this MIDI device'} in this learner profile.</p><p role="status">Input health: {inputs.some(input => input.id === midiId) ? 'connected' : 'disconnected'} · {SIGHT_VOICES.filter(voice => Object.values(selectedMidiProfile.midiMap).includes(voice)).length}/5 voices mapped · {midiCalibrationSummary}.</p>{SIGHT_VOICES.map(voice => { const note = Object.entries(selectedMidiProfile.midiMap).find(([, mapped]) => mapped === voice)?.[0] ?? ''; return <div className={styles.controls} key={voice}><label>{voice} MIDI note<input aria-label={`${voice} MIDI note`} type="number" min={0} max={127} value={note} onChange={e => saveMidiMap(voice, Number(e.target.value))} /></label><button type="button" onClick={() => { midiMappingVoiceRef.current = voice; setMidiMappingVoice(voice); setMessage(`Strike the ${voice} pad to learn its MIDI note.`); }}>Learn {voice} pad</button></div>; })}<label>Device timing correction ({selectedMidiProfile.latencyMs} ms)<input type="range" min={-200} max={200} step={5} value={selectedMidiProfile.latencyMs} onChange={e => saveMidiLatency(Number(e.target.value))} /></label><p>{SIGHT_VOICES.filter(voice => Object.values(selectedMidiProfile.midiMap).includes(voice)).length} of 5 voices mapped. Timing correction is currently {selectedMidiProfile.latencyMs} ms.</p><button type="button" onClick={startMidiReadinessCheck} disabled={!inputs.some(input => input.id === midiId)}>Run MIDI readiness check</button>{midiCheckRemaining.length > 0 && <p role="status">Confirmed: {midiCheckVerified.join(', ') || 'none yet'}. Strike {midiCheckRemaining[0]} next.</p>}<button type="button" onClick={() => { void calibrateMidiTiming(); }} disabled={!inputs.some(input => input.id === midiId) || active}>Estimate input timing correction</button><p className={styles.chartCaption}>Tap the mapped snare on eight clicks after the count-in. The median offset includes both device delay and tap consistency.</p>{midiTimingStatus && <p role="status">{midiTimingStatus}</p>}{midiMappingVoice && <p role="status">Strike a pad to map {midiMappingVoice}, or choose another voice.</p>}</section>}</>}
     </div></fieldset>}
     {active && <p>{settings.level} · {settings.bpm} BPM · {settings.meter} · {settings.bars} bars · {settings.style} · {settings.focusRhythm} · {settings.focusVoice}</p>}
-    <p>Ten-second silent preview · one-bar count-in · one pass. Accents are reading cues; scoring checks voice and timing. <Link href="/trainer?setup=1">Input mapping and calibration</Link></p>
-    <div className={styles.actions}>{!active && !reference && <><button onClick={start}>{phase === 'results' || hasAttempted ? 'Retry as practice' : 'Start sight reading'}</button><button onClick={fresh}>New exercise</button><button onClick={() => { void shareExercise(); }}>Share assignment</button>{exercise && <button onClick={() => { setShowSetupNotation(true); window.setTimeout(() => window.print(), 120); }}>Print exercise</button>}</>}{active && <button onClick={cancel}>Cancel attempt</button>}{phase === 'results' && <button disabled={reference} onClick={playReference}>Play reference</button>}{reference && <button onClick={() => { stop(); setReference(false); }}>Stop reference</button>}</div>
-    {!active && <details><summary>Share or import a student assignment</summary><p>Share creates a link and a short code. Students can open the link or paste the code here.</p><label>Assignment code<input value={assignmentCode} onChange={e => setAssignmentCode(e.target.value)} placeholder="seed.settings-code" /></label><button onClick={importAssignment}>Load shared assignment</button></details>}
-    {sharedAssignment && <p className={styles.assignment} role="status">Shared assignment loaded · {exercise?.settings.level} · {exercise?.settings.meter} · {exercise?.settings.bpm} BPM. Preview it before starting.</p>}
-    {!active && currentRecommendation && <section className={styles.panel}><h2>Suggested next step</h2><p>{currentRecommendation.reason}</p><button onClick={applyRecommendedSettings}>{recommendationAction}</button></section>}
-    <p role="status" aria-live="polite">{phase === 'preview' ? `Silent preview · ${clock} seconds` : phase === 'count-in' ? 'Count-in' : phase === 'playing' ? 'Play the notation' : message || (hasAttempted && phase !== 'results' ? 'This exercise will count as practice.' : 'Ready')}</p>
-    {exercise && (phase !== 'setup' || hasAttempted || showSetupNotation) && <div className={styles.printable}><h2>Drum Hero sight-reading exercise</h2><p>{exercise.settings.level} · {exercise.settings.meter} · {exercise.settings.bpm} quarter-note BPM · {exercise.settings.bars} bars · {exercise.settings.style}</p><Notation exercise={exercise} cursor={cursor} /><p>Legend: Kick (Space), Snare (F), Hi-hat (J), Tom (K), Crash (L). Cross noteheads: cymbals. &gt; accent. Rests: silence. {settings.meter === '7/8' ? 'Grouping: 2+2+3 eighths.' : settings.meter === '5/4' ? 'Grouping: 3+2 quarters.' : ''}</p><details><summary>Counted note descriptions</summary><p>{noteText}</p><button disabled={phase === 'playing' || phase === 'count-in'} onClick={() => { assisted.current = true; setClassification('assisted'); if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(noteText)); } else setMessage('Speech is unavailable; read the counted notes.'); }}>Speak notes (assisted attempt)</button></details></div>}
-    <div className={styles.pads}>{SIGHT_VOICES.map((voice, index) => <button key={voice} data-reading-pad disabled={phase !== 'playing' || source === 'midi'} onPointerDown={e => { e.preventDefault(); hit(voice, source); }} onClick={e => { if (e.detail === 0) hit(voice, source); }}>{labels[index]}<small>{keys[index].replace('Key','')}</small></button>)}</div>
-    {result && <section className={styles.panel}><h2 ref={heading} tabIndex={-1}>Sight-reading results</h2><p><strong>{classification === 'reading' ? 'First reading' : classification === 'assisted' ? 'Assisted attempt' : 'Practice retry'} · {result.summary.accuracy}% accuracy · {result.summary.score} score</strong></p><p>{result.meanOffsetMs === null ? 'No matched hits' : `Average timing: ${Math.abs(result.meanOffsetMs)} ms ${result.meanOffsetMs < 0 ? 'early' : result.meanOffsetMs > 0 ? 'late' : 'on time'}`} · {result.summary.miss} misses · {result.summary.extra} extras</p><div className={styles.scroll}><table><caption>Misses and extras by bar and voice</caption><thead><tr><th>Bar</th><th>Voice</th><th>Misses</th><th>Extras</th></tr></thead><tbody>{exercise && Array.from({ length: exercise.settings.bars }, (_, bar) => SIGHT_VOICES.map(voice => { const rows = result.rated.filter(h => h.instrument === voice && Math.floor((h.step ?? 0) / exercise.stepsPerBar) === bar); return <tr key={`${bar}-${voice}`}><td>{bar + 1}</td><td>{voice}</td><td>{rows.filter(h => h.rating === 'miss').length}</td><td>{rows.filter(h => h.rating === 'extra').length}</td></tr>; }))}</tbody></table></div><details><summary>Review every expected and played note</summary>{exercise && Array.from({ length: exercise.settings.bars }, (_, bar) => <section key={bar}><h3>Bar {bar + 1}</h3><ol className={styles.review}>{result.rated.filter(h => Math.floor((h.step ?? 0) / exercise.stepsPerBar) === bar).sort((a,b) => (a.step ?? 0) - (b.step ?? 0)).map((hit,index) => { const step = hit.step ?? 0; const beat = ((step % exercise.stepsPerBar) * 4 / exercise.subdivision) + 1; const timing = hit.offsetMs === null ? '' : ` · ${Math.abs(hit.offsetMs)} ms ${hit.offsetMs < 0 ? 'early' : hit.offsetMs > 0 ? 'late' : 'on time'}`; return <li className={styles[hit.rating]} key={`${hit.instrument}-${step}-${hit.rating}-${index}`}><strong>{hit.rating === 'miss' ? 'Missed' : hit.rating === 'extra' ? 'Extra' : hit.rating === 'great' ? 'On time' : 'Played'}</strong> · {hit.instrument} · beat {Number.isInteger(beat) ? beat : beat.toFixed(2)}{timing}</li>; })}</ol></section>)}</details>{tempoLadder && <div className={styles.ladder}><p>Tempo ladder: advance after 85% accuracy.</p><button onClick={advanceTempoLadder}>{result.summary.accuracy >= 85 && settings.bpm < 200 ? `Next tempo: ${settings.bpm + 5} BPM` : result.summary.accuracy >= 85 ? 'Ladder complete' : 'Retry before advancing'}</button></div>}</section>}
-    <section className={styles.panel}><h2>Practice goal</h2>{goal ? <><p>{goalAttempts.length} of {goal.targetReads} first readings at {goal.accuracy}% or higher · {goal.level}, {goal.focusRhythm} in {goal.meter} at {goal.bpm} BPM</p><progress max={goal.targetReads} value={Math.min(goal.targetReads,goalAttempts.length)} aria-label="Practice goal progress" /><button onClick={() => { setGoal(null); localStorage.removeItem(goalKey); setGoalMessage('Goal removed.'); }}>Remove goal</button></> : <p>Set a target for a rhythm and tempo, then track successful first readings.</p>}<div className={styles.controls}><label>Goal level<select value={goalDraft.level} onChange={e => { const level = e.target.value as SightGoal['level']; setGoalDraft({ ...goalDraft, level, meter: sightMeters(level).includes(goalDraft.meter) ? goalDraft.meter : sightMeters(level)[0] }); }}><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label><label>Goal meter<select value={goalDraft.meter} onChange={e => setGoalDraft({ ...goalDraft, meter: e.target.value as SightGoal['meter'] })}>{sightMeters(goalDraft.level).map(meter => <option key={meter}>{meter}</option>)}</select></label><label>Goal tempo<input type="number" min={40} max={200} value={goalDraft.bpm} onChange={e => setGoalDraft({ ...goalDraft, bpm: Number(e.target.value) })} /></label><label>Goal rhythm<select value={goalDraft.focusRhythm} onChange={e => setGoalDraft({ ...goalDraft, focusRhythm: e.target.value as SightRhythmFocus })}>{(['mixed','quarters','eighths',...(goalDraft.level === 'Beginner' ? [] : ['sixteenths']),...(goalDraft.level === 'Advanced' && goalDraft.meter !== '7/8' ? ['triplets'] : [])] as SightRhythmFocus[]).map(value => <option key={value} value={value}>{value}</option>)}</select></label><label>Accuracy target<input type="number" min={50} max={100} value={goalDraft.accuracy} onChange={e => setGoalDraft({ ...goalDraft, accuracy: Number(e.target.value) })} /></label><label>First readings to complete<input type="number" min={1} max={20} value={goalDraft.targetReads} onChange={e => setGoalDraft({ ...goalDraft, targetReads: Number(e.target.value) })} /></label><button onClick={saveGoal}>{goal ? 'Update goal' : 'Save goal'}</button></div><p role="status">{goalMessage}</p></section>
-    <section className={styles.panel}><h2>Progress insights</h2><div className={styles.controls}><label>Level<select value={historyFilters.level} onChange={e => setHistoryFilters({ ...historyFilters, level: e.target.value })}><option>Any</option>{['Beginner','Intermediate','Advanced'].map(level => <option key={level}>{level}</option>)}</select></label><label>Meter<select value={historyFilters.meter} onChange={e => setHistoryFilters({ ...historyFilters, meter: e.target.value })}><option>Any</option>{['4/4','3/4','5/4','7/8'].map(meter => <option key={meter}>{meter}</option>)}</select></label><label>Input<select value={historyFilters.source} onChange={e => setHistoryFilters({ ...historyFilters, source: e.target.value })}><option>Any</option>{['keyboard','touch','midi'].map(input => <option key={input}>{input}</option>)}</select></label><label>Tempo<select value={historyFilters.tempo} onChange={e => setHistoryFilters({ ...historyFilters, tempo: e.target.value })}><option value="Any">Any tempo</option><option value="under80">Under 80</option><option value="80to119">80–119</option><option value="120plus">120+</option></select></label></div><p>{trendReadings.length} first readings · {trendReadings.length ? `${Math.round(trendReadings.reduce((sum,h) => sum+h.accuracy,0)/trendReadings.length)}% average accuracy` : 'Complete a first reading to start a trend.'} · {practiceReadings.length} practice/assisted attempts shown separately.</p>{trendReadings.length > 0 && <><div className={styles.chart} role="img" aria-label={`Recent first-reading accuracy: ${trendReadings.slice(-10).map(row => row.accuracy).join(', ')} percent`}><div>{trendReadings.slice(-10).map((row,index) => <span key={`${row.id}-${index}`} style={{ height: `${Math.max(6,row.accuracy)}%` }} title={`${row.accuracy}% · ${row.settings.bpm} BPM`} />)}</div></div><p className={styles.chartCaption}>Most recent {Math.min(10,trendReadings.length)} first readings, oldest to newest.</p></>}<details><summary>First-reading history ({trendReadings.length})</summary><ol>{[...trendReadings].reverse().map(row => <li key={row.id}>{new Date(row.playedAt).toLocaleDateString()} · {row.settings.level} · {row.settings.meter} · {row.settings.bpm} BPM · {row.source} · {row.accuracy}% · {row.meanOffsetMs === null ? 'no timing match' : `${Math.abs(row.meanOffsetMs)} ms ${row.meanOffsetMs < 0 ? 'early' : row.meanOffsetMs > 0 ? 'late' : 'on time'}`}</li>)}</ol></details><details><summary>Practice and assisted attempts ({practiceReadings.length})</summary><ol>{[...practiceReadings].reverse().map(row => <li key={row.id}>{new Date(row.playedAt).toLocaleDateString()} · {row.settings.level} · {row.settings.meter} · {row.settings.bpm} BPM · {row.source} · {row.classification} · {row.accuracy}%</li>)}</ol></details></section>
+    {sessionTotal > 0 && phase !== 'results' && <p role="status">Practice set · exercise {sessionIndex} of {sessionTotal} · {sessionMetrics.length} first reads complete.</p>}
+    <p hidden={focusMode}>{previewSeconds === 0 ? 'Cold read' : `${previewSeconds}-second silent preview`} · {countInBars === 0 ? 'no count-in' : `${countInBars}-bar count-in`}{spokenCountIn ? ' with spoken count' : ''} · one scored pass. Accents are reading cues; scoring checks voice and timing. <Link href="/trainer?setup=1">Trainer input help</Link></p>
+    <div className={styles.actions}>{!active && !reference && <><button onClick={start}>{phase === 'results' || hasAttempted ? 'Retry as practice' : 'Start sight reading'}</button><button onClick={fresh}>New exercise</button>{!focusMode && <button onClick={beginPracticeSet}>Start {sessionLength}-exercise set</button>} {!focusMode && <button onClick={() => { void shareExercise(); }}>Share assignment</button>}{!focusMode && exercise && <button onClick={() => { rememberPhrase(exercise); setShowSetupNotation(true); window.setTimeout(() => window.print(), 120); }}>Print exercise</button>}</>}{active && <button onClick={cancel}>{midiTimingActive ? 'Cancel MIDI timing check' : 'Cancel attempt'}</button>}{reference && <button onClick={() => { stop(); setReference(false); }}>Stop playback</button>}</div>
+    {!active && !focusMode && <details><summary>Teacher assignment and student result</summary><p>Create a seeded exercise with a due date and accuracy target. Students return their result with a short code; no account or cloud sync is needed.</p><div className={styles.controls}><label>Assignment title<input maxLength={80} value={assignmentTitle} onChange={e => setAssignmentTitle(e.target.value)} /></label><label>Due date<input type="date" value={assignmentDueDate} onChange={e => setAssignmentDueDate(e.target.value)} /></label><label>Minimum accuracy (%)<input type="number" min={50} max={100} value={assignmentMinimumAccuracy} onChange={e => setAssignmentMinimumAccuracy(Number(e.target.value))} /></label></div><label>Assignment or student result code<input value={assignmentCode} onChange={e => setAssignmentCode(e.target.value)} placeholder="Paste DH-SA1 or DH-SUB1 code" /></label><button onClick={importAssignment}>Load assignment / review result</button></details>}
+    {sharedAssignment && loadedAssignment && <p className={styles.assignment} role="status" hidden={focusMode}>{loadedAssignment.title || 'Shared assignment'}{loadedAssignment.dueDate ? ` · due ${loadedAssignment.dueDate}` : ''}{loadedAssignment.minimumAccuracy ? ` · target ${loadedAssignment.minimumAccuracy}%` : ''} · {exercise?.settings.level} · {exercise?.settings.meter} · {exercise?.settings.bpm} BPM. Preview it before starting.</p>}
+    {!active && !focusMode && currentRecommendation && <section className={styles.panel}><h2>Suggested next step</h2><p>{currentRecommendation.reason}</p><button onClick={applyRecommendedSettings}>{recommendationAction}</button></section>}
+    {!active && !focusMode && <section className={styles.panel}><h2>Learning path</h2>{pathIndex >= 0 ? <><p>Step {pathIndex + 1} of {SIGHT_LEARNING_PATH.length}: {SIGHT_LEARNING_PATH[pathIndex].title}. Complete a first reading at 80% to advance.</p><progress max={SIGHT_LEARNING_PATH.length} value={pathIndex} aria-label="Reading learning path progress" /><button onClick={startLearningPathStep}>Start this step</button></> : <><p>All reading foundation steps are complete.</p><progress max={SIGHT_LEARNING_PATH.length} value={SIGHT_LEARNING_PATH.length} aria-label="Reading learning path complete" /></>}</section>}
+    <p role="status" aria-live="polite">{phase === 'preview' ? `Silent preview · ${clock} seconds` : phase === 'count-in' ? `Count-in · ${countInSyllable}` : phase === 'playing' ? 'Play the notation' : message || (hasAttempted && phase !== 'results' ? 'This exercise will count as practice.' : 'Ready')}</p>
+    {exercise && (phase !== 'setup' || hasAttempted || showSetupNotation) && <div className={styles.printable}><h2>Drum Hero sight-reading exercise</h2><p>{exercise.settings.level} · {exercise.settings.meter} · {exercise.settings.bpm} quarter-note BPM · {exercise.settings.bars} bars · {exercise.settings.style}</p><Notation exercise={exercise} cursor={cursor} />{cueLevel === 'full' ? <p>Legend: Kick (Space), Snare (F), Hi-hat (J), Tom (K), Crash (L). Cross noteheads: cymbals. &gt; accent. Rests: silence. {settings.meter === '7/8' ? 'Grouping: 2+2+3 eighths.' : settings.meter === '5/4' ? 'Grouping: 3+2 quarters.' : ''}</p> : cueLevel === 'compact' ? <p>Voice is encoded by staff position. &gt; marks an accent; rests are silence.</p> : null}<details><summary>{cueLevel === 'full' ? 'Accessible counted notation' : 'Show voice legend and counted notation'}</summary><p>Kick (Space), Snare (F), Hi-hat (J), Tom (K), Crash (L). Cross noteheads: cymbals. &gt; marks an accent; rests are silence.</p><p>{noteText}</p><button disabled={phase === 'playing' || phase === 'count-in'} onClick={() => { assisted.current = true; setClassification('assisted'); if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(noteText)); } else setMessage('Speech is unavailable; read the counted notes.'); }}>Speak notes (assisted attempt)</button></details></div>}
+    <div className={`${styles.pads} ${cueLevel === 'standard' ? styles.standardPads : ''}`}>{SIGHT_VOICES.map((voice, index) => <button key={voice} aria-label={`${labels[index]} drum pad`} data-reading-pad disabled={phase !== 'playing' || source === 'midi'} onPointerDown={e => { e.preventDefault(); hit(voice, source); }} onClick={e => { if (e.detail === 0) hit(voice, source); }}>{cueLevel === 'standard' ? `Pad ${index + 1}` : labels[index]}{cueLevel !== 'standard' && <small>{keys[index].replace('Key','')}</small>}</button>)}</div>
+    {result && !confidenceRecorded && <section className={styles.panel} aria-labelledby="confidence-title"><h2 id="confidence-title" ref={confidenceHeading} tabIndex={-1}>Before seeing your score</h2><p>How confident did you feel while reading this phrase?</p><div className={styles.actions}>{[['1','Not sure'],['2','A little sure'],['3','Somewhat sure'],['4','Very sure'],['5','Certain']].map(([value,label]) => <button type="button" key={value} onClick={() => recordConfidence(Number(value))} aria-label={`${label}, ${value} out of 5`}>{value} · {label}</button>)}<button type="button" onClick={() => recordConfidence(null)}>Skip</button></div><p>This reflection is saved with the attempt; it does not affect the score or reading trends.</p></section>}
+    {result && confidenceRecorded && <section className={styles.panel}><h2 ref={heading} tabIndex={-1}>Sight-reading results</h2><p><strong>{classification === 'reading' ? 'First reading' : classification === 'assisted' ? 'Assisted attempt' : 'Practice retry'} · {result.summary.accuracy}% accuracy · {result.summary.score} score</strong></p><p>{result.meanOffsetMs === null ? 'No matched hits' : `Average timing: ${Math.abs(result.meanOffsetMs)} ms ${result.meanOffsetMs < 0 ? 'early' : result.meanOffsetMs > 0 ? 'late' : 'on time'}`} · {result.summary.miss} misses · {result.summary.extra} extras{result.timingSpreadMs !== null ? ` · ${result.timingSpreadMs} ms timing spread` : ''}{result.pulseRecovery !== null ? ` · ${result.pulseRecovery}% pulse recovery after errors` : ''}</p>{confidenceRating !== null && <p>Confidence: {confidenceRating}/5 ({confidenceRating * 20}%) · {confidenceRating * 20 - result.summary.accuracy >= 0 ? `${confidenceRating * 20 - result.summary.accuracy} points more confident than the score` : `${result.summary.accuracy - confidenceRating * 20} points less confident than the score`}.</p>}{classification === 'reading' && source === 'midi' && <p>Input check: {attemptCalibrationSummary}.</p>}{loadedAssignment && <p role="status">{result.summary.accuracy >= (loadedAssignment.minimumAccuracy ?? 0) ? 'Assignment target met' : 'Assignment target not met'}{loadedAssignment.minimumAccuracy ? ` · ${loadedAssignment.minimumAccuracy}% required` : ''}{loadedAssignment.dueDate ? ` · due ${loadedAssignment.dueDate}` : ''}</p>}<div className={styles.actions}><button onClick={shareSubmission}>Copy student result code</button>{drillParent ? <button onClick={returnToFullPhrase}>Return to full phrase</button> : <button onClick={startWeakestBarDrill}>Practice weakest bar twice</button>}{result.summary.miss + result.summary.extra > 0 && !transferCheck && <button onClick={startErrorFocusDrill}>Practice the main error pattern</button>}{transferSettings && !transferCheck && <button onClick={startTransferCheck}>Check transfer on a new phrase</button>}</div><div className={styles.actions}><label>Playback speed<select value={reviewSpeed} onChange={e => setReviewSpeed(Number(e.target.value))}><option value={0.75}>0.75×</option><option value={1}>1×</option><option value={1.25}>1.25×</option></select></label><button disabled={reference} onClick={() => { void playReview('reference'); }}>Play reference</button><button disabled={reference} onClick={() => { void playReview('learner'); }}>Play my pass</button><button disabled={reference} onClick={() => { void playReview('compare'); }}>Compare reference and my pass</button></div>{result.fluency && <section><h3>Rhythm reading fluency</h3><div className={styles.scroll}><table><caption>Accuracy by rhythm family</caption><thead><tr><th>Rhythm</th><th>Accuracy</th></tr></thead><tbody>{Object.entries(result.fluency).map(([name, accuracy]) => <tr key={name}><th scope="row">{name}</th><td>{accuracy}%</td></tr>)}</tbody></table></div></section>}<div className={styles.scroll}><table><caption>Misses and extras by bar and voice</caption><thead><tr><th>Bar</th><th>Voice</th><th>Misses</th><th>Extras</th></tr></thead><tbody>{exercise && Array.from({ length: exercise.settings.bars }, (_, bar) => SIGHT_VOICES.map(voice => { const rows = result.rated.filter(h => h.instrument === voice && Math.floor((h.step ?? 0) / exercise.stepsPerBar) === bar); return <tr key={`${bar}-${voice}`}><td>{bar + 1}</td><td>{voice}</td><td>{rows.filter(h => h.rating === 'miss').length}</td><td>{rows.filter(h => h.rating === 'extra').length}</td></tr>; }))}</tbody></table></div><details><summary>Review every expected and played note</summary>{exercise && Array.from({ length: exercise.settings.bars }, (_, bar) => <section key={bar}><h3>Bar {bar + 1}</h3><ol className={styles.review}>{result.rated.filter(h => Math.floor((h.step ?? 0) / exercise.stepsPerBar) === bar).sort((a,b) => (a.step ?? 0) - (b.step ?? 0)).map((hit,index) => { const step = hit.step ?? 0; const beat = ((step % exercise.stepsPerBar) * 4 / exercise.subdivision) + 1; const timing = hit.offsetMs === null ? '' : ` · ${Math.abs(hit.offsetMs)} ms ${hit.offsetMs < 0 ? 'early' : hit.offsetMs > 0 ? 'late' : 'on time'}`; return <li className={styles[hit.rating]} key={`${hit.instrument}-${step}-${hit.rating}-${index}`}><strong>{hit.rating === 'miss' ? 'Missed' : hit.rating === 'extra' ? 'Extra' : hit.rating === 'great' ? 'On time' : 'Played'}</strong> · {hit.instrument} · beat {Number.isInteger(beat) ? beat : beat.toFixed(2)}{timing}</li>; })}</ol></section>)}</details>{sessionTotal > 0 && <section className={styles.session}><h3>{sessionLabel} · {sessionStage ? `${sessionStage} · ` : ''}exercise {sessionIndex} of {sessionTotal}</h3>{sessionQueue.length ? <><p>{sessionMetrics.length} first reads complete · {sessionMetrics.length ? `${Math.round(sessionMetrics.reduce((sum, item) => sum + item.accuracy, 0) / sessionMetrics.length)}% average accuracy so far` : 'This exercise did not count as a first read.'}</p><button onClick={nextPracticeSetExercise}>Next exercise in set</button></> : <><p>Set complete · {sessionMetrics.length} first reads · {sessionMetrics.length ? `${Math.round(sessionMetrics.reduce((sum, item) => sum + item.accuracy, 0) / sessionMetrics.length)}% average accuracy` : 'No first-read results were recorded.'} · {sessionMetrics.flatMap(item => item.timingSpreadMs === null ? [] : [item.timingSpreadMs]).length ? `${setAvgTimingSpread} ms average timing spread` : 'timing spread unavailable'}</p></>}</section>}{tempoLadder && <div className={styles.ladder}><p>Tempo ladder: advance after 85% accuracy.</p><button onClick={advanceTempoLadder}>{result.summary.accuracy >= 85 && settings.bpm < 200 ? `Next tempo: ${settings.bpm + 5} BPM` : result.summary.accuracy >= 85 ? 'Ladder complete' : 'Retry before advancing'}</button></div>}</section>}
+    {adaptiveMode && result && exercise && classification === 'reading' && <section className={styles.panel} hidden={focusMode}><h2>Adaptive next step</h2>{adaptiveNext || adaptivePreview !== null ? <><p>Based on this first read, {adaptiveNext ? `try ${adaptiveNext.focusRhythm} rhythms at ${adaptiveNext.density} density and ${adaptiveNext.bpm} BPM` : 'keep the same rhythm and tempo'}{adaptivePreview !== null ? ` with a ${adaptivePreview}-second preview` : ''}.</p><button onClick={() => { const next = adaptiveNext ?? exercise.settings; setSettings(next); setPreviewSeconds(adaptivePreview ?? previewSeconds); setExercise(generateFreshSightExercise(next, crypto.getRandomValues(new Uint32Array(1))[0], phraseMemory())); setSessionQueue([]); setSessionTotal(0); setSessionIndex(0); attempted.current = false; setHasAttempted(false); assisted.current = false; setResult(null); setReviewCursor(null); setPhase('setup'); setMessage('Adaptive exercise ready. Preview it before your first read.'); }}>Continue with adaptive exercise</button></> : <p>Hold this setting steady; accuracy and timing are in the practice range.</p>}</section>}
+    {result && exercise && <section className={styles.panel} hidden={focusMode}><h2>Replay a specific error</h2><p>Choose a missed or extra note to compare its bar against the reference. The staff cursor marks that note.</p><div className={styles.actions}>{result.rated.filter(hit => hit.rating === 'miss' || hit.rating === 'extra').map((hit, index) => { const step = hit.step ?? 0, bar = Math.min(exercise.settings.bars - 1, Math.floor(step / exercise.stepsPerBar)), beat = ((step % exercise.stepsPerBar) * 4 / exercise.subdivision) + 1; return <button key={`${hit.instrument}-${step}-${hit.rating}-${index}`} disabled={reference} onClick={() => { setReviewCursor({ barIndex: bar, fraction: (step % exercise.stepsPerBar) * 4 / exercise.subdivision / exercise.beatsPerBar }); void playReview('compare', bar); }}>{hit.rating === 'miss' ? 'Missed' : 'Extra'} {hit.instrument} · bar {bar + 1}, beat {Number.isInteger(beat) ? beat : beat.toFixed(2)}</button>; })}</div>{result.rated.every(hit => hit.rating !== 'miss' && hit.rating !== 'extra') && <p>No missed or extra notes to replay.</p>}</section>}
+    <section className={styles.panel} hidden={focusMode}><h2>Practice goal</h2>{goal ? <><p>{goalAttempts.length} of {goal.targetReads} first readings at {goal.accuracy}% or higher · {goal.level}, {goal.focusRhythm} in {goal.meter} at {goal.bpm} BPM</p><progress max={goal.targetReads} value={Math.min(goal.targetReads,goalAttempts.length)} aria-label="Practice goal progress" /><button onClick={beginGoalPath}>Run five-step goal study path</button><button onClick={() => { setGoal(null); localStorage.removeItem(goalKey); setGoalMessage('Goal removed.'); }}>Remove goal</button></> : <p>Set a target for a rhythm and tempo, then track successful first readings.</p>}<div className={styles.controls}><label>Goal level<select value={goalDraft.level} onChange={e => { const level = e.target.value as SightGoal['level']; setGoalDraft({ ...goalDraft, level, meter: sightMeters(level).includes(goalDraft.meter) ? goalDraft.meter : sightMeters(level)[0] }); }}><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label><label>Goal meter<select value={goalDraft.meter} onChange={e => setGoalDraft({ ...goalDraft, meter: e.target.value as SightGoal['meter'] })}>{sightMeters(goalDraft.level).map(meter => <option key={meter}>{meter}</option>)}</select></label><label>Goal tempo<input type="number" min={40} max={200} value={goalDraft.bpm} onChange={e => setGoalDraft({ ...goalDraft, bpm: Number(e.target.value) })} /></label><label>Goal rhythm<select value={goalDraft.focusRhythm} onChange={e => setGoalDraft({ ...goalDraft, focusRhythm: e.target.value as SightRhythmFocus })}>{(['mixed','quarters','eighths',...(goalDraft.level === 'Beginner' ? [] : ['sixteenths']),...(goalDraft.level === 'Advanced' && goalDraft.meter !== '7/8' ? ['triplets'] : [])] as SightRhythmFocus[]).map(value => <option key={value} value={value}>{value}</option>)}</select></label><label>Accuracy target<input type="number" min={50} max={100} value={goalDraft.accuracy} onChange={e => setGoalDraft({ ...goalDraft, accuracy: Number(e.target.value) })} /></label><label>First readings to complete<input type="number" min={1} max={20} value={goalDraft.targetReads} onChange={e => setGoalDraft({ ...goalDraft, targetReads: Number(e.target.value) })} /></label><button onClick={saveGoal}>{goal ? 'Update goal' : 'Save goal'}</button></div><p role="status">{goalMessage}</p></section>
+    <section className={styles.panel} hidden={focusMode}><h2>Progress insights</h2><div className={styles.controls}><label>Level<select value={historyFilters.level} onChange={e => setHistoryFilters({ ...historyFilters, level: e.target.value })}><option>Any</option>{['Beginner','Intermediate','Advanced'].map(level => <option key={level}>{level}</option>)}</select></label><label>Meter<select value={historyFilters.meter} onChange={e => setHistoryFilters({ ...historyFilters, meter: e.target.value })}><option>Any</option>{['4/4','3/4','5/4','7/8'].map(meter => <option key={meter}>{meter}</option>)}</select></label><label>Input<select value={historyFilters.source} onChange={e => setHistoryFilters({ ...historyFilters, source: e.target.value })}><option>Any</option>{['keyboard','touch','midi'].map(input => <option key={input}>{input}</option>)}</select></label><label>Tempo<select value={historyFilters.tempo} onChange={e => setHistoryFilters({ ...historyFilters, tempo: e.target.value })}><option value="Any">Any tempo</option><option value="under80">Under 80</option><option value="80to119">80–119</option><option value="120plus">120+</option></select></label></div><p>{trendReadings.length} first readings · {trendReadings.length ? `${Math.round(trendReadings.reduce((sum,h) => sum+h.accuracy,0)/trendReadings.length)}% average accuracy` : 'Complete a first reading to start a trend.'} · {practiceReadings.length} practice/assisted attempts shown separately.</p><p>Timing consistency: {avgTimingSpread === null ? 'matched hits will build this trend' : `${avgTimingSpread} ms average spread around each read's mean`} · {timingDirection.early} early and {timingDirection.late} late matched hits.</p><p>Pulse recovery after errors: {avgPulseRecovery === null ? 'no first-read recovery samples yet' : `${avgPulseRecovery}% average across ${pulseTrend.length} first readings`} · confidence calibration: {confidenceBias === null ? 'record a confidence check to begin' : `${Math.abs(confidenceBias)} points ${confidenceBias > 0 ? 'overconfident' : confidenceBias < 0 ? 'underconfident' : 'well matched'} on average`}.</p><p>Phrase variety: {variety.uniquePhrases} unique phrases across {variety.attempts} first reads · {variety.meters} meters · {variety.rhythmSettings} meter/rhythm pairs · {variety.styles} styles.</p><button onClick={startCoverageGap}>Try a coverage gap: {coverageGap.meter} {coverageGap.focusRhythm}</button>{rhythmFluency.some(row => row.average !== null) && <div className={styles.scroll}><table><caption>First-reading fluency by rhythm family</caption><thead><tr><th>Pattern</th><th>Average</th><th>Readings</th></tr></thead><tbody>{rhythmFluency.filter(row => row.average !== null).map(row => <tr key={row.name}><th scope="row">{row.name}</th><td>{row.average}%</td><td>{row.count}</td></tr>)}</tbody></table></div>}{trendReadings.length > 0 && <><div className={styles.chart} role="img" aria-label={`Recent first-reading accuracy: ${trendReadings.slice(-10).map(row => row.accuracy).join(', ')} percent`}><div>{trendReadings.slice(-10).map((row,index) => <span key={`${row.id}-${index}`} style={{ height: `${Math.max(6,row.accuracy)}%` }} title={`${row.accuracy}% · ${row.settings.bpm} BPM`} />)}</div></div><p className={styles.chartCaption}>Most recent {Math.min(10,trendReadings.length)} first readings, oldest to newest.</p></>}<details><summary>First-reading history ({trendReadings.length})</summary><ol>{[...trendReadings].reverse().map(row => <li key={row.id}>{new Date(row.playedAt).toLocaleDateString()} · {row.settings.level} · {row.settings.meter} · {row.settings.bpm} BPM · {row.source} · {row.accuracy}%{row.confidence == null ? '' : ` · confidence ${row.confidence}/5`}{row.pulseRecovery == null ? '' : ` · ${row.pulseRecovery}% pulse recovery`} · {row.meanOffsetMs === null ? 'no timing match' : `${Math.abs(row.meanOffsetMs)} ms ${row.meanOffsetMs < 0 ? 'early' : row.meanOffsetMs > 0 ? 'late' : 'on time'}`} · {row.timingSpreadMs === undefined || row.timingSpreadMs === null ? 'timing spread not recorded' : `${row.timingSpreadMs} ms spread; ${row.earlyHits ?? 0} early, ${row.lateHits ?? 0} late`}</li>)}</ol></details><details><summary>Practice and assisted attempts ({practiceReadings.length})</summary><ol>{[...practiceReadings].reverse().map(row => <li key={row.id}>{new Date(row.playedAt).toLocaleDateString()} · {row.settings.level} · {row.settings.meter} · {row.settings.bpm} BPM · {row.source} · {row.classification} · {row.accuracy}%</li>)}</ol></details></section>
+    {trendReadings.length > 0 && <section className={styles.panel} hidden={focusMode}><h2>Progress map</h2><p>First-read accuracy by meter, rhythm focus, and tempo band. Input and level filters above apply here too.</p><div className={styles.scroll}><table className={styles.progressMap}><caption>First-reading accuracy map</caption><thead><tr><th scope="col">Meter · rhythm</th>{tempoBands.map(band => <th scope="col" key={band.id}>{band.label}</th>)}</tr></thead><tbody>{progressRows.map(key => { const [meter, rhythm] = key.split('|'); return <tr key={key}><th scope="row">{meter} · {rhythm}</th>{tempoBands.map(band => { const rows = trendReadings.filter(row => row.settings.meter === meter && row.settings.focusRhythm === rhythm && band.matches(row.settings.bpm)); const average = rows.length ? Math.round(rows.reduce((sum, row) => sum + row.accuracy, 0) / rows.length) : null; const tone = average === null ? styles.progressEmpty : average >= 85 ? styles.progressGood : average >= 70 ? styles.progressMid : styles.progressLow; return <td key={band.id} className={`${styles.progressCell} ${tone}`} aria-label={average === null ? 'No first readings' : `${average}% average from ${rows.length} first readings`}>{average === null ? '—' : `${average}% · ${rows.length}`}</td>; })}</tr>; })}</tbody></table></div></section>}
+
   </div>;
 }

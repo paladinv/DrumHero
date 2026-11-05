@@ -107,7 +107,7 @@ struct DrumHeroRootView: View {
         self.storageNotice = storageNotice
         if ProcessInfo.processInfo.arguments.contains("--uitesting-reset"), !Self.didResetForUITests {
             Self.didResetForUITests = true
-            [AssessmentHistory.key, "drumHero.selectedTab", "drumHero.practicePatternID", "drumHero.practiceBpm", "drumHero.language"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
+            [AssessmentHistory.key, SightHistory.key, SightHistory.goalKey, "drumHero.selectedTab", "drumHero.practicePatternID", "drumHero.practiceBpm", "drumHero.language"].forEach { UserDefaults.standard.removeObject(forKey: $0) }
         }
         do { _content = State(initialValue: try MobileContentDocument.load()) }
         catch { _loadError = State(initialValue: error.localizedDescription) }

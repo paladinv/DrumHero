@@ -6,11 +6,19 @@
 .pads button { min-width:85px; min-height:64px; touch-action:manipulation; }
 .notes { overflow-x:auto; max-width:100%; }
 .notes canvas { max-width:100%; height:auto; }
+.root[data-large-notation="true"] .notes canvas { width:150%; max-width:none; }
+.check { display:flex; align-items:center; gap:.65rem; min-height:44px; }
+.check input { width:1.25rem; height:1.25rem; }
+.educator,.optionalCheck { display:grid; gap:.75rem; padding:.85rem; border:1px solid var(--line); border-radius:12px; }
+.educator label { display:grid; gap:.4rem; }
+.educator textarea { min-height:5rem; padding:.65rem; border:1px solid var(--line); border-radius:8px; background:var(--theme-bg-surface,var(--surface)); color:var(--ink); font:inherit; }
 .status { font-size:1.25rem; min-height:2rem; }
 .root fieldset { padding:1rem; }
 .root table { width:100%; text-align:left; }
 .tableScroll { max-width:100%; overflow-x:auto; }
-.tableScroll table { min-width:640px; }
+.tableScroll table { min-width:760px; }
+.notice { padding:1rem; border-inline-start:4px solid var(--coral); background:var(--theme-bg-surface,var(--surface)); }
+.notice a { color:var(--ink); font-weight:700; }
 .root td,.root th { padding:.5rem; }
 .root button:focus-visible,.root a:focus-visible { outline:3px solid currentColor; outline-offset:3px; }
 .root button,.root select { min-height:44px; padding:.65rem 1rem; border:1px solid var(--line); border-radius:10px; background:var(--theme-bg-surface,var(--surface)); color:var(--ink); }

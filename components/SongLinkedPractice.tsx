@@ -2,17 +2,17 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { allSongs, readSongLibrary, recordSongScore, writeSongLibrary, type DrumSong, type SongLibraryState } from "@/lib/song-library";
+import { allSongs, readActiveSongLibrary, readSongLibrary, recordSongScore, writeSongLibrary, type DrumSong, type SongLibraryState } from "@/lib/song-library";
 import type { SongRunResult } from "./SongSessionPlayer";
 
 const SongSessionPlayer = dynamic(() => import("./SongSessionPlayer").then(module => module.SongSessionPlayer), { loading: () => <p>Loading full kit scoring…</p> });
 
 export function SongLinkedPractice({ patternId, engine, targetBpm }: { patternId: string; engine: "pad" | "trainer"; targetBpm?: number }) {
-  const [state, setState] = useState<SongLibraryState>(() => readSongLibrary());
+  const [state, setState] = useState<SongLibraryState>(() => readActiveSongLibrary());
   const [message, setMessage] = useState("");
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
-    const refresh = () => { setState(readSongLibrary()); setLoaded(true); };
+    const refresh = () => { setState(readActiveSongLibrary()); setLoaded(true); };
     refresh();
     window.addEventListener("drum-hero:song-library-change", refresh);
     window.addEventListener("storage", refresh);

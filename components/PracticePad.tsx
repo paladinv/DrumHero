@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDrumAudio, type DrumAudio } from "@/lib/audio";
 import { createPracticeBass, type PracticeBass } from "@/lib/practice-accompaniment";
 import { patterns } from "@/lib/curriculum";
-import { allSongs, readSongLibrary, recordSongScore, songPartPattern, writeSongLibrary } from "@/lib/song-library";
+import { allSongs, readActiveSongLibrary, readSongLibrary, recordSongScore, songPartPattern, writeSongLibrary } from "@/lib/song-library";
 import { classifyOffset, findClosestExpected, stepDurationMs, summarizeHits } from "@/lib/scoring";
 import { CUSTOM_GROOVES_EVENT, readCustomGrooves } from "@/lib/custom-grooves";
 import type { Instrument, PracticePattern, RatedHit, SessionResult } from "@/lib/types";
@@ -32,7 +32,7 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const pattern=availablePatterns.find((item)=>item.id===patternId)??patterns[0];
   const [bpm,setBpm]=useState(preferredTempo(initial,progress.settings.preferredBpm));
   useEffect(()=>{if(hydrated)setBpm(preferredTempo(pattern,progress.settings.preferredBpm))},[hydrated,pattern.id,progress.settings.preferredBpm]);
-  useEffect(()=>{const timer=window.setTimeout(()=>{const songs=allSongs(readSongLibrary());setLibrarySongs(songs);const next=songs.flatMap((song)=>song.sections.flatMap((section)=>section.parts.map((part)=>songPartPattern(song,section,part))));setLibraryPatterns(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(preferredTempo(match,progress.settings.preferredBpm))},0);return()=>window.clearTimeout(timer)},[initialPatternId,progress.settings.preferredBpm]);
+  useEffect(()=>{const timer=window.setTimeout(()=>{const songs=allSongs(readActiveSongLibrary());setLibrarySongs(songs);const next=songs.flatMap((song)=>song.sections.flatMap((section)=>section.parts.map((part)=>songPartPattern(song,section,part))));setLibraryPatterns(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(preferredTempo(match,progress.settings.preferredBpm))},0);return()=>window.clearTimeout(timer)},[initialPatternId,progress.settings.preferredBpm]);
   useEffect(()=>{const load=()=>{const next=readCustomGrooves();setCustomGrooves(next);const match=next.find((item)=>item.id===initialPatternId);if(match)setBpm(preferredTempo(match,progress.settings.preferredBpm))};const timer=window.setTimeout(load,0);window.addEventListener(CUSTOM_GROOVES_EVENT,load);return()=>{window.clearTimeout(timer);window.removeEventListener(CUSTOM_GROOVES_EVENT,load)}},[initialPatternId,progress.settings.preferredBpm]);
   const [mode,setModeState]=useState<Mode>("idle");
   const modeRef=useRef<Mode>("idle");

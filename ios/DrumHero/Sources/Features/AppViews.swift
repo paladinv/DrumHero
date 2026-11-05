@@ -586,7 +586,13 @@ private enum TrainerSkillFocus: String, CaseIterable, Identifiable {
 struct TrainerView: View {
     let content: MobileContentDocument
     var initialPatternId: String? = nil
+    var initialBpm: Int? = nil
     var initialAdaptation: String = "standard"
+    var assessmentSince: Date? = nil
+    var assessmentInputProfile: String? = nil
+    var assessmentAdaptation: String? = nil
+    var assessmentCorrectionMs: Double? = nil
+    var assessmentTimingCalibrated: Bool? = nil
     @Environment(\.locale) private var locale
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
@@ -634,8 +640,26 @@ struct TrainerView: View {
     private var visibleVoices: [DrumVoice] { adaptation == "One voice / reduced reach" ? [adaptiveVoice] : Array(DrumVoice.allCases) }
     private var midiInputOffsetMs: Double { NativeMIDICalibration.correction(for: selectedMidiSourceID) }
     private var activeInputProfile: String { inputMode == "MIDI" ? selectedMidiSourceID : inputMode == "Microphone" ? "microphone" : "touch" }
+    private var activeInputCorrectionMs: Double { inputMode == "MIDI" ? midiInputOffsetMs : inputMode == "Microphone" ? microphoneInputOffsetMs : touchInputOffsetMs }
+    private var activeInputCalibrated: Bool { inputMode == "MIDI" ? NativeMIDICalibration.wasCalibrated(for: selectedMidiSourceID) : inputMode == "Microphone" ? NativeMIDICalibration.microphoneWasCalibrated : NativeMIDICalibration.touchWasCalibrated }
     private var recentMatchingRounds: [TrainerRoundRecord] {
         trainerRounds.filter { $0.patternID == patternID && $0.mode == "scored" && $0.assessmentAdaptation == "standard" && $0.inputProfile == activeInputProfile }.prefix(6).map { $0 }
+    }
+    private var assessmentRecheckStreak: Int? {
+        guard let assessmentSince, let assessmentInputProfile, let assessmentAdaptation,
+              assessmentSince <= .now else { return nil }
+        let matches = trainerRounds.filter {
+            $0.patternID == patternID && $0.mode.hasPrefix("scored") && $0.playedAt > assessmentSince &&
+            $0.inputProfile == assessmentInputProfile && $0.assessmentAdaptation == assessmentAdaptation &&
+            $0.timingCalibrated == assessmentTimingCalibrated &&
+            abs(($0.timingCorrectionMs ?? 0) - (assessmentCorrectionMs ?? 0)) < 10
+        }.sorted { $0.playedAt > $1.playedAt }
+        var streak = 0
+        for row in matches {
+            guard (row.score ?? 0) >= 85, (row.accuracy ?? 0) >= 85 else { break }
+            streak += 1
+        }
+        return streak
     }
     private var recentProgressSummary: String {
         let values = recentMatchingRounds.compactMap(\.accuracy)
@@ -668,6 +692,12 @@ struct TrainerView: View {
         NavigationStack {
             Form {
                 NavigationLink("Sight reading") { SightReadingView() }
+                if let streak = assessmentRecheckStreak {
+                    Section("Assessment practice") {
+                        Text(streak >= 3 ? "Ready for a recheck · \(min(streak, 3))/3 consecutive scored rounds reached 85% score and matched hits." : "\(min(streak, 3))/3 consecutive scored rounds reached 85% score and matched hits. Keep practising, then return to your assessment.")
+                        Text("This native Trainer history does not store hit timing offsets, so this readiness check uses score and matched-hit percentage only.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section("Round setup") {
                     Picker("Skill focus", selection: $skillFocus) { ForEach(TrainerSkillFocus.allCases) { Text($0.rawValue).tag($0) } }
                         .accessibilityIdentifier("trainer.skillFocus")
@@ -820,7 +850,7 @@ struct TrainerView: View {
             }
             .navigationTitle("Trainer")
             .onAppear {
-                if let id = initialPatternId, let selected = content.practicePatterns.first(where: { $0.id == id }) { patternID = id; bpm = selected.defaultBpm }
+                if let id = initialPatternId, let selected = content.practicePatterns.first(where: { $0.id == id }) { patternID = id; bpm = min(220, max(40, initialBpm ?? selected.defaultBpm)) }
                 if initialAdaptation == "hands-only" { adaptation = "Seated / no kick target" }
                 if initialAdaptation == "single-voice" { adaptation = "One voice / reduced reach" }
             }
@@ -904,7 +934,7 @@ struct TrainerView: View {
             }
         }
         saveRound(TrainerRoundRecord(patternID: pattern.id, patternName: roundPattern.name, bpm: bpm,
-                                     mode: adaptation == "Standard pattern" ? "scored" : "scored-adapted", repetitions: repetitions, ratings: [], score: result.score, accuracy: result.accuracy, inputProfile: inputMode == "MIDI" ? selectedMidiSourceID : inputMode == "Microphone" ? "microphone" : "touch", assessmentAdaptation: adaptation == "Standard pattern" ? "standard" : adaptation == "Seated / no kick target" ? "hands-only" : "single-voice"))
+                                     mode: adaptation == "Standard pattern" ? "scored" : "scored-adapted", repetitions: repetitions, ratings: [], score: result.score, accuracy: result.accuracy, inputProfile: inputMode == "MIDI" ? selectedMidiSourceID : inputMode == "Microphone" ? "microphone" : "touch", assessmentAdaptation: adaptation == "Standard pattern" ? "standard" : adaptation == "Seated / no kick target" ? "hands-only" : "single-voice", timingCorrectionMs: activeInputCorrectionMs, timingCalibrated: activeInputCalibrated))
         let descriptor = FetchDescriptor<PracticeSessionRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
         if let all = try? modelContext.fetch(descriptor) { for stale in all.dropFirst(50) { modelContext.delete(stale) } }
         let rounds = FetchDescriptor<TrainerRoundRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
@@ -998,6 +1028,8 @@ struct MobileBackupTrainerRound: Codable {
     let accuracy: Int?
     let inputProfile: String?
     let assessmentAdaptation: String?
+    let timingCorrectionMs: Double?
+    let timingCalibrated: Bool?
 
     init(_ record: TrainerRoundRecord) {
         id = record.id
@@ -1012,11 +1044,13 @@ struct MobileBackupTrainerRound: Codable {
         accuracy = record.accuracy
         inputProfile = record.inputProfile
         assessmentAdaptation = record.assessmentAdaptation
+        timingCorrectionMs = record.timingCorrectionMs
+        timingCalibrated = record.timingCalibrated
     }
 
     func makeRecord() -> TrainerRoundRecord {
         TrainerRoundRecord(id: id, patternID: patternID, patternName: patternName, bpm: bpm, playedAt: playedAt,
-                           mode: mode, repetitions: repetitions, ratings: ratings, score: score, accuracy: accuracy, inputProfile: inputProfile, assessmentAdaptation: assessmentAdaptation)
+                           mode: mode, repetitions: repetitions, ratings: ratings, score: score, accuracy: accuracy, inputProfile: inputProfile, assessmentAdaptation: assessmentAdaptation, timingCorrectionMs: timingCorrectionMs, timingCalibrated: timingCalibrated)
     }
 }
 
@@ -1139,7 +1173,8 @@ struct MobileProgressBackup: Codable {
                   !item.id.isEmpty && item.id.count <= 120 && patternIDs.contains(item.patternID) && validName(item.patternName) &&
                       (40...200).contains(item.bpm) && ["self", "scored", "self-adapted", "scored-adapted"].contains(item.mode) &&
                       (1...32).contains(item.repetitions) && item.ratings.count <= item.repetitions &&
-                      (item.score.map { (0...100).contains($0) } ?? true) && (item.accuracy.map { (0...100).contains($0) } ?? true)
+                      (item.score.map { (0...100).contains($0) } ?? true) && (item.accuracy.map { (0...100).contains($0) } ?? true) &&
+                      (item.timingCorrectionMs.map { $0.isFinite && abs($0) <= 250 } ?? true)
               }) else { throw MobileBackupError.invalidRecords }
 
         guard (schemaVersion == 2 || personalSongs.isEmpty), personalSongs.count <= 20,
@@ -1311,6 +1346,68 @@ private struct PortablePracticeSession: Codable, Hashable {
     var maxCombo: Int
 }
 
+private struct PortableGuidedPracticeStep: Codable, Hashable {
+    var id: String
+    var title: String
+    var reason: String
+    var patternId: String
+    var patternName: String
+    var minutes: Int
+    var href: String
+}
+
+private struct PortableGuidedPracticeSession: Codable, Hashable {
+    var version: Int
+    var id: String
+    var createdAt: String
+    var steps: [PortableGuidedPracticeStep]
+    var completedStepIds: [String]
+    var skippedStepIds: [String]
+    var elapsedMs: Int
+    var runStartedAt: Double?
+    var completedAt: String?
+
+    func paused(at now: Date = .now) -> Self {
+        var copy = self
+        if let runStartedAt {
+            let elapsedSinceStart = min(86_400_000.0, max(0, now.timeIntervalSince1970 * 1_000 - runStartedAt))
+            copy.elapsedMs = min(86_400_000, elapsedMs + Int(elapsedSinceStart))
+        }
+        copy.runStartedAt = nil
+        return copy
+    }
+
+    func isValid() -> Bool {
+        let ids = Set(steps.map(\.id))
+        let completed = Set(completedStepIds)
+        let skipped = Set(skippedStepIds)
+        let validPath: (String) -> Bool = { $0.hasPrefix("/trainer?") || $0.hasPrefix("/practice?") }
+        return version == 1 && !id.isEmpty && id.count <= 120 && parsePortableTransferDate(createdAt) != nil &&
+            !steps.isEmpty && steps.count <= 8 && ids.count == steps.count && elapsedMs >= 0 && elapsedMs <= 86_400_000 &&
+            (runStartedAt == nil || runStartedAt!.isFinite) && (completedAt == nil || parsePortableTransferDate(completedAt!) != nil) &&
+            steps.allSatisfy { !$0.id.isEmpty && $0.id.count <= 100 && $0.title.count <= 100 && $0.reason.count <= 300 &&
+                !$0.patternId.isEmpty && $0.patternId.count <= 200 && $0.patternName.count <= 200 && (1...60).contains($0.minutes) && validPath($0.href) } &&
+            completed.union(skipped).isSubset(of: ids) && completed.isDisjoint(with: skipped) &&
+            (completedAt == nil || completed.union(skipped).count == ids.count)
+    }
+
+    var remainingSteps: [PortableGuidedPracticeStep] {
+        steps.filter { !completedStepIds.contains($0.id) && !skippedStepIds.contains($0.id) }
+    }
+}
+
+private struct PortableWeeklyGoal: Codable, Hashable {
+    var version: Int
+    var type: String
+    var target: Int
+    var focus: String
+
+    func isValid() -> Bool {
+        version == 1 && ["days", "lessons", "focus"].contains(type) && (1...7).contains(target) &&
+            ["timing", "listening", "reading", "creative", "songs"].contains(focus)
+    }
+}
+
 private func parsePortableTransferDate(_ value: String) -> Date? {
     let formatter = ISO8601DateFormatter()
     if let date = formatter.date(from: value) { return date }
@@ -1329,8 +1426,11 @@ private struct MobileProgressTransfer: Codable {
     var practiceSessions: [PortablePracticeSession]
     var bestScores: [String: Int]
     var preferredBpm: Int
+    var guidedPracticeSession: PortableGuidedPracticeSession?
+    var weeklyGoal: PortableWeeklyGoal?
 
-    init(lessonProgress: [LessonProgressRecord], practiceSessions: [PracticeSessionRecord], bests: [PatternBestRecord], preferredBpm: Int) {
+    init(lessonProgress: [LessonProgressRecord], practiceSessions: [PracticeSessionRecord], bests: [PatternBestRecord], preferredBpm: Int,
+         guidedPracticeSession: PortableGuidedPracticeSession? = nil, weeklyGoal: PortableWeeklyGoal? = nil) {
         let formatter = ISO8601DateFormatter()
         application = "Drum Hero"
         format = Self.formatID
@@ -1348,6 +1448,8 @@ private struct MobileProgressTransfer: Codable {
         }
         bestScores = Dictionary(uniqueKeysWithValues: bests.map { ($0.patternID, $0.score) })
         self.preferredBpm = min(200, max(40, preferredBpm))
+        self.guidedPracticeSession = guidedPracticeSession?.paused()
+        self.weeklyGoal = weeklyGoal
     }
 
     func review(content: MobileContentDocument) throws -> MobileProgressTransferReview {
@@ -1355,6 +1457,7 @@ private struct MobileProgressTransfer: Codable {
         guard application == "Drum Hero", format == Self.formatID, version == 1,
               validDate(exportedAt), (40...200).contains(preferredBpm),
               completedLessons.count <= 100, practiceSessions.count <= 100,
+              guidedPracticeSession?.isValid() ?? true, weeklyGoal?.isValid() ?? true,
               bestScores.count <= 256, bestScores.allSatisfy({ !$0.key.isEmpty && $0.key.count <= 160 && (0...100).contains($0.value) }),
               Set(completedLessons.map(\.id)).count == completedLessons.count,
               Set(practiceSessions.map(\.id)).count == practiceSessions.count,
@@ -1422,6 +1525,8 @@ struct ProgressViewScreen: View {
     let content: MobileContentDocument
     @Environment(\.modelContext) private var modelContext
     @AppStorage("drumHero.practiceBpm") private var preferredBpm = 80
+    @AppStorage("drumHero.guidedPracticeSessionJSON") private var guidedPracticeSessionJSON = ""
+    @AppStorage("drumHero.weeklyGoalJSON") private var weeklyGoalJSON = ""
     @Query private var lessonProgress: [LessonProgressRecord]
     @Query(sort: \PracticeSessionRecord.playedAt, order: .reverse) private var sessions: [PracticeSessionRecord]
     @Query(sort: \TrainerRoundRecord.playedAt, order: .reverse) private var rounds: [TrainerRoundRecord]
@@ -1438,6 +1543,20 @@ struct ProgressViewScreen: View {
     @State private var confirmingTransfer = false
     @State private var pendingTransfer: MobileProgressTransferReview?
     @State private var backupMessage = ""
+
+    private var decodedGuidedPracticeSession: PortableGuidedPracticeSession? {
+        guard let data = guidedPracticeSessionJSON.data(using: .utf8),
+              let session = try? JSONDecoder().decode(PortableGuidedPracticeSession.self, from: data),
+              session.isValid() else { return nil }
+        return session
+    }
+
+    private var decodedWeeklyGoal: PortableWeeklyGoal? {
+        guard let data = weeklyGoalJSON.data(using: .utf8),
+              let goal = try? JSONDecoder().decode(PortableWeeklyGoal.self, from: data),
+              goal.isValid() else { return nil }
+        return goal
+    }
 
     var body: some View {
         NavigationStack {
@@ -1462,12 +1581,28 @@ struct ProgressViewScreen: View {
                     LabeledContent("Trainer rounds", value: "\(rounds.count)")
                     if let latest = sessions.first { LabeledContent("Last practiced", value: latest.playedAt.formatted(date: .abbreviated, time: .shortened)) }
                 }
+                Section("Guided practice") {
+                    if let session = decodedGuidedPracticeSession {
+                        Text(session.completedAt == nil ? "Saved guided session · \(session.remainingSteps.count) steps left" : "Last guided session complete")
+                            .font(.headline)
+                        if let step = session.remainingSteps.first { Text("Next: \(step.patternName) · \(step.minutes) min") }
+                        Text("This session is carried in progress transfers and can be resumed in the web app.").font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        Text("No guided session has been transferred to this device.").foregroundStyle(.secondary)
+                    }
+                    if let goal = decodedWeeklyGoal {
+                        LabeledContent("Weekly goal", value: "\(goal.target) \(goal.type == "days" ? "practice days" : goal.type == "lessons" ? "lesson completions" : "\(goal.focus) sessions")")
+                    } else {
+                        Text("No weekly goal has been transferred to this device.").foregroundStyle(.secondary)
+                    }
+                }
                 Section("Move learning progress between web and iOS") {
-                    Text("Transfer completed lessons, recent scored sessions, best scores, and preferred tempo. Import merges with this device’s progress and keeps its existing records. Song projects use the separate single-song JSON export. These transfer files contain no audio; full backups are platform-specific.")
+                    Text("Transfer completed lessons, recent scored sessions, best scores, preferred tempo, a paused guided session, and a weekly goal. Import merges progress and carries the guided settings to the active profile. Song projects use the separate single-song JSON export. These transfer files contain no audio; full backups are platform-specific.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("Export learning progress transfer", systemImage: "square.and.arrow.up") {
                         do {
-                            let transfer = MobileProgressTransfer(lessonProgress: lessonProgress, practiceSessions: sessions, bests: bests, preferredBpm: preferredBpm)
+                            let transfer = MobileProgressTransfer(lessonProgress: lessonProgress, practiceSessions: sessions, bests: bests, preferredBpm: preferredBpm,
+                                guidedPracticeSession: decodedGuidedPracticeSession, weeklyGoal: decodedWeeklyGoal)
                             transferDocument = try MobileProgressTransferDocument(transfer: transfer)
                             isTransferExporting = true
                         } catch { backupMessage = "Could not prepare the progress transfer: \(error.localizedDescription)" }
@@ -1542,7 +1677,7 @@ struct ProgressViewScreen: View {
                     Button("Cancel", role: .cancel) { pendingTransfer = nil }
                 } message: {
                     if let transfer = pendingTransfer {
-                        Text("Merges up to \(transfer.lessons.count) lesson completions, \(transfer.sessions.count) scored sessions, and \(transfer.bestScores.count) best scores. Existing data stays; matching session IDs are updated. \(transfer.ignoredLessons + transfer.ignoredSessions + transfer.ignoredBests) records use IDs this app version does not recognize and will be skipped. Preferred tempo will be set to \(transfer.transfer.preferredBpm) BPM.")
+                        Text("Merges up to \(transfer.lessons.count) lesson completions, \(transfer.sessions.count) scored sessions, and \(transfer.bestScores.count) best scores. Existing data stays; matching session IDs are updated. \(transfer.ignoredLessons + transfer.ignoredSessions + transfer.ignoredBests) records use IDs this app version does not recognize and will be skipped. Preferred tempo will be set to \(transfer.transfer.preferredBpm) BPM. \(transfer.transfer.guidedPracticeSession == nil ? "" : "The saved guided session will be replaced.") \(transfer.transfer.weeklyGoal == nil ? "" : "The weekly goal will be replaced.")")
                     }
                 }
                 .alert("Replace local progress?", isPresented: $confirmingImport) {
@@ -1589,7 +1724,9 @@ struct ProgressViewScreen: View {
             let transfer = try JSONDecoder().decode(MobileProgressTransfer.self, from: data)
             pendingTransfer = try transfer.review(content: content)
             confirmingTransfer = true
-            backupMessage = "Progress transfer loaded for review. Your current data has not changed."
+            let sessionNote = transfer.guidedPracticeSession == nil ? "" : " A paused guided session is included."
+            let goalNote = transfer.weeklyGoal == nil ? "" : " A weekly goal is included."
+            backupMessage = "Progress transfer loaded for review. Your current data has not changed.\(sessionNote)\(goalNote)"
         } catch { backupMessage = error.localizedDescription }
     }
 
@@ -1661,7 +1798,17 @@ struct ProgressViewScreen: View {
             for stale in allSessions.dropFirst(50) { modelContext.delete(stale) }
             try modelContext.save()
             preferredBpm = transfer.transfer.preferredBpm
-            backupMessage = "Merged \(addedLessons) lesson completions and \(addedSessions) new scored sessions, updated best scores, and set preferred tempo to \(preferredBpm) BPM. Existing records were kept."
+            if let session = transfer.transfer.guidedPracticeSession {
+                let encoder = JSONEncoder()
+                guidedPracticeSessionJSON = String(data: try encoder.encode(session.paused()), encoding: .utf8) ?? ""
+            }
+            if let goal = transfer.transfer.weeklyGoal {
+                let encoder = JSONEncoder()
+                weeklyGoalJSON = String(data: try encoder.encode(goal), encoding: .utf8) ?? ""
+            }
+            let guidedMessage = transfer.transfer.guidedPracticeSession == nil ? "" : " Guided session saved for web resume."
+            let goalMessage = transfer.transfer.weeklyGoal == nil ? "" : " Weekly goal saved."
+            backupMessage = "Merged \(addedLessons) lesson completions and \(addedSessions) new scored sessions, updated best scores, and set preferred tempo to \(preferredBpm) BPM. Existing records were kept.\(guidedMessage)\(goalMessage)"
         } catch {
             modelContext.rollback()
             backupMessage = "Could not merge this progress transfer: \(error.localizedDescription)"

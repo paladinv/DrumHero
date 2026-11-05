@@ -4,7 +4,7 @@ import { normalizeDrumMix, normalizeSongBuilderSettings, type SongBuilderSetting
 import type { SongInstrument } from "./types";
 
 export type EmbeddedCustomSampleLayer = { name: string; type: string; base64: string };
-export type EmbeddedCustomSample = EmbeddedCustomSampleLayer & { accent?: EmbeddedCustomSampleLayer };
+export type EmbeddedCustomSample = EmbeddedCustomSampleLayer & { soft?: EmbeddedCustomSampleLayer; accent?: EmbeddedCustomSampleLayer };
 export type SongBuilderProjectFile = {
   format: "drum-hero-song";
   version: 1;
@@ -50,9 +50,11 @@ export function readSongProjectFile(input: unknown): SongBuilderProjectFile | nu
       };
       const primary = readLayer(sample);
       if (!primary) return null;
+      const soft = sample.soft === undefined ? undefined : readLayer(sample.soft);
+      if (sample.soft !== undefined && !soft) return null;
       const accent = sample.accent === undefined ? undefined : readLayer(sample.accent);
       if (sample.accent !== undefined && !accent) return null;
-      customSamples[voice as SongInstrument] = { ...primary, ...(accent ? { accent } : {}) };
+      customSamples[voice as SongInstrument] = { ...primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}) };
     }
   }
   let workspace: SongBuilderProjectFile['workspace'];

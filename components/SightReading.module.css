@@ -5,6 +5,8 @@
 .scroll { overflow-x:auto; max-width:100%; }
 .notation { min-width:650px; }
 .notation canvas { display:block; width:100%; height:auto; }
+.notationFrame { position:relative; min-width:650px; }
+.playhead { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
 .pads { display:flex; flex-wrap:wrap; gap:.75rem; }
 .pads button { min-width:85px; min-height:64px; touch-action:manipulation; }
 .pads small { display:block; }
@@ -13,6 +15,11 @@
 .root fieldset { border:1px solid var(--border,#aaa); border-radius:12px; padding:1rem; }
 .panel { border:1px solid var(--border,#c8c4bb); border-radius:14px; padding:1rem; background:var(--surface,#fffdf8); }
 .panel h2 { margin-top:0; }
+.session { margin-top:1rem; border-left:4px solid #bd3d35; padding:.75rem 1rem; background:color-mix(in srgb,#bd3d35 7%,var(--surface,#fffdf8)); border-radius:0 10px 10px 0; }
+.session h3 { margin:.1rem 0 .5rem; }
+.session p { margin:.35rem 0 .75rem; }
+.midiCalibration { grid-column:1 / -1; display:grid; gap:.75rem; border:1px solid var(--border,#c8c4bb); border-radius:12px; padding:1rem; }
+.midiCalibration h3,.midiCalibration p { margin:.2rem 0; }
 .assignment { border-left:4px solid #bd3d35; padding:.75rem 1rem; background:color-mix(in srgb,#bd3d35 9%,var(--surface,#fffdf8)); }
 .review { display:grid; gap:.4rem; padding-left:1.5rem; }
 .review li { padding:.35rem .55rem; border-left:4px solid #777; }
@@ -26,6 +33,18 @@
 .chart span { flex:1; min-width:12px; background:#bd3d35; border-radius:5px 5px 0 0; }
 .chartCaption { font-size:.85rem; color:var(--muted,#666); }
 .printable { display:block; }
+.progressMap { width:100%; }
+.progressCell { text-align:center !important; font-weight:700; white-space:nowrap; }
+.progressGood { background:color-mix(in srgb,#2c8a4b 18%,var(--surface,#fffdf8)); }
+.progressMid { background:color-mix(in srgb,#d28a13 18%,var(--surface,#fffdf8)); }
+.progressLow { background:color-mix(in srgb,#bd3d35 16%,var(--surface,#fffdf8)); }
+.progressEmpty { color:var(--muted,#666); }
+.standardPads button { letter-spacing:.03em; }
+.focusMode .printable { border:1px solid var(--border,#c8c4bb); border-radius:16px; padding:1rem; background:var(--surface,#fffdf8); }
+.focusMode .notation { min-width:760px; }
+.focusMode .pads { justify-content:center; }
+.focusMode .pads button { flex:1 1 120px; min-height:76px; }
+.inlineReview { display:block; margin-top:.45rem; }
 
 .root button { font:inherit; font-weight:600; color:var(--ink,#252521); background:var(--surface,#fffdf8); border:1px solid var(--border,#c8c4bb); border-radius:10px; padding:.7rem 1rem; min-height:44px; cursor:pointer; }
 .root button:disabled { opacity:.5; cursor:default; }

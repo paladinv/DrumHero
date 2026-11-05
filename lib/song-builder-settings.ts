@@ -13,6 +13,7 @@ export type SongBuilderKitPreset = { id: string; name: string; mix: DrumMixSetti
 export type SongBuilderPerformancePreset = { id: string; name: string; bpm: number; mix: DrumMixSettings; playDrums: boolean; metronome: boolean; loop: boolean; countInBeats: number; metronomeSubdivision: number; rangeStart: number; rangeEnd: number; fractionalLoop?: boolean; loopStart?: number; loopEnd?: number; backingVolume?: number };
 export type SongBuilderNotationSettings = NotationOptions;
 export type SongBuilderExportPreset = { id: string; name: string; view: "tab" | "staff"; format: "png" | "pdf"; scope: "song" | "section"; paperSize: "letter" | "a4"; orientation: "portrait" | "landscape"; barsPerPage: 4 | 6 | 8; barsPerLine: 1 | 2 | 3 | 4; sectionLineBreaks: boolean };
+export type SongBuilderAudioExportSettings = { sampleRate: 44100 | 48000; bitDepth: 16 | 24; normalize: boolean; targetDbfs: number; stemPrefix: string };
 export type SongBuilderSettings = {
   mix: DrumMixSettings;
   midiNotes: Record<SongInstrument, number>;
@@ -28,6 +29,7 @@ export type SongBuilderSettings = {
   kitPresets: SongBuilderKitPreset[];
   performancePresets: SongBuilderPerformancePreset[];
   exportPresets: SongBuilderExportPreset[];
+  audioExport: SongBuilderAudioExportSettings;
   midiSeparateTracks: boolean;
   notation: SongBuilderNotationSettings;
 };
@@ -47,6 +49,7 @@ export const DEFAULT_SONG_BUILDER_SETTINGS: SongBuilderSettings = {
   kitPresets: [],
   performancePresets: [],
   exportPresets: [],
+  audioExport: { sampleRate: 44100, bitDepth: 16, normalize: true, targetDbfs: -1, stemPrefix: "drums" },
   midiSeparateTracks: true,
   notation: { barsPerPage: 6, barsPerLine: 2, sectionLineBreaks: false, pageBreakBeforeSections: [], cymbalNoteheads: "cross", showSticking: true, showArticulationMarks: true, staffPositions: { kick: 3, snare: -1, rimshot: -1, tom: -2, hihat: -5, openhat: -5, ride: -4, crash: -6, cowbell: -3, shaker: -7, tambourine: -6, custom1: 0, custom2: 1, custom3: -1, custom4: 2, custom5: 0, custom6: 1, custom7: -1, custom8: 2 }, beamGrouping: "auto" }
 };
@@ -59,11 +62,15 @@ export function normalizeDrumMix(input: unknown): DrumMixSettings {
   const levels = value.levels && typeof value.levels === "object" ? value.levels as Partial<Record<SongInstrument, number>> : {};
   const pan = value.pan && typeof value.pan === "object" ? value.pan as Partial<Record<SongInstrument, number>> : {};
   const sampleIndex = value.sampleIndex && typeof value.sampleIndex === "object" ? value.sampleIndex as Partial<Record<SongInstrument, number>> : {};
+  const pitch = value.pitch && typeof value.pitch === "object" ? value.pitch as Partial<Record<SongInstrument, number>> : {};
+  const decay = value.decay && typeof value.decay === "object" ? value.decay as Partial<Record<SongInstrument, number>> : {};
   const muted = value.muted && typeof value.muted === "object" ? value.muted as Partial<Record<SongInstrument, boolean>> : {};
   return {
     levels: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, boundedNumber(levels[voice], DEFAULT_DRUM_MIX.levels[voice], 0, 1)])) as DrumMixSettings["levels"],
     pan: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, boundedNumber(pan[voice], 0, -1, 1)])) as DrumMixSettings["pan"],
     sampleIndex: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, Math.round(boundedNumber(sampleIndex[voice], 0, -1, voice === "tom" || voice === "rimshot" ? 2 : 3))])) as DrumMixSettings["sampleIndex"],
+    pitch: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, boundedNumber(pitch[voice], 0, -12, 12)])) as DrumMixSettings["pitch"],
+    decay: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, boundedNumber(decay[voice], 1, 0.05, 1)])) as DrumMixSettings["decay"],
     muted: Object.fromEntries(SONG_INSTRUMENTS.map((voice) => [voice, muted[voice] === true])) as DrumMixSettings["muted"],
     solo: SONG_INSTRUMENTS.includes(value.solo as SongInstrument) ? value.solo as SongInstrument : ""
   };
@@ -72,6 +79,7 @@ export function normalizeDrumMix(input: unknown): DrumMixSettings {
 export function normalizeSongBuilderSettings(input: unknown): SongBuilderSettings {
   const value = input && typeof input === "object" ? input as Partial<SongBuilderSettings> : {};
   const rawNotation = value.notation && typeof value.notation === "object" ? value.notation as Partial<SongBuilderNotationSettings> : {};
+  const rawAudioExport = value.audioExport && typeof value.audioExport === "object" ? value.audioExport as Partial<SongBuilderAudioExportSettings> : {};
   const rawMidi = value.midiNotes && typeof value.midiNotes === "object" ? value.midiNotes as Partial<Record<SongInstrument, number>> : {};
   const kitPresets = Array.isArray(value.kitPresets) ? value.kitPresets.flatMap((preset) => {
     if (!preset || typeof preset !== "object" || typeof preset.id !== "string" || typeof preset.name !== "string") return [];
@@ -106,6 +114,7 @@ export function normalizeSongBuilderSettings(input: unknown): SongBuilderSetting
     kitPresets,
     performancePresets,
     exportPresets,
+    audioExport: { sampleRate: rawAudioExport.sampleRate === 48000 ? 48000 : 44100, bitDepth: rawAudioExport.bitDepth === 24 ? 24 : 16, normalize: rawAudioExport.normalize !== false, targetDbfs: boundedNumber(rawAudioExport.targetDbfs, -1, -12, -0.1), stemPrefix: typeof rawAudioExport.stemPrefix === "string" ? rawAudioExport.stemPrefix.trim().replace(/[^a-z0-9_-]+/gi,"-").slice(0,40) || "drums" : "drums" },
     midiSeparateTracks: value.midiSeparateTracks !== false,
     notation: {
       paperSize: rawNotation.paperSize === 'a4' ? 'a4' : 'letter',

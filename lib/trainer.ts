@@ -13,11 +13,18 @@ export type TrainerRound = {
   mode: TrainerMode; source: TrainerSource | "self"; ratings: TrainerRating[]; repetitions?: number;
   result: SessionResult | null; hits?: RatedHit[]; focusedDrill?: { instrument: Instrument; beat: number; sourceRoundId?: string; sourcePatternId?: string };
   feel?: TrainerFeel; limbFocus?: TrainerLimbFocus; adaptation?: "standard" | "seated" | "single-voice"; swingRatio?: number; pocketMs?: number; learningMode?: string; inputProfile?: string; targetVoice?: Instrument; uncertainDetections?: number; inputClipped?: boolean;
+  timingCorrectionMs?: number; timingCalibrated?: boolean;
   variationId?: string;
   backingChallenge?: "rock" | "funk" | "shuffle";
+  notes?: string;
+  tags?: Array<"warm-up" | "focused" | "teacher" | "recording-review" | "rough-session">;
+  voicePractice?: "all" | "single" | "layers";
+  voiceFocus?: Instrument;
+  voiceLayerCount?: number;
+  rudimentHandCheck?: boolean;
 };
 export type AudioDynamicsCalibration = { noiseRms?: number; ghostRms?: number; accentRms?: number };
-export type TrainerDeviceProfile = { latencyMs: number; latencyCalibrated?: boolean; midiMap: Record<number, Instrument | null>; midiArticulations: Record<number, MidiArticulation | null>; audioTemplates: Partial<Record<Instrument, number[]>>; audioDynamics?: Partial<Record<Instrument, AudioDynamicsCalibration>> };
+export type TrainerDeviceProfile = { latencyMs: number; latencyCalibrated?: boolean; latencySpreadMs?: number | null; latencyCalibratedAt?: string | null; midiMap: Record<number, Instrument | null>; midiArticulations: Record<number, MidiArticulation | null>; audioTemplates: Partial<Record<Instrument, number[]>>; audioDynamics?: Partial<Record<Instrument, AudioDynamicsCalibration>> };
 export type TrainerState = { version: 2; rounds: TrainerRound[]; latencyMs: number; midiMap: Record<number, Instrument | null>; deviceProfiles: Record<string, TrainerDeviceProfile> };
 type PersistedTrainerState = Omit<Partial<TrainerState>, "version"> & { version?: number };
 export const TRAINER_KEY = "drum-hero:trainer:v1";
@@ -57,7 +64,7 @@ export function parseTrainerState(raw: string | null): TrainerState {
         const mapped: Record<number, Instrument | null> = { ...DEFAULT_MIDI_MAP };
         for (const [note, voice] of Object.entries(profile.midiMap ?? {})) if (/^\d+$/.test(note) && Number(note) <= 127 && (voice === null || voices.includes(voice))) mapped[Number(note)] = voice;
         const articulations: Record<number, MidiArticulation | null> = {};
-        const validArticulations: MidiArticulation[] = ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash"];
+        const validArticulations: MidiArticulation[] = ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot"];
         for (const [note, articulation] of Object.entries(profile.midiArticulations ?? {})) if (/^\d+$/.test(note) && Number(note) <= 127 && (articulation === null || validArticulations.includes(articulation))) articulations[Number(note)] = articulation;
         const audioTemplates: Partial<Record<Instrument, number[]>> = {};
         for (const voice of voices) { const template = profile.audioTemplates?.[voice]; if (Array.isArray(template) && template.length === 5 && template.every((v: unknown) => typeof v === "number" && Number.isFinite(v))) audioTemplates[voice] = template.map((v: number) => Math.max(0, Math.min(1, v))); }
@@ -71,7 +78,8 @@ export function parseTrainerState(raw: string | null): TrainerState {
           })) as AudioDynamicsCalibration;
           if (Object.keys(parsed).length) audioDynamics[voice] = parsed;
         }
-        deviceProfiles[key] = { latencyMs: Number.isFinite(profile.latencyMs) ? Math.max(-200, Math.min(200, Number(profile.latencyMs))) : 0, latencyCalibrated: profile.latencyCalibrated === true, midiMap: mapped, midiArticulations: articulations, audioTemplates, audioDynamics };
+        const latencySpreadMs = typeof profile.latencySpreadMs === "number" && Number.isFinite(profile.latencySpreadMs) && profile.latencySpreadMs >= 0 && profile.latencySpreadMs <= 240 ? profile.latencySpreadMs : null;
+        deviceProfiles[key] = { latencyMs: Number.isFinite(profile.latencyMs) ? Math.max(-200, Math.min(200, Number(profile.latencyMs))) : 0, latencyCalibrated: profile.latencyCalibrated === true, latencySpreadMs, latencyCalibratedAt: typeof profile.latencyCalibratedAt === "string" && Number.isFinite(Date.parse(profile.latencyCalibratedAt)) ? profile.latencyCalibratedAt : null, midiMap: mapped, midiArticulations: articulations, audioTemplates, audioDynamics };
       }
     }
     return { version: 2, rounds: value.rounds.filter((round): round is TrainerRound => {
@@ -85,6 +93,8 @@ export function parseTrainerState(raw: string | null): TrainerState {
           (round.uncertainDetections !== undefined && (!Number.isInteger(round.uncertainDetections) || round.uncertainDetections < 0 || round.uncertainDetections > 100000)) ||
           (round.inputClipped !== undefined && typeof round.inputClipped !== "boolean") ||
           (round.inputProfile !== undefined && (typeof round.inputProfile !== "string" || round.inputProfile.length > 200)) ||
+          (round.timingCorrectionMs !== undefined && (!Number.isFinite(round.timingCorrectionMs) || Math.abs(round.timingCorrectionMs) > 250)) ||
+          (round.timingCalibrated !== undefined && typeof round.timingCalibrated !== "boolean") ||
           (round.targetVoice !== undefined && !voices.includes(round.targetVoice)) ||
           (round.swingRatio !== undefined && (!Number.isFinite(round.swingRatio) || round.swingRatio < 0.5 || round.swingRatio > 0.75)) ||
           (round.pocketMs !== undefined && (!Number.isFinite(round.pocketMs) || round.pocketMs < 0 || round.pocketMs > 80)) ||
@@ -94,6 +104,12 @@ export function parseTrainerState(raw: string | null): TrainerState {
           (round.adaptation !== undefined && !["standard", "seated", "single-voice"].includes(round.adaptation)) ||
           (round.variationId !== undefined && (typeof round.variationId !== "string" || round.variationId.length > 80)) ||
           (round.backingChallenge !== undefined && !["rock", "funk", "shuffle"].includes(round.backingChallenge)) ||
+          (round.notes !== undefined && (typeof round.notes !== "string" || round.notes.length > 500)) ||
+          (round.tags !== undefined && (!Array.isArray(round.tags) || round.tags.length > 5 || !round.tags.every((tag) => ["warm-up", "focused", "teacher", "recording-review", "rough-session"].includes(tag)))) ||
+          (round.voicePractice !== undefined && !["all", "single", "layers"].includes(round.voicePractice)) ||
+          (round.voiceFocus !== undefined && !voices.includes(round.voiceFocus)) ||
+          (round.voiceLayerCount !== undefined && (!Number.isInteger(round.voiceLayerCount) || round.voiceLayerCount < 1 || round.voiceLayerCount > 5)) ||
+          (round.rudimentHandCheck !== undefined && typeof round.rudimentHandCheck !== "boolean") ||
           !round.ratings.every((rating: TrainerRating) => ["clean", "needsWork", "missed"].includes(rating)) ||
           (round.result !== null && (!round.result || !Number.isFinite(round.result.score) || !Number.isFinite(round.result.accuracy)))) return false;
       if (round.hits === undefined) return true;
@@ -106,8 +122,10 @@ export function parseTrainerState(raw: string | null): TrainerState {
           (hit.articulationSpacingMs === undefined || (Number.isFinite(hit.articulationSpacingMs) && hit.articulationSpacingMs >= 5 && hit.articulationSpacingMs <= 100)) &&
           (hit.transition === undefined || hit.transition === "landing") &&
           (hit.feelZone === undefined || ["straight", "offbeat", "backbeat", "fill"].includes(hit.feelZone)) &&
-          (hit.midiArticulation === undefined || ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash"].includes(hit.midiArticulation)) &&
+          (hit.midiArticulation === undefined || ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot"].includes(hit.midiArticulation)) &&
           (hit.sustainMs === undefined || (Number.isFinite(hit.sustainMs) && hit.sustainMs >= 0 && hit.sustainMs <= 180)) &&
+          (hit.handTarget === undefined || hit.handTarget === "R" || hit.handTarget === "L") &&
+          (hit.handPlayed === undefined || hit.handPlayed === "R" || hit.handPlayed === "L") &&
           (hit.atMs === undefined || (Number.isFinite(hit.atMs) && hit.atMs >= -1000 && hit.atMs <= 3600000)) &&
           (hit.step === undefined || (Number.isInteger(hit.step) && hit.step >= 0 && hit.step <= 4096)) &&
           (hit.repetition === undefined || (Number.isInteger(hit.repetition) && hit.repetition >= 0 && hit.repetition < 16))));
@@ -141,13 +159,13 @@ export function expectedRoundHits(pattern: PracticePattern, bpm: number, startAt
     return offsets.map((offset) => ({ atOffset: baseAt + offset, hit, graceSpacing }));
   });
   return Array.from({ length: repetitions }, (_, repetition) => events.map(({ atOffset, hit }) =>
-    ({ at: startAt + repetition * duration + atOffset, instrument: hit.instrument, accent: Boolean(hit.accent), velocityTarget: hit.velocityTarget, articulation: hit.articulation, articulationSpacingMs: hit.articulation ? articulationGraceSpacingMs(hit.articulation, bpm) : undefined, matched: false, step: hit.step, repetition }))).flat();
+    ({ at: startAt + repetition * duration + atOffset, instrument: hit.instrument, accent: Boolean(hit.accent), sticking: hit.sticking, velocityTarget: hit.velocityTarget, articulation: hit.articulation, articulationSpacingMs: hit.articulation ? articulationGraceSpacingMs(hit.articulation, bpm) : undefined, matched: false, step: hit.step, repetition }))).flat();
 }
-export function scoreTrainerHit(now: number, expected: Array<{ at: number; instrument: Instrument; accent?: boolean; velocityTarget?: number; articulation?: PatternHit["articulation"]; articulationSpacingMs?: number; transition?: RatedHit["transition"]; feelZone?: RatedHit["feelZone"]; matched: boolean; step?: number; repetition?: number }>, instrument: Instrument, latencyMs = 0): RatedHit {
+export function scoreTrainerHit(now: number, expected: Array<{ at: number; instrument: Instrument; accent?: boolean; sticking?: PatternHit["sticking"]; velocityTarget?: number; articulation?: PatternHit["articulation"]; articulationSpacingMs?: number; transition?: RatedHit["transition"]; feelZone?: RatedHit["feelZone"]; matched: boolean; step?: number; repetition?: number }>, instrument: Instrument, latencyMs = 0): RatedHit {
   const closest = findClosestExpected(now - latencyMs, expected, instrument);
   if (closest.index < 0 || Math.abs(closest.offset) > 100) return { instrument, rating: "extra", offsetMs: null };
   expected[closest.index].matched = true;
-  return { instrument, rating: classifyOffset(closest.offset), offsetMs: Math.round(closest.offset), accentTarget: Boolean(expected[closest.index].accent), velocityTarget: expected[closest.index].velocityTarget, articulation: expected[closest.index].articulation, articulationSpacingMs: expected[closest.index].articulationSpacingMs, transition: expected[closest.index].transition, feelZone: expected[closest.index].feelZone, step: expected[closest.index].step, repetition: expected[closest.index].repetition };
+  return { instrument, rating: classifyOffset(closest.offset), offsetMs: Math.round(closest.offset), accentTarget: Boolean(expected[closest.index].accent), handTarget: expected[closest.index].sticking, velocityTarget: expected[closest.index].velocityTarget, articulation: expected[closest.index].articulation, articulationSpacingMs: expected[closest.index].articulationSpacingMs, transition: expected[closest.index].transition, feelZone: expected[closest.index].feelZone, step: expected[closest.index].step, repetition: expected[closest.index].repetition };
 }
 export function summarizeTrainerRound(pattern: PracticePattern, bpm: number, mode: TrainerMode, source: TrainerRound["source"], ratings: TrainerRating[], hits: RatedHit[], repetitions = 10): TrainerRound {
   const playedAt = new Date().toISOString();

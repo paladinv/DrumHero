@@ -116,7 +116,7 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 
 ## Song Library (initial web release)
 
-- **UC-S01 — Local repertoire:** Browse eight original examples and add personal songs with title, artist, difficulty, tempo, meter, tags, notes, source attribution, and authorization metadata.
+- **UC-S01 — Local repertoire:** Browse 12 original examples and add personal songs with title, artist, difficulty, tempo, meter, tags, notes, source attribution, and authorization metadata.
 - **UC-S02 — Drum arrangement:** Add sections and editable eight-voice grid parts, with bounded beat count, subdivision, and tempo.
 - **UC-S03 — Practice handoff:** Open a part in Practice Pad or Trainer and save completed section scores to the local library.
 - **UC-S04 — Organize:** Search songs, mark favorites, archive, create collections, practice queues, and setlists.
@@ -178,3 +178,8 @@ Section reviews, tempo ramps, readiness estimates, arrangement snapshots, checkl
 - Export landscape rehearsal PDFs with staff notation and paginated notes, sticking, dynamics and stage cues. Export runs locally and works from a complete offline download.
 - Offline downloads include byte sizes and SHA-256 checks. Verify readiness without a network connection, detect missing/corrupt cached resources, and update to repair them. Browser storage eviction can still remove data; keep backups.
 - Interrupted practice rounds save local bar position and settings. Restore settings, then explicitly resume from the beginning of that bar. Changed arrangements invalidate recovery. Only the resumed portion is scored and is marked partial, so recovery cannot create a complete readiness pass. Audio, recording takes and round recovery stay local.
+- Set a per-song goal for a drum part with a tempo, minimum score, clean-pass count, and optional target date; review completion against the arrangement that was saved when the goal was created.
+- Open repertoire upkeep to find songs whose review is due, songs not practiced recently, and songs never practiced; launch a suggested part or build a local maintenance queue.
+- Assign a learner a specific song section and drum part with target tempo, minimum accuracy, required scored rounds, and due date; open the assignment directly in Song Library practice and track matching evidence.
+- Export a reviewed multi-song transfer pack between web and iOS. Match duplicates by ID or title and artist, select add/replace/copy/skip per song, and review iOS voice compatibility before importing.
+- In selected-song shares, reply to anchored arrangement comments; owners and editors can resolve or reopen threads after applying the comment-thread migration.

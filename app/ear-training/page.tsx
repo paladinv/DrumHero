@@ -9,7 +9,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default function EarTrainingPage() {
   return <main id="main-content" className="page">
-    <header className="page-heading"><span className="eyebrow"><LocalizedText text="Rhythm ear training" /></span><h1><LocalizedText text="Hear the beat. Play it back." /></h1><p><LocalizedText text="Build rhythm memory by tapping patterns back, matching rhythms, recognizing meter, and hearing straight, swing, and shuffle feels." /></p></header>
+    <header className="page-heading"><span className="eyebrow"><LocalizedText text="Rhythm ear training" /></span><h1><LocalizedText text="Hear the beat. Play it back." /></h1><p><LocalizedText text="Train rhythm memory with tap-back, input timing calibration, multi-voice rhythm building, target and answer playback, MIDI input, guided rhythm lessons, cross-rhythm and quintuplet practice, shareable challenge packs, and detailed progress diagnostics." /></p></header>
     <RhythmEarTraining />
   </main>;
 }

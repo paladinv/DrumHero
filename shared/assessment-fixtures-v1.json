@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 5,
   "cases": [
     {
       "name": "perfect",
@@ -182,20 +182,292 @@
     {
       "resultId": "assessment-fixture-1",
       "selectedIds": [
-        "listen-2",
+        "listen-12",
         "read-3",
-        "listen-4",
+        "listen-9",
         "read-2"
       ]
     },
     {
       "resultId": "assessment-fixture-2",
       "selectedIds": [
-        "listen-2",
-        "read-3",
-        "listen-3",
-        "read-2"
+        "listen-11",
+        "read-8",
+        "listen-7",
+        "read-6"
       ]
+    }
+  ],
+  "quizFormatCases": [
+    {
+      "resultId": "audio-learner",
+      "format": "audio",
+      "selectedKinds": [
+        "listening",
+        "listening",
+        "listening",
+        "listening"
+      ]
+    }
+  ],
+  "confidenceCases": [
+    {
+      "name": "untested",
+      "domain": "pulse",
+      "rows": [],
+      "expected": "not-tested"
+    },
+    {
+      "name": "failed probe",
+      "domain": "pulse",
+      "rows": [
+        {
+          "probeId": "pulse-1",
+          "score": 20,
+          "meanAbsoluteMs": null,
+          "passed": false
+        }
+      ],
+      "expected": "limited-evidence"
+    },
+    {
+      "name": "one clear probe is tentative",
+      "domain": "pulse",
+      "rows": [
+        {
+          "probeId": "pulse-1",
+          "score": 100,
+          "meanAbsoluteMs": 0,
+          "passed": true
+        }
+      ],
+      "expected": "tentative"
+    },
+    {
+      "name": "two clear tiers are supported",
+      "domain": "pulse",
+      "rows": [
+        {
+          "probeId": "pulse-1",
+          "score": 100,
+          "meanAbsoluteMs": 0,
+          "passed": true
+        },
+        {
+          "probeId": "pulse-2",
+          "score": 100,
+          "meanAbsoluteMs": 0,
+          "passed": true
+        }
+      ],
+      "expected": "supported"
+    }
+  ],
+  "recommendationCases": [
+    {
+      "name": "groove goal favors first backbeat after pulse is established",
+      "goal": "play-with-others",
+      "adaptation": "standard",
+      "attempts": [
+        {
+          "probeId": "pulse-1",
+          "score": 100,
+          "accuracy": 100,
+          "meanAbsoluteMs": 0,
+          "passed": true
+        },
+        {
+          "probeId": "coordination-1",
+          "score": 0,
+          "accuracy": 0,
+          "meanAbsoluteMs": null,
+          "passed": false
+        }
+      ],
+      "answers": [],
+      "expected": "first-backbeat"
+    },
+    {
+      "name": "expressive goal prioritizes measured dynamics gap",
+      "goal": "play-expressively",
+      "adaptation": "standard",
+      "attempts": [
+        {
+          "probeId": "pulse-1",
+          "score": 100,
+          "accuracy": 100,
+          "meanAbsoluteMs": 0,
+          "passed": true
+        },
+        {
+          "probeId": "dynamics-1",
+          "score": 100,
+          "accuracy": 100,
+          "meanAbsoluteMs": 0,
+          "passed": false,
+          "dynamicsContrast": 5
+        }
+      ],
+      "answers": [],
+      "expected": "dynamic-arc"
+    },
+    {
+      "name": "notation goal selects reading lesson when notation was tested",
+      "goal": "read-notation",
+      "quizFormat": "visual",
+      "adaptation": "standard",
+      "attempts": [],
+      "answers": [
+        {
+          "questionId": "read-1",
+          "choice": 2
+        }
+      ],
+      "expected": "count-the-grid"
+    }
+  ],
+  "tempoCases": [
+    {
+      "domain": "pulse",
+      "bpms": [
+        72
+      ],
+      "expectedBpm": 72
+    },
+    {
+      "domain": "subdivisions",
+      "bpms": [
+        72
+      ],
+      "expectedBpm": 72
+    },
+    {
+      "domain": "coordination",
+      "bpms": [
+        72
+      ],
+      "expectedBpm": 72
+    }
+  ],
+  "internalPulseCases": [
+    {
+      "name": "steady without click",
+      "offsetsByBar": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "accuracy": 100,
+      "clickOnMeanAbsoluteMs": 0,
+      "clickOffMeanAbsoluteMs": 0,
+      "dropoutDriftMs": 0,
+      "passed": true
+    },
+    {
+      "name": "drift without click",
+      "offsetsByBar": [
+        0,
+        0,
+        80,
+        80
+      ],
+      "accuracy": 100,
+      "clickOnMeanAbsoluteMs": 0,
+      "clickOffMeanAbsoluteMs": 80,
+      "dropoutDriftMs": 80,
+      "passed": false
+    }
+  ],
+  "progressionCases": [
+    {
+      "name": "strong tier one response jumps to the challenge probe",
+      "adaptation": "standard",
+      "attempts": [
+        {
+          "probeId": "pulse-1",
+          "score": 100,
+          "meanAbsoluteMs": 20,
+          "passed": true
+        }
+      ],
+      "expectedProbeId": "pulse-3"
+    },
+    {
+      "name": "fast-track challenge allows its retry",
+      "adaptation": "standard",
+      "attempts": [
+        {
+          "probeId": "pulse-1",
+          "score": 100,
+          "meanAbsoluteMs": 20,
+          "passed": true
+        },
+        {
+          "probeId": "pulse-3",
+          "score": 70,
+          "meanAbsoluteMs": 50,
+          "passed": false
+        }
+      ],
+      "expectedProbeId": "pulse-3"
+    },
+    {
+      "name": "two challenge failures fall back to the skipped middle tier",
+      "adaptation": "standard",
+      "attempts": [
+        {
+          "probeId": "pulse-1",
+          "score": 100,
+          "meanAbsoluteMs": 20,
+          "passed": true
+        },
+        {
+          "probeId": "pulse-3",
+          "score": 70,
+          "meanAbsoluteMs": 50,
+          "passed": false
+        },
+        {
+          "probeId": "pulse-3",
+          "score": 70,
+          "meanAbsoluteMs": 50,
+          "passed": false
+        }
+      ],
+      "expectedProbeId": "pulse-2"
+    },
+    {
+      "name": "ordinary pass continues one tier at a time",
+      "adaptation": "standard",
+      "attempts": [
+        {
+          "probeId": "pulse-1",
+          "score": 90,
+          "meanAbsoluteMs": 45,
+          "passed": true
+        }
+      ],
+      "expectedProbeId": "pulse-2"
+    }
+  ],
+  "adaptationCases": [
+    {
+      "name": "hands-only remaps kick targets to tom without dropping notes",
+      "probeId": "coordination-1",
+      "adaptation": "hands-only",
+      "expectedHitCount": 12,
+      "expectedKickCount": 0,
+      "expectedTomCount": 2
+    },
+    {
+      "name": "single-voice leaves kick targets intact in the pattern but omits coordination placement",
+      "probeId": "coordination-1",
+      "adaptation": "single-voice",
+      "expectedHitCount": 12,
+      "expectedKickCount": 2,
+      "expectedTomCount": 0,
+      "omitsCoordination": true
     }
   ]
 }

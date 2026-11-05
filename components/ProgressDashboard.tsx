@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { calculateStreak, levelProgress } from "@/lib/progress";
+import { levelProgress } from "@/lib/progress";
 import { trainerStorageKey, parseTrainerState, type TrainerRound } from "@/lib/trainer";
 import type { Level } from "@/lib/types";
 import { useProgress } from "./ProgressProvider";
 import { useLocalization } from "./LocalizationProvider";
+import { CrossModeSkillMap } from "./CrossModeSkillMap";
+import { WeeklyPracticeGoal } from "./WeeklyPracticeGoal";
 
 const levels: Level[] = ["Beginner", "Intermediate", "Advanced"];
 
@@ -22,11 +24,13 @@ export function ProgressDashboard() {
     window.addEventListener("drum-hero:trainer-state-import", update);
     return () => { window.clearTimeout(id); window.removeEventListener("storage", update); window.removeEventListener("drum-hero:learner-profile-change", update); window.removeEventListener("drum-hero:trainer-state-import", update); };
   }, [profileId]);
-  const streak = calculateStreak(progress.practiceDates);
-  const best = Math.max(0, ...Object.values(progress.bestScores), ...trainerRounds.map((round) => round.result?.score ?? 0));
-  const scoredRecent = trainerRounds.filter((round) => round.mode === "scored" && (!round.adaptation || round.adaptation === "standard")).slice(0, 10);
+  const scoredRecent = trainerRounds.filter((round) => round.mode === "scored" && round.result && !round.uncertainDetections && !round.inputClipped && !round.focusedDrill && !round.learningMode && (!round.adaptation || round.adaptation === "standard")).sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, 10);
   const averageAccuracy = scoredRecent.length
     ? Math.round(scoredRecent.reduce((sum, round) => sum + (round.result?.accuracy ?? 0), 0) / scoredRecent.length)
+    : null;
+  const padRecent = [...progress.sessions].sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, 10);
+  const padAverageAccuracy = padRecent.length
+    ? Math.round(padRecent.reduce((sum, session) => sum + session.accuracy, 0) / padRecent.length)
     : null;
   const grouped = new Map<string, TrainerRound[]>();
   trainerRounds.filter((round) => !round.adaptation || round.adaptation === "standard").forEach((round) => grouped.set(round.patternId, [...(grouped.get(round.patternId) ?? []), round]));
@@ -52,16 +56,20 @@ export function ProgressDashboard() {
   return <>
     <p><Link className="button-secondary" href="/assessment">{t("Initial skill assessment and results")}</Link></p>
     <section className="stat-grid">
-      <div className="stat"><strong>{progress.completedLessons.length}/12</strong><span>Lessons complete</span></div>
-      <div className="stat"><strong>{progress.sessions.length + trainerRounds.length}</strong><span>Practice sessions</span></div>
-      <div className="stat"><strong>{best}</strong><span>Best score</span></div>
-      <div className="stat"><strong>{formatNumber(streak)}</strong><span>{t("day streak")}</span></div>
+      <div className="stat"><strong>{formatNumber(progress.completedLessons.length)}/12</strong><span>{t("Lessons complete")}</span></div>
+      <div className="stat"><strong>{formatNumber(progress.sessions.length + trainerRounds.length)}</strong><span>{t("Practice sessions")}</span></div>
+      <div className="stat"><strong>{padAverageAccuracy === null ? "—" : `${formatNumber(padAverageAccuracy)}%`}</strong><span>{t("Practice Pad average accuracy")}</span></div>
+      <div className="stat"><strong>{averageAccuracy === null ? "—" : `${formatNumber(averageAccuracy)}%`}</strong><span>{t("Trainer average accuracy")}</span></div>
     </section>
+    <p className="progress-score-note">{t("Accuracy is shown separately for each activity. Compare trends within the same activity and input setup.")}</p>
     <div className="section-heading"><div><span className="eyebrow">Learning path</span><h2>Level progress</h2></div></div>
     <section className="card-grid">{levels.map((level) => {
       const value = levelProgress(progress.completedLessons, level);
       return <article className={"card level-" + level} key={level}><span className="level-mark">{t(level)}</span><h3>{formatNumber(value.done)} of {formatNumber(value.total)}</h3><div className="progress-track" role="progressbar" aria-label={value.percent + "% complete"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value.percent}><span style={{ width: value.percent + "%" }} /></div><p>{formatNumber(value.percent)}% of this level completed.</p></article>;
     })}</section>
+    <div className="section-heading"><div><span className="eyebrow">{t("All practice modes")}</span><h2>{t("Connect your skills")}</h2></div></div>
+    <CrossModeSkillMap profileId={profileId} progress={progress} />
+    <WeeklyPracticeGoal profileId={profileId} progress={progress} />
     <div className="section-heading"><div><span className="eyebrow">Trainer insights</span><h2>What to practise next</h2></div><Link className="button" href="/trainer">Train now</Link></div>
     <section className="card-grid trainer-insights">
       <article className="card"><span className="level-mark">Timing</span><h3>{averageAccuracy === null ? "—" : averageAccuracy + "%"}</h3><p>{scoredRecent.length ? "Average accuracy across your " + scoredRecent.length + " latest scored rounds." : "Score a Trainer round to see your recent timing accuracy."}</p></article>

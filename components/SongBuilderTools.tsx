@@ -10,6 +10,7 @@ import type { ArrangementBar } from '@/lib/song-builder';
 import { sectionClips, songVoiceLabel, varyDrumPart, VOICE_LABEL } from '@/lib/song-builder';
 import { drawNotationPage, paginateNotation, type NotationOptions, type NotationView } from '@/lib/song-builder-notation';
 import { morphDrumParts } from '@/lib/song-builder-creative';
+import type { DrumMixSettings } from '@/lib/audio';
 
 type TaskGuideWorkspace = "compose" | "arrange" | "rehearse" | "export";
 type TaskGuideStep = { title: string; detail: string; workspace: TaskGuideWorkspace; target: string };
@@ -105,7 +106,7 @@ export function SongBuilderArrangementSuggestions({song,onApply,onPreview,previe
     const partIds=new Map(section.parts.map(part=>[part.id,crypto.randomUUID()]));
     copy.id=crypto.randomUUID();copy.name=name;copy.kind=kind;copy.repeats=1;copy.endingGroup=undefined;copy.endingPass=undefined;copy.endingRepeats=undefined;
     copy.parts=section.parts.map(part=>{const next=variant?varyDrumPart(part,'half-time'):structuredClone(part);return {...next,id:partIds.get(part.id)!,sourceId:undefined,linkedBaseId:undefined,linkOverrides:undefined,linkRemoved:undefined};});
-    copy.clips=sectionClips(section).map(clip=>({...structuredClone(clip),id:crypto.randomUUID(),partId:partIds.get(clip.partId)!,repeatVariants:clip.repeatVariants?.filter(item=>partIds.has(item.partId)).map(item=>({...item,partId:partIds.get(item.partId)!}))}));
+    copy.clips=sectionClips(section).map(clip=>({...structuredClone(clip),id:crypto.randomUUID(),partId:partIds.get(clip.partId)!,layers:clip.layers?.flatMap(id=>partIds.has(id)?[partIds.get(id)!]:[]),overrides:clip.overrides?{...clip.overrides,mutedLayers:clip.overrides.mutedLayers?.flatMap(id=>partIds.has(id)?[partIds.get(id)!]:[]),soloLayer:clip.overrides.soloLayer?partIds.get(clip.overrides.soloLayer):undefined}:undefined,repeatVariants:clip.repeatVariants?.filter(item=>partIds.has(item.partId)).map(item=>({...item,partId:partIds.get(item.partId)!}))}));
     copy.rehearsalCues=section.rehearsalCues?.map(cue=>({...cue,id:crypto.randomUUID()}));
     const selectedFeel:SongFeel|undefined=feel==='keep'?copy.feel:{kind:feel,amount:feel==='shuffle'?66.7:feel==='swing'?58:50};
     copy.feel=selectedFeel;
@@ -183,6 +184,32 @@ export function SongBuilderCueList({bars,onSeek}:{bars:ArrangementBar[];onSeek:(
   const cues=bars.filter(bar=>bar.rehearsalCue);
   if(!cues.length)return null;
   return <section className="card song-builder-cue-list" aria-label="Rehearsal cue roadmap"><h2>Rehearsal cues</h2><ul>{cues.map(bar=><li key={`${bar.sectionId}:${bar.index}`}><button type="button" onClick={()=>onSeek(bar.index)}>Measure {bar.number} · {bar.sectionName}</button><span>{bar.rehearsalCue}</span></li>)}</ul></section>;
+}
+
+export function SongBuilderHealthCheck({song,bars,mix,sampleNames,notation,onNavigate}:{song:DrumSong;bars:ArrangementBar[];mix:DrumMixSettings;sampleNames:Partial<Record<SongInstrument,string>>;notation:NotationOptions;onNavigate:(workspace:TaskGuideWorkspace,target:string)=>void}){
+  const findings:Array<{kind:"review"|"info";text:string;workspace:TaskGuideWorkspace;target:string}>=[];
+  for(const section of song.sections){
+    const clips=sectionClips(section),used=new Set(clips.flatMap(clip=>[clip.partId,...(clip.layers??[]),...(clip.repeatVariants??[]).map(variant=>variant.partId)]));
+    if(!clips.length)findings.push({kind:"review",text:`${section.name} has no clips, so it contributes no notes to playback or exports.`,workspace:"arrange",target:".song-builder-arrangement"});
+    const orphaned=section.parts.filter(part=>!used.has(part.id));
+    if(orphaned.length)findings.push({kind:"info",text:`${section.name} has ${orphaned.length} unused pattern${orphaned.length===1?"":"s"}; they stay in the editor but are not played.`,workspace:"compose",target:".song-builder-pattern-editor"});
+    const empty=section.parts.filter(part=>used.has(part.id)&&part.hits.length===0);
+    if(empty.length)findings.push({kind:"review",text:`${section.name} plays ${empty.length} empty pattern${empty.length===1?"":"s"}. Check whether the silence is intentional.`,workspace:"compose",target:".song-builder-pattern-editor"});
+  }
+  const silent=bars.filter(bar=>bar.hits.length===0);
+  if(bars.length&&!bars.some(bar=>bar.hits.length))findings.push({kind:"review",text:"The full arrangement contains no drum hits; audio and MIDI exports will be silent.",workspace:"compose",target:".song-builder-pattern-editor"});
+  const dense=bars.filter(bar=>new Set(bar.hits.map(hit=>hit.step)).size>=16);
+  if(dense.length)findings.push({kind:"review",text:`${dense.length} measure${dense.length===1?"":"s"} contain 16 or more active grid positions; inspect notation spacing before printing.`,workspace:"export",target:".song-builder-notation"});
+  const changes=bars.flatMap((bar,index)=>index>0&&bar.sectionId!==bars[index-1]?.sectionId&&Math.abs(bar.bpm-bars[index-1]!.bpm)/bars[index-1]!.bpm>=0.15?[`${bars[index-1]!.sectionName} → ${bar.sectionName} (${Math.round(bars[index-1]!.bpm)} → ${Math.round(bar.bpm)} BPM)`]:[]);
+  if(changes.length)findings.push({kind:"review",text:`Abrupt section tempo changes: ${[...new Set(changes)].slice(0,4).join('; ')}.`,workspace:"arrange",target:".song-builder-arrangement"});
+  const missing=new Set<SongInstrument>();
+  for(const bar of bars)for(const hit of bar.hits){const voice=hit.articulation==='foot-splash'?'openhat':hit.instrument;if((bar.kitMix??mix).sampleIndex[voice]<0&&!sampleNames[voice])missing.add(voice);}
+  if(missing.size)findings.push({kind:"review",text:`Custom samples are missing for ${[...missing].map(voice=>VOICE_LABEL[voice]).join(', ')}. Choose a built-in sound or restore those samples.`,workspace:"rehearse",target:".song-builder-mixer"});
+  if(paginateNotation(bars,notation).length>30)findings.push({kind:"info",text:"The full chart exceeds the 30-page PNG limit. Export a PDF or select a section for PNG.",workspace:"export",target:".song-builder-notation"});
+  const longSeconds=bars.reduce((sum,bar)=>sum+bar.beats*60/bar.bpm,0);
+  if(longSeconds>180)findings.push({kind:"info",text:`The arrangement runs about ${Math.round(longSeconds/60)} minutes. Export long audio in sections; aligned stem archives have a three-minute limit.`,workspace:"export",target:".song-builder-notation"});
+  const visible=findings.slice(0,24);
+  return <details className="card song-builder-health-check"><summary>Project health · {visible.length ? `${visible.filter(item=>item.kind==="review").length} review items` : "ready to review"}</summary><p>Checks that arrangement content is connected and gives a quick pre-export review. Findings are suggestions; intentional silence and unused sketches are fine.</p>{visible.length?<ul>{visible.map((finding,index)=><li key={`${finding.text}:${index}`}><span className={`song-builder-health-${finding.kind}`}>{finding.kind==="review"?"Review":"Info"}</span> {finding.text} <button type="button" onClick={()=>onNavigate(finding.workspace,finding.target)}>Open</button></li>)}</ul>:<p>No empty patterns, crowded measures, or export-size issues found.</p>}{silent.length>0&&silent.length<bars.length&&<p>{silent.length} silent measure{silent.length===1?"":"s"} across the song may be intentional breaks.</p>}</details>;
 }
 
 export function SongBuilderStorage({songId,onBackup,onCleanup}:{songId:string;onBackup:()=>void;onCleanup:()=>void}){

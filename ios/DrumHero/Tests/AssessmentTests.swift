@@ -6,15 +6,34 @@ final class AssessmentTests: XCTestCase {
     struct Fixtures: Decodable {
         struct Case: Decodable { var name: String; var probeId: String; var variant: Int?; var offsetMs: Double; var missing: Int; var extras: Int; var velocity: String; var score: Int; var accuracy: Int; var meanAbsoluteMs: Double?; var meanOffsetMs: Double?; var timingSpreadMs: Double?; var passed: Bool; var dynamicsContrast: Double? }
         struct QuizForm: Decodable { var resultId: String; var selectedIds: [String] }
+        struct QuizFormatCase: Decodable { var resultId: String; var format: String; var selectedKinds: [String] }
+        struct ConfidenceRow: Decodable { var probeId: String; var score: Int; var meanAbsoluteMs: Double?; var passed: Bool }
+        struct ConfidenceCase: Decodable { var name: String; var domain: String; var rows: [ConfidenceRow]; var expected: String }
+        struct RecommendationRow: Decodable { var probeId: String; var score: Int; var accuracy: Int; var meanAbsoluteMs: Double?; var dynamicsContrast: Double?; var passed: Bool }
+        struct RecommendationAnswer: Decodable { var questionId: String; var choice: Int }
+        struct RecommendationCase: Decodable { var name: String; var goal: String?; var quizFormat: String?; var adaptation: String; var attempts: [RecommendationRow]; var answers: [RecommendationAnswer]; var expected: String }
+        struct TempoCase: Decodable { var domain: String; var bpms: [Int]; var expectedBpm: Int }
+        struct InternalPulseCase: Decodable { var name: String; var offsetsByBar: [Double]; var accuracy: Int; var clickOnMeanAbsoluteMs: Double; var clickOffMeanAbsoluteMs: Double; var dropoutDriftMs: Double; var passed: Bool }
+        struct ProgressionAttempt: Decodable { var probeId: String; var score: Int; var meanAbsoluteMs: Double?; var passed: Bool }
+        struct ProgressionCase: Decodable { var name: String; var adaptation: String; var attempts: [ProgressionAttempt]; var expectedProbeId: String }
+        struct AdaptationCase: Decodable { var name: String; var probeId: String; var adaptation: String; var expectedHitCount: Int; var expectedKickCount: Int; var expectedTomCount: Int; var omitsCoordination: Bool? }
         var version: Int
         var cases: [Case]
         var quizForms: [QuizForm]?
+        var quizFormatCases: [QuizFormatCase]?
+        var confidenceCases: [ConfidenceCase]?
+        var recommendationCases: [RecommendationCase]?
+        var tempoCases: [TempoCase]?
+        var internalPulseCases: [InternalPulseCase]?
+        var progressionCases: [ProgressionCase]?
+        var adaptationCases: [AdaptationCase]?
     }
     func testSharedWebIOSFixtures() throws {
         let bundle = Bundle(for: Self.self)
         let content = try AssessmentContent.load(bundle: bundle)
         let url = try XCTUnwrap(bundle.url(forResource: "assessment-fixtures-v1", withExtension: "json"))
         let fixtures = try JSONDecoder().decode(Fixtures.self, from: Data(contentsOf: url))
+        XCTAssertEqual(fixtures.version, content.version)
         for fixture in fixtures.cases {
             let probe = try XCTUnwrap(content.probes.first { $0.id == fixture.probeId }).variant(fixture.variant ?? 0)
             var hits = probe.pattern("standard").hits.dropFirst(fixture.missing).map { note in
@@ -31,6 +50,57 @@ final class AssessmentTests: XCTestCase {
             var result = AssessmentResult(input: "keyboard", inputProfile: "keyboard", adaptation: "standard")
             result.id = fixture.resultId
             XCTAssertEqual(result.questions(content).map(\.id), fixture.selectedIds, fixture.resultId)
+        }
+        for fixture in fixtures.quizFormatCases ?? [] {
+            var result = AssessmentResult(input: "keyboard", inputProfile: "keyboard", adaptation: "standard", quizFormat: fixture.format)
+            result.id = fixture.resultId
+            XCTAssertEqual(result.questions(content).map(\.kind), fixture.selectedKinds, fixture.resultId)
+        }
+        for fixture in fixtures.confidenceCases ?? [] {
+            var result = AssessmentResult(input: "keyboard", inputProfile: "keyboard", adaptation: "standard")
+            result.attempts = fixture.rows.map { row in AssessmentAttempt(probeId: row.probeId, score: row.score, accuracy: row.score, meanAbsoluteMs: row.meanAbsoluteMs, misses: 0, extras: 0, dynamicsContrast: nil, passed: row.passed) }
+            XCTAssertEqual(result.confidence(fixture.domain, content: content), fixture.expected, fixture.name)
+        }
+        for fixture in fixtures.recommendationCases ?? [] {
+            var result = AssessmentResult(input: "keyboard", inputProfile: "keyboard", adaptation: fixture.adaptation, goal: fixture.goal, quizFormat: fixture.quizFormat)
+            result.attempts = fixture.attempts.map { row in AssessmentAttempt(probeId: row.probeId, score: row.score, accuracy: row.accuracy, meanAbsoluteMs: row.meanAbsoluteMs, misses: 0, extras: 0, dynamicsContrast: row.dynamicsContrast, passed: row.passed) }
+            result.answers = fixture.answers.map { AssessmentAnswer(questionId: $0.questionId, choice: $0.choice) }
+            XCTAssertEqual(result.recommendation(content), fixture.expected, fixture.name)
+        }
+        for fixture in fixtures.tempoCases ?? [] {
+            let tempos = Set(content.probes.filter { $0.domain == fixture.domain }.map(\.bpm))
+            XCTAssertEqual(tempos, Set([fixture.expectedBpm]), fixture.domain)
+        }
+        for fixture in fixtures.internalPulseCases ?? [] {
+            let probe = try XCTUnwrap(content.probes.first { $0.id == "internal-pulse-1" })
+            let hits = probe.pattern("standard").hits.map { note in
+                AssessmentInputHit(instrument: note.instrument, atMs: Double(note.step) * 60000 / Double(probe.bpm) * 4 / Double(probe.subdivision) + fixture.offsetsByBar[note.step / probe.subdivision], velocity: 70)
+            }
+            let result = AssessmentRules.score(probe, adaptation: "standard", hits: hits, content: content)
+            XCTAssertEqual(result.accuracy, fixture.accuracy, fixture.name)
+            XCTAssertEqual(result.clickOnMeanAbsoluteMs, fixture.clickOnMeanAbsoluteMs, fixture.name)
+            XCTAssertEqual(result.clickOffMeanAbsoluteMs, fixture.clickOffMeanAbsoluteMs, fixture.name)
+            XCTAssertEqual(result.dropoutDriftMs, fixture.dropoutDriftMs, fixture.name)
+            XCTAssertEqual(result.passed, fixture.passed, fixture.name)
+        }
+        for fixture in fixtures.progressionCases ?? [] {
+            var result = AssessmentResult(input: "keyboard", inputProfile: "keyboard", adaptation: fixture.adaptation)
+            result.attempts = fixture.attempts.map { row in AssessmentAttempt(probeId: row.probeId, score: row.score, accuracy: row.score, meanAbsoluteMs: row.meanAbsoluteMs, misses: 0, extras: 0, dynamicsContrast: nil, passed: row.passed) }
+            XCTAssertEqual(result.nextProbe(content)?.id, fixture.expectedProbeId, fixture.name)
+        }
+        for fixture in fixtures.adaptationCases ?? [] {
+            let probe = try XCTUnwrap(content.probes.first { $0.id == fixture.probeId })
+            let adapted = probe.pattern(fixture.adaptation, bars: 1).hits
+            XCTAssertEqual(adapted.count, fixture.expectedHitCount, fixture.name)
+            XCTAssertEqual(adapted.filter { $0.instrument == .kick }.count, fixture.expectedKickCount, fixture.name)
+            XCTAssertEqual(adapted.filter { $0.instrument == .tom }.count, fixture.expectedTomCount, fixture.name)
+            if fixture.omitsCoordination == true {
+                var result = AssessmentResult(input: "touch", inputProfile: "touch", adaptation: fixture.adaptation)
+                result.attempts = content.probes.filter { ["pulse", "subdivisions"].contains($0.domain) }.map { probe in
+                    AssessmentAttempt(probeId: probe.id, score: 100, accuracy: 100, meanAbsoluteMs: 0, misses: 0, extras: 0, dynamicsContrast: nil, passed: true)
+                }
+                XCTAssertNil(result.nextProbe(content), fixture.name)
+            }
         }
     }
     func testAdaptiveProgressionSkipsAndValidation() throws {
@@ -67,7 +137,21 @@ final class AssessmentTests: XCTestCase {
         XCTAssertTrue(details.evidence.contains("matched")); XCTAssertTrue(details.goal.contains("85"))
         result.inputProfile = "midi:serial-123"; result.playedAt = "2026-10-22T12:00:00Z"
         let export = try XCTUnwrap(result.educatorReviewJSON(content))
-        XCTAssertTrue(export.contains("drum-hero-assessment-review")); XCTAssertFalse(export.contains("learner-one")); XCTAssertFalse(export.contains("serial-123")); XCTAssertFalse(export.contains(result.playedAt))
+        XCTAssertTrue(export.contains("drum-hero-assessment-review")); XCTAssertTrue(export.contains("educatorComparisonTemplate")); XCTAssertFalse(export.contains("learner-one")); XCTAssertFalse(export.contains("serial-123")); XCTAssertFalse(export.contains(result.playedAt))
+    }
+    func testAudioQuizTransferValidationAndLegacyResultDecoding() throws {
+        let content = try AssessmentContent.load(bundle: Bundle(for: Self.self))
+        var result = AssessmentResult(input: "keyboard", inputProfile: "keyboard", adaptation: "standard", goal: "play-expressively", quizFormat: "audio")
+        result.id = "audio-learner"
+        XCTAssertEqual(result.questions(content).map(\.kind), ["listening", "listening", "listening", "listening"])
+        let transfer = try XCTUnwrap(content.probes.first { $0.id == "transfer-1" })
+        let transferHits = transfer.pattern("standard").hits.map { note in AssessmentInputHit(instrument: note.instrument, atMs: Double(note.step) * 60000 / Double(transfer.bpm) * 4 / Double(transfer.subdivision), velocity: 75) }
+        result.transferAttempt = AssessmentRules.score(transfer, adaptation: "standard", hits: transferHits, content: content)
+        XCTAssertTrue(result.valid(content)); XCTAssertEqual(result.tier("transfer"), 0)
+        var invalid = result; invalid.transferAttempt?.variant = 99; XCTAssertFalse(invalid.valid(content))
+        let legacy = Data(#"{"version":1,"id":"legacy","playedAt":"2026-10-22T12:00:00Z","input":"touch","inputProfile":"touch","adaptation":"standard","attempts":[],"answers":[],"skipped":[],"endedEarly":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(AssessmentResult.self, from: legacy)
+        XCTAssertNil(decoded.goal); XCTAssertNil(decoded.quizFormat); XCTAssertNil(decoded.transferAttempt); XCTAssertTrue(decoded.valid(content))
     }
     func testProgressComparisonAndLegacyAttemptDecoding() throws {
         let content = try AssessmentContent.load(bundle: Bundle(for: Self.self))
@@ -83,6 +167,33 @@ final class AssessmentTests: XCTestCase {
         let oldAttempt = Data(#"{"probeId":"pulse-1","score":0,"accuracy":0,"meanAbsoluteMs":null,"misses":16,"extras":0,"dynamicsContrast":null,"passed":false}"#.utf8)
         let decoded = try JSONDecoder().decode(AssessmentAttempt.self, from: oldAttempt)
         XCTAssertNil(decoded.variant); XCTAssertNil(decoded.meanOffsetMs); XCTAssertNil(decoded.timingSpreadMs)
+    }
+    func testAssessmentCheckpointQualityAndPracticeRecheckSummary() throws {
+        let content = try AssessmentContent.load(bundle: Bundle(for: Self.self))
+        let original = UserDefaults.standard.data(forKey: AssessmentHistory.draftKey)
+        defer { if let original { UserDefaults.standard.set(original, forKey: AssessmentHistory.draftKey) } else { AssessmentHistory.clearDraft() } }
+        var result = AssessmentResult(input: "touch", inputProfile: "touch", adaptation: "standard")
+        result.timingCorrectionMs = 100
+        try AssessmentHistory.writeDraft(result, content: content)
+        XCTAssertEqual(AssessmentHistory.readDraft(content: content)?.id, result.id)
+        XCTAssertNil(AssessmentHistory.readDraft(content: content, now: .now.addingTimeInterval(15 * 24 * 60 * 60)))
+        let quality = result.qualityNotes(content)
+        XCTAssertEqual(quality.level, "limited")
+        XCTAssertTrue(quality.flags.contains { $0.contains("large timing correction") })
+        AssessmentHistory.clearDraft()
+        XCTAssertNil(AssessmentHistory.readDraft(content: content))
+
+        var previous = result
+        previous.playedAt = "2026-10-21T12:00:00Z"
+        previous.transferAttempt = AssessmentAttempt(probeId: "transfer-1", score: 90, accuracy: 90, meanAbsoluteMs: 25, misses: 1, extras: 0, dynamicsContrast: nil, passed: false)
+        previous.internalPulseAttempt = AssessmentAttempt(probeId: "internal-pulse-1", score: 90, accuracy: 90, meanAbsoluteMs: 20, clickOnMeanAbsoluteMs: 15, clickOffMeanAbsoluteMs: 35, dropoutDriftMs: 25, misses: 1, extras: 0, dynamicsContrast: nil, passed: true)
+        var next = result
+        next.playedAt = "2026-10-22T12:00:00Z"
+        next.transferAttempt = AssessmentAttempt(probeId: "transfer-1", score: 95, accuracy: 95, meanAbsoluteMs: 15, misses: 0, extras: 0, dynamicsContrast: nil, passed: true)
+        next.internalPulseAttempt = AssessmentAttempt(probeId: "internal-pulse-1", score: 95, accuracy: 95, meanAbsoluteMs: 10, clickOnMeanAbsoluteMs: 10, clickOffMeanAbsoluteMs: 15, dropoutDriftMs: 5, misses: 0, extras: 0, dynamicsContrast: nil, passed: true)
+        let summary = try XCTUnwrap(next.comparisonSummary(from: previous))
+        XCTAssertTrue(summary.contains("fresh-pattern transfer: 90% → 95%"))
+        XCTAssertTrue(summary.contains("internal-pulse drift: 25 ms → 5 ms"))
     }
     func testMIDITimingCorrectionsAreStoredPerSourceWithLegacyFallback() {
         let defaults = UserDefaults.standard, source = "midi:assessment-test-source", key = NativeMIDICalibration.key(for: source)

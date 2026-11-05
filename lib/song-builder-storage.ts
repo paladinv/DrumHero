@@ -17,17 +17,18 @@ export type BuilderBacking = {
   source?: string;
   rights?: string;
 };
+export type BuilderMicRecording = { id: string; songId: string; name: string; blob: Blob; mimeType: string; durationMs: number; createdAt: string };
 
 const DATABASE = 'drum-hero-builder-workspace';
 
 function open() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 3);
+    const request = indexedDB.open(DATABASE, 4);
     request.onupgradeneeded = (event) => {
       const database = request.result;
       const transaction = request.transaction;
       if (!transaction) return;
-      for (const name of ['versions', 'takes', 'backing']) {
+      for (const name of ['versions', 'takes', 'backing', 'mic-recordings']) {
         const store = database.objectStoreNames.contains(name)
           ? transaction.objectStore(name)
           : database.createObjectStore(name, { keyPath: 'id' });
@@ -106,6 +107,21 @@ export async function readBuilderTakes(songId: string) { return (await transacti
 export async function saveBuilderTake(take: BuilderTake) { await transaction('takes', 'readwrite', (store) => store.put(take)); const old = (await readBuilderTakes(take.songId)).slice(10); for (const item of old) await deleteBuilderTake(item.id); }
 export async function deleteBuilderTake(id: string) { await transaction('takes', 'readwrite', (store) => store.delete(id)); }
 
+export async function readBuilderMicRecordings(songId: string) {
+  return (await transaction<BuilderMicRecording[]>('mic-recordings', 'readonly', (store) => store.index('songId').getAll(songId)))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+export async function saveBuilderMicRecording(recording: BuilderMicRecording) {
+  await transaction('mic-recordings', 'readwrite', (store) => store.put(recording));
+  const old = (await readBuilderMicRecordings(recording.songId)).slice(10);
+  for (const item of old) await deleteBuilderMicRecording(item.id);
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('drum-hero:audio-storage-change'));
+}
+export async function deleteBuilderMicRecording(id: string) {
+  await transaction('mic-recordings', 'readwrite', (store) => store.delete(id));
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('drum-hero:audio-storage-change'));
+}
+
 export async function readBuilderBackings(songId: string) {
   return (await transaction<BuilderBacking[]>('backing', 'readonly', (store) => store.index('songId').getAll(songId)))
     .sort((a, b) => (a.stemId === 'main' ? -1 : b.stemId === 'main' ? 1 : a.name.localeCompare(b.name)));
@@ -148,8 +164,8 @@ export async function deleteBuilderBacking(songId: string) {
 }
 
 export async function builderStorageInventory(songId: string) {
-  const [backings, takes, versions, quota] = await Promise.all([
-    readBuilderBackings(songId), readBuilderTakes(songId), readBuilderVersions(songId),
+  const [backings, takes, versions, micRecordings, quota] = await Promise.all([
+    readBuilderBackings(songId), readBuilderTakes(songId), readBuilderVersions(songId), readBuilderMicRecordings(songId),
     typeof navigator === 'undefined' ? undefined : navigator.storage?.estimate?.().catch(() => undefined),
   ]);
   const backing = backings.find((item) => item.stemId === 'main' || item.id === songId) ?? backings[0];
@@ -159,8 +175,10 @@ export async function builderStorageInventory(songId: string) {
     takes,
     versions,
     quota,
+    micRecordings,
     bytes: {
       backing: backings.reduce((total, item) => total + item.blob.size, 0),
+      micRecordings: micRecordings.reduce((total, item) => total + item.blob.size, 0),
       takes: new Blob([JSON.stringify(takes)]).size,
       versions: new Blob([JSON.stringify(versions)]).size,
     },

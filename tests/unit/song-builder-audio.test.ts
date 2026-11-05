@@ -3,6 +3,7 @@ import { createDrumAudio } from '@/lib/audio';
 class Node {
   gain={value:1,setValueAtTime:vi.fn(),cancelScheduledValues:vi.fn(),linearRampToValueAtTime:vi.fn(),exponentialRampToValueAtTime:vi.fn()};
   pan={setValueAtTime:vi.fn()};
+  playbackRate={setValueAtTime:vi.fn()};
   buffer:unknown;
   start=vi.fn();stop=vi.fn();connect=vi.fn(()=>this);
 }

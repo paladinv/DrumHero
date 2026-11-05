@@ -30,6 +30,8 @@ vm.runInNewContext(songLibraryOutput, { module: songLibraryModule, exports: song
   if (specifier === "./song-builder-tools") return { normalizeTempoAnchors: (anchors) => anchors };
   if (specifier === "./song-library-next") return { normalizePresets: (items) => items, normalizeSavedSearches: (items) => items, normalizeSetlistEntries: (items) => items };
   if (specifier === "./custom-grooves") return { parseCustomGrooves: () => [] };
+  if (specifier === "./audio") return { DEFAULT_DRUM_MIX: { levels: {}, pan: {}, sampleIndex: {}, pitch: {}, decay: {}, muted: {}, solo: "" } };
+  if (specifier === "./types") return { SONG_INSTRUMENTS: ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", ...Array.from({ length: 8 }, (_, index) => `custom${index + 1}`)] };
   throw new Error(`Unexpected song-library dependency: ${specifier}`);
 } }, { filename: songLibraryPath });
 const guideSource = fs.readFileSync(path.join(root, "lib/lesson-guides.ts"), "utf8");

@@ -104,12 +104,13 @@ export function arrangementMidi(bars: ArrangementBar[], title: string, noteMap: 
       conductor.push({ tick: barTick, priority: -1, bytes: [0xff, 0x06, ...variableLength(markerBytes.length), ...markerBytes] });
     }
     for (const hit of bar.hits) {
-      const gridPosition=hit.step%bar.subdivision;
-      const swingableOffbeat=(bar.subdivision===8&&gridPosition%2===1)||(bar.subdivision===16&&gridPosition%4===2);
+      const hitSubdivision=hit.sourceSubdivision??bar.subdivision;
+      const gridPosition=hit.step%hitSubdivision;
+      const swingableOffbeat=(hitSubdivision===8&&gridPosition%2===1)||(hitSubdivision===16&&gridPosition%4===2);
       const clipSwing=bar.clipOverrides?.swing??bar.playbackFeel?.swing??(bar.feel?(bar.feel.kind==="straight"?50:bar.feel.amount):swing);
       const swingDelay=swingableOffbeat?Math.round(480*(Math.max(50,Math.min(75,clipSwing))-50)/100):0;
       const at = barTick + Math.max(0, Math.round(hit.beat * 480)+swingDelay);
-      const duration = Math.max(1, Math.round((480 * 4 / bar.subdivision) * 0.55));
+      const duration = Math.max(1, Math.round((480 * 4 / hitSubdivision) * 0.55));
       const automationScale = automationScaleAtHit(bar, hit);
       if (automationScale <= 0.001) continue;
       const voice = hit.articulation === "foot-splash" ? "openhat" : hit.instrument;
@@ -117,7 +118,7 @@ export function arrangementMidi(bars: ArrangementBar[], title: string, noteMap: 
       const velocity = Math.max(1, Math.min(127, Math.round(hit.velocity * automationScale * velocityScale)));
       const note = hit.articulation === "foot-splash" ? 44 : noteMap[hit.instrument] ?? midiNotes[hit.instrument];
       const events = separateTracks ? (voiceEvents.get(voice) ?? (voiceEvents.set(voice, []), voiceEvents.get(voice)!)) : conductor;
-      const strikes = expressionStrikes(hit.articulation,60000/bar.bpm*4/bar.subdivision).map(([ms,scale]) => [Math.max(barTick,at+Math.round(ms*bar.bpm*480/60000)),Math.max(1,Math.round(velocity*scale))]);
+      const strikes = expressionStrikes(hit.articulation,60000/bar.bpm*4/hitSubdivision).map(([ms,scale]) => [Math.max(barTick,at+Math.round(ms*bar.bpm*480/60000)),Math.max(1,Math.round(velocity*scale))]);
       for (const [strikeAt, strikeVelocity] of strikes) {
         events.push({ tick: strikeAt, priority: 1, bytes: [0x99, note, strikeVelocity] });
         events.push({ tick: strikeAt + (hit.articulation === "choke" ? Math.round(.12*bar.bpm*8) : duration), priority: 0, bytes: [0x89, note, 0] });
@@ -174,8 +175,9 @@ export function arrangementMusicXml(bars: ArrangementBar[], title: string, artis
   const newSystems=new Set(pages.flatMap(page=>notationSystems(page,options).slice(1).map(system=>system[0])));
   const measures=bars.map((bar,index)=>{
     const signature=bar.meter.match(/(\d+)\s*\/\s*(\d+)/),numerator=Number(signature?.[1]??4),denominator=Number(signature?.[2]??4),scale=notationQuarterScale(bar);
-    const measureTicks=Math.max(1,Math.round(bar.beats*scale*48));
-    const attributes=`<attributes><divisions>48</divisions><time><beats>${numerator}</beats><beat-type>${denominator}</beat-type></time><clef><sign>percussion</sign><line>2</line></clef></attributes>`;
+    const divisions=bar.subdivision===20||bar.hits.some(hit=>hit.sourceSubdivision===20)?240:48;
+    const measureTicks=Math.max(1,Math.round(bar.beats*scale*divisions));
+    const attributes=`<attributes><divisions>${divisions}</divisions><time><beats>${numerator}</beats><beat-type>${denominator}</beat-type></time><clef><sign>percussion</sign><line>2</line></clef></attributes>`;
     const label=[bar.marker,bar.sectionName,bar.dynamics,bar.annotation,bar.endingPass?`Ending ${bar.endingPass}`:''].filter(Boolean).join(' · ');
     const dynamic=bar.dynamics && /^(ppp|pp|p|mp|mf|f|ff|fff|sfz)$/.test(bar.dynamics.trim())?`<dynamics><${bar.dynamics.trim()}/></dynamics>`:'';
     const rehearsal=bar.marker?`<rehearsal>${xmlEscape(bar.marker)}</rehearsal>`:'';
@@ -183,9 +185,10 @@ export function arrangementMusicXml(bars: ArrangementBar[], title: string, artis
     const body=(['hands','feet'] as const).map((lane,laneIndex)=>{
       const events=percussionRhythm(bar,lane,options),voice=laneIndex+1,stem=lane==='feet'?'down':'up';
       return `${laneIndex?`<backup><duration>${measureTicks}</duration></backup>`:''}`+events.map((event,eventIndex)=>{
-        const duration=event.measureRest?measureTicks:Math.max(1,Math.round(event.duration*4/bar.subdivision*scale*48)),type=musicType(duration);
-        const durationXml=`<duration>${duration}</duration><voice>${voice}</voice>${type&&!event.measureRest?`<type>${type.type}</type>${type.dotted?'<dot/>':''}`:''}${type?.triplet&&!event.measureRest?'<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>':''}`;
-        const tuplet=bar.subdivision===12&&scale===1&&event.duration===1?`${event.step%3===0?'<tuplet type="start" bracket="yes"/>':''}${event.step%3===2?'<tuplet type="stop"/>':''}`:'';
+        const duration=event.measureRest?measureTicks:Math.max(1,Math.round(event.duration*4/bar.subdivision*scale*divisions)),quintuplet=bar.subdivision===20&&event.duration===1,type=quintuplet?{type:"16th",dotted:scale===1.5,triplet:false}:musicType(duration*48/divisions);
+        const durationXml=`<duration>${duration}</duration><voice>${voice}</voice>${type&&!event.measureRest?`<type>${type.type}</type>${type.dotted?'<dot/>':''}`:''}${quintuplet&&!event.measureRest?'<time-modification><actual-notes>5</actual-notes><normal-notes>4</normal-notes></time-modification>':type?.triplet&&!event.measureRest?'<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>':''}`;
+        const group=quintuplet?5:bar.subdivision===12&&scale===1&&event.duration===1?3:0;
+        const tuplet=group?`${event.step%group===0?'<tuplet type="start" bracket="yes"/>':''}${event.step%group===group-1?'<tuplet type="stop"/>':''}`:'';
         if(!event.hits.length)return `<note><rest${event.measureRest?' measure="yes"':''}/>${durationXml}${tuplet?`<notations>${tuplet}</notations>`:''}</note>`;
         const previous=events[eventIndex-1],next=events[eventIndex+1];
         const beamBefore=Boolean(previous?.hits.length&&previous.group===event.group&&previous.step+previous.duration===event.step);
@@ -221,31 +224,38 @@ const wavSamplePaths = {
   ...Object.fromEntries(Array.from({length:8},(_,index)=>[`custom${index+1}`, [`/audio/drums/${["kick","snare","tom","crash"][index%4]}-1.wav`]]))
 } as Record<SongInstrument, string[]>;
 
-export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number } = {}) {
+export type AudioRenderOptions = { sampleRate: 44100 | 48000; bitDepth: 16 | 24; normalizeToDbfs?: number };
+export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number; render?: AudioRenderOptions } = {}) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
-  const sampleRate = 44_100;
+  const sampleRate = options.render?.sampleRate ?? 44_100;
+  const bitDepth = options.render?.bitDepth ?? 16;
   const totalSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0) + 1;
   if (totalSeconds > 8 * 60) throw new Error("This song is longer than the eight-minute WAV export limit. Export it in sections.");
   const Offline = window.OfflineAudioContext;
   if (!Offline) throw new Error("Offline audio export is unavailable in this browser.");
   const context = new Offline(2, Math.ceil(totalSeconds * sampleRate), sampleRate);
   const voices = [...new Set(bars.flatMap((bar) => bar.hits.map((hit) => hit.articulation === "foot-splash" ? "openhat" : hit.instrument)))];
-  const buffers = new Map<SongInstrument, { primary: AudioBuffer; accent?: AudioBuffer }>();
-  await Promise.all(voices.map(async (voice) => {
-    if (mix.muted[voice] || (mix.solo && mix.solo !== voice)) return;
-    if (mix.sampleIndex[voice] < 0 && customSamples[voice]) {
+  const buffers = new Map<string, { primary: AudioBuffer; soft?: AudioBuffer; accent?: AudioBuffer }>();
+  const sampleKeys = [...new Set(bars.flatMap(bar => voices.map(voice => `${voice}:${(bar.kitMix ?? mix).sampleIndex[voice] ?? 0}`)))];
+  await Promise.all(sampleKeys.map(async (key) => {
+    const separator = key.lastIndexOf(":");
+    const voice = key.slice(0, separator) as SongInstrument;
+    const sampleIndex = Number(key.slice(separator + 1));
+    if (!bars.some(bar => { const barMix = bar.kitMix ?? mix; return bar.hits.some(hit => (hit.articulation === "foot-splash" ? "openhat" : hit.instrument) === voice) && !barMix.muted[voice] && (!barMix.solo || barMix.solo === voice) && barMix.sampleIndex[voice] === sampleIndex; })) return;
+    if (sampleIndex < 0 && customSamples[voice]) {
       const source = customSamples[voice]!;
       const layers = source instanceof Blob ? { primary: source } : source;
       const primary = await context.decodeAudioData(await layers.primary.arrayBuffer());
+      const soft = layers.soft ? await context.decodeAudioData(await layers.soft.arrayBuffer()).catch(() => undefined) : undefined;
       const accent = layers.accent ? await context.decodeAudioData(await layers.accent.arrayBuffer()).catch(() => undefined) : undefined;
-      buffers.set(voice, { primary, ...(accent ? { accent } : {}) });
+      buffers.set(key, { primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}) });
       return;
     }
     const samplePaths = wavSamplePaths[voice];
-    const samplePath = samplePaths[Math.max(0, Math.min(samplePaths.length - 1, mix.sampleIndex[voice] ?? 0))] ?? samplePaths[0];
+    const samplePath = samplePaths[Math.max(0, Math.min(samplePaths.length - 1, sampleIndex))] ?? samplePaths[0];
     const response = await fetch(samplePath);
     if (!response.ok) throw new Error(`Could not load the ${VOICE_NAMES[voice]} sample for WAV export.`);
-    buffers.set(voice, { primary: await context.decodeAudioData(await response.arrayBuffer()) });
+    buffers.set(key, { primary: await context.decodeAudioData(await response.arrayBuffer()) });
   }));
   let startSeconds = 0;
   let activeOpenHat: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
@@ -259,20 +269,22 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
     }
     for (const hit of bar.hits) {
       const instrument = hit.articulation === "foot-splash" ? "openhat" : hit.instrument;
+      const barMix = bar.kitMix ?? mix;
       const automationScale = automationScaleAtHit(bar, hit);
-      if (automationScale <= 0.001 || mix.muted[instrument] || (mix.solo && mix.solo !== instrument)) continue;
-      const sampleLayers = buffers.get(instrument);
+      if (automationScale <= 0.001 || barMix.muted[instrument] || (barMix.solo && barMix.solo !== instrument)) continue;
+      const sampleLayers = buffers.get(`${instrument}:${barMix.sampleIndex[instrument] ?? 0}`);
       if (!sampleLayers) continue;
       const automationBeat = (bar.arrangementBeatStart ?? 0) + hit.beat;
       const arrangementVelocityScale = arrangementAutomationValue(bar, instrument, "velocity", automationBeat, 1);
-      const panAutomation = arrangementAutomationValue(bar, instrument, "pan", automationBeat, mix.pan[instrument] ?? 0);
-      const gridPosition = hit.step % bar.subdivision;
-      const swingableOffbeat = (bar.subdivision === 8 && gridPosition % 2 === 1) || (bar.subdivision === 16 && gridPosition % 4 === 2);
+      const panAutomation = arrangementAutomationValue(bar, instrument, "pan", automationBeat, barMix.pan[instrument] ?? 0);
+      const hitSubdivision = hit.sourceSubdivision ?? bar.subdivision;
+      const gridPosition = hit.step % hitSubdivision;
+      const swingableOffbeat = (hitSubdivision === 8 && gridPosition % 2 === 1) || (hitSubdivision === 16 && gridPosition % 4 === 2);
       const clipSwing = bar.clipOverrides?.swing ?? bar.playbackFeel?.swing ?? (bar.feel ? (bar.feel.kind === "straight" ? 50 : bar.feel.amount) : swing);
       const swingSeconds = swingableOffbeat ? quarterSeconds * (Math.max(50, Math.min(75, clipSwing)) - 50) / 100 : 0;
       const hitAt = startSeconds + hit.beat * quarterSeconds + swingSeconds;
       const articulation = hit.articulation ?? "normal";
-      const strikes = expressionStrikes(articulation,quarterSeconds*4000/bar.subdivision).map(([ms, velocity]) => [ms / 1000, velocity] as const);
+      const strikes = expressionStrikes(articulation,quarterSeconds*4000/hitSubdivision).map(([ms, velocity]) => [ms / 1000, velocity] as const);
       for (const [delay, articulationVelocityScale] of strikes) {
         const source = context.createBufferSource();
         const gain = context.createGain();
@@ -285,12 +297,20 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
           activeOpenHat = null;
         }
         const strikeVelocity = hit.velocity * arrangementVelocityScale * articulationVelocityScale;
-        source.buffer = strikeVelocity >= 96 && sampleLayers.accent ? sampleLayers.accent : sampleLayers.primary;
-        gain.gain.value = Math.max(0, Math.min(1, strikeVelocity / 127)) * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)) * automationScale;
+        source.buffer = strikeVelocity < 48 && sampleLayers.soft ? sampleLayers.soft : strikeVelocity >= 96 && sampleLayers.accent ? sampleLayers.accent : sampleLayers.primary;
+        gain.gain.value = Math.max(0, Math.min(1, strikeVelocity / 127)) * Math.max(0, Math.min(1, barMix.levels[instrument] ?? 0.82)) * automationScale;
         const panner = context.createStereoPanner();
         panner.pan.value = Math.max(-1, Math.min(1, panAutomation));
+        const playbackRate = Math.pow(2, Math.max(-12, Math.min(12, barMix.pitch?.[instrument] ?? 0)) / 12);
+        source.playbackRate.setValueAtTime(playbackRate, eventAt);
         source.connect(gain).connect(panner).connect(context.destination);
-        source.start(eventAt);
+        const decay = Math.max(0.05, Math.min(1, barMix.decay?.[instrument] ?? 1));
+        if (decay < 0.999 && articulation !== 'choke') {
+          const audibleDuration = Math.max(0.04, source.buffer.duration / playbackRate * decay);
+          gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), eventAt + audibleDuration * 0.82);
+          gain.gain.linearRampToValueAtTime(0.0001, eventAt + audibleDuration);
+          source.start(eventAt); source.stop(eventAt + audibleDuration + 0.005);
+        } else source.start(eventAt);
         if (articulation === 'choke') { gain.gain.setValueAtTime(gain.gain.value,eventAt+.08); gain.gain.linearRampToValueAtTime(0,eventAt+.12); source.stop(eventAt+.13); }
         if (instrument === "openhat") activeOpenHat = { source, gain };
       }
@@ -307,18 +327,26 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
   const rendered = await context.startRendering();
   const leftSamples = rendered.getChannelData(0);
   const rightSamples = rendered.getChannelData(1);
-  const dataBytes = leftSamples.length * 4;
+  let peak = 0;
+  for (let index = 0; index < leftSamples.length; index += 1) peak = Math.max(peak, Math.abs(leftSamples[index] ?? 0), Math.abs(rightSamples[index] ?? 0));
+  const normalizationGain = options.render?.normalizeToDbfs !== undefined && peak > 0 ? Math.pow(10, options.render.normalizeToDbfs / 20) / peak : 1;
+  const bytesPerSample = bitDepth / 8;
+  const dataBytes = leftSamples.length * 2 * bytesPerSample;
   const wav = new ArrayBuffer(44 + dataBytes);
   const view = new DataView(wav);
   const writeText = (offset: number, value: string) => [...value].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
   writeText(0, "RIFF"); view.setUint32(4, 36 + dataBytes, true); writeText(8, "WAVE");
   writeText(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 2, true);
-  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 4, true); view.setUint16(32, 4, true); view.setUint16(34, 16, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2 * bytesPerSample, true); view.setUint16(32, 2 * bytesPerSample, true); view.setUint16(34, bitDepth, true);
   writeText(36, "data"); view.setUint32(40, dataBytes, true);
   for (let index = 0; index < leftSamples.length; index += 1) {
     for (const [channel, samples] of [leftSamples, rightSamples].entries()) {
-      const sample = Math.max(-1, Math.min(1, samples[index] ?? 0));
-      view.setInt16(44 + (index * 2 + channel) * 2, sample < 0 ? sample * 32768 : sample * 32767, true);
+      const sample = Math.max(-1, Math.min(1, (samples[index] ?? 0) * normalizationGain));
+      const offset = 44 + (index * 2 + channel) * bytesPerSample;
+      if (bitDepth === 24) {
+        const value = sample < 0 ? Math.round(sample * 0x800000) : Math.round(sample * 0x7fffff);
+        view.setUint8(offset, value & 0xff); view.setUint8(offset + 1, (value >> 8) & 0xff); view.setUint8(offset + 2, (value >> 16) & 0xff);
+      } else view.setInt16(offset, sample < 0 ? sample * 32768 : sample * 32767, true);
     }
   }
   return new Blob([wav], { type: "audio/wav" });
@@ -383,7 +411,7 @@ export async function arrangementStemsZip(
   swing = 50,
   mix: DrumMixSettings = DEFAULT_DRUM_MIX,
   customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {},
-  options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number } = {}
+  options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number; render?: AudioRenderOptions; stemPrefix?: string } = {}
 ) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
   const durationSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0);
@@ -392,22 +420,21 @@ export async function arrangementStemsZip(
   if (!voices.length && !options.metronome && !options.backing) throw new Error("There are no drum hits or optional tracks to export in this range.");
   const files: StemZipFile[] = [];
   for (const voice of voices) {
-    const stemMix: DrumMixSettings = {
-      ...mix,
-      solo: "",
-      muted: Object.fromEntries(Object.keys(mix.muted).map(key => [key, key === voice ? mix.muted[voice] : true])) as DrumMixSettings["muted"]
-    };
-    files.push({ name: `drums-${voice}.wav`, blob: await arrangementWav(bars, swing, stemMix, customSamples) });
+    const soloMix = (source: DrumMixSettings): DrumMixSettings => ({ ...source, solo: "", muted: Object.fromEntries(Object.keys(source.muted).map(key => [key, key === voice ? source.muted[voice] : true])) as DrumMixSettings["muted"] });
+    const stemMix = soloMix(mix);
+    const stemBars = bars.map(bar => bar.kitMix ? { ...bar, kitMix: soloMix(bar.kitMix) } : bar);
+    files.push({ name: `${options.stemPrefix || "drums"}-${voice}.wav`, blob: await arrangementWav(stemBars, swing, stemMix, customSamples, { render: options.render }) });
   }
   files.push({ name: "tempo-map.mid", blob: arrangementMidi(bars.map(bar => ({ ...bar, hits: [] })), "Tempo and meter map") });
-  if (options.metronome) files.push({ name: "metronome.wav", blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { metronome: true }) });
-  if (options.backing) files.push({ name: "backing-track.wav", blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { backing: options.backing, backingOffsetSeconds: options.backingOffsetSeconds }) });
+  if (options.metronome) files.push({ name: `${options.stemPrefix || "drums"}-metronome.wav`, blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { metronome: true, render: options.render }) });
+  if (options.backing) files.push({ name: `${options.stemPrefix || "drums"}-backing-track.wav`, blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { backing: options.backing, backingOffsetSeconds: options.backingOffsetSeconds, render: options.render }) });
   const minutes = Math.floor(durationSeconds / 60), seconds = Math.round(durationSeconds % 60);
   const readme = [
     "Drum Hero aligned WAV stems",
     `Arrangement duration: ${minutes}:${String(seconds).padStart(2, "0")}`,
     "Every stem starts at the same arrangement position and uses the same sample rate and bit depth.",
-    "Drum stems follow the selected kit samples, per-voice level and pan. They are not peak-normalized.",
+    `Audio format: ${options.render?.sampleRate ?? 44100} Hz · ${options.render?.bitDepth ?? 16}-bit PCM${options.render?.normalizeToDbfs === undefined ? " · normalization off" : ` · peak-normalized to ${options.render.normalizeToDbfs} dBFS`}`,
+    "Drum stems follow the selected kit samples, per-voice level, pan, pitch and decay.",
     "Import tempo-map.mid into the same DAW session to recover section tempo, meter and marker changes.",
     "Metronome and backing audio are included as separate stems when selected.",
     ...files.map(file => `- ${file.name}`)

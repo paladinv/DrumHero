@@ -1,12 +1,12 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { DrumPart } from "@/lib/song-library";
 import type { TempoAnchor } from "@/lib/song-builder-tools";
 import type { ArrangementBar } from "@/lib/song-builder";
 import { mappedSeconds } from "@/lib/song-builder-tools";
 import { deleteBuilderBacking, readBuilderBacking, saveBuilderBacking, type BuilderBacking } from "@/lib/song-builder-storage";
-import { analyzeBackingAudio, backingSuggestionsForPart, type BackingAudioAnalysis } from "@/lib/song-builder-audio-analysis";
+import { analyzeBackingAudio, backingSuggestionsForArrangement, backingSuggestionsForPart, type ArrangementHitSuggestion, type BackingAudioAnalysis } from "@/lib/song-builder-audio-analysis";
 import { useLocalization } from "./LocalizationProvider";
 
 export type BackingTrackHandle = {
@@ -22,12 +22,15 @@ type Props = {
   anchors: TempoAnchor[];
   onApplyTempo: (bpm: number) => void;
   onApplyHits: (hits: DrumPart["hits"]) => void;
+  onApplyArrangementHits: (groups: ArrangementHitSuggestion[]) => void;
   onAnchorsChange: (anchors: TempoAnchor[]) => void;
   songBpm: number;
 };
 
+const candidateKey = (hit: BackingAudioAnalysis["hits"][number]) => `${hit.timeSeconds.toFixed(3)}:${hit.voice}`;
+
 export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(function SongBuilderBackingTrack(
-  { songId, targetPart, bars, anchors, onApplyTempo, onApplyHits, onAnchorsChange, songBpm },
+  { songId, targetPart, bars, anchors, onApplyTempo, onApplyHits, onApplyArrangementHits, onAnchorsChange, songBpm },
   ref,
 ) {
   const { t } = useLocalization();
@@ -47,6 +50,10 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
   const [anchorMeasure, setAnchorMeasure] = useState(1);
   const [themeRevision, setThemeRevision] = useState(0);
   const [showBeatGrid,setShowBeatGrid]=useState(true);
+  const [selectedSuggestionBars, setSelectedSuggestionBars] = useState<number[]>([]);
+  const [confidenceFloor, setConfidenceFloor] = useState(45);
+  const [excludedCandidates, setExcludedCandidates] = useState<string[]>([]);
+  const [candidateVoiceOverrides, setCandidateVoiceOverrides] = useState<Record<string, "kick" | "snare" | "hihat">>({});
 
   useEffect(() => {
     let active = true;
@@ -238,10 +245,12 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
   const analyze = async () => {
     if (!track) return;
     setAnalyzing(true);
-    setAnalysisMessage(t("Analyzing a maximum of three minutes of audio locally…"));
+    setAnalysisMessage(t("Analyzing the full backing track locally…"));
     try {
       const result = await analyzeBackingAudio(track.blob);
       setAnalysis(result);
+      setExcludedCandidates([]); setCandidateVoiceOverrides({});
+      setSelectedSuggestionBars(bars.map(bar => bar.index));
       setAnalysisMessage(t("{bpm} BPM estimate · {hits} transient suggestions · first candidate beat at {seconds} seconds. Review before applying.", {
         bpm: result.bpm,
         hits: result.hits.length,
@@ -255,7 +264,11 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
     }
   };
 
-  const suggestions = analysis && targetPart ? backingSuggestionsForPart(analysis, targetPart) : [];
+  const excludedCandidateSet = useMemo(() => new Set(excludedCandidates), [excludedCandidates]);
+  const reviewedAnalysis = useMemo(() => analysis ? ({ ...analysis, hits: analysis.hits.filter(hit => hit.confidence * 100 >= confidenceFloor && !excludedCandidateSet.has(candidateKey(hit))).map(hit => ({ ...hit, voice: candidateVoiceOverrides[candidateKey(hit)] ?? hit.voice })) }) : null, [analysis, confidenceFloor, excludedCandidateSet, candidateVoiceOverrides]);
+  const suggestions = reviewedAnalysis && targetPart ? backingSuggestionsForPart(reviewedAnalysis, targetPart) : [];
+  const arrangementSuggestions = useMemo(() => reviewedAnalysis && track ? backingSuggestionsForArrangement(reviewedAnalysis, bars, track.downbeat) : [], [reviewedAnalysis, track?.downbeat, bars]);
+  const chosenArrangementSuggestions = arrangementSuggestions.filter(item => selectedSuggestionBars.includes(item.barIndex));
 
   return <section className="card song-builder-backing" aria-label={t("Backing track")}>
     <h2>{t("Play with a backing track")}</h2>
@@ -291,10 +304,13 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
       </div>
       <details className="song-builder-extra">
         <summary>{t("Analyze tempo and suggest drum hits")}</summary>
-        <p>{t("Local audio analysis estimates a steady pulse and classifies transient peaks as kick, snare, or hi-hat. Mixed audio can produce false hits, so review the suggestions and edit them after insertion.")}</p>
+        <p>{t("Local audio analysis estimates a steady pulse and classifies transient peaks as kick, snare, or hi-hat across the full track. These are reviewable guesses: mixed audio can produce false hits.")}</p>
         <button type="button" disabled={analyzing} onClick={() => void analyze()}>{analyzing ? t("Analyzing…") : t("Analyze backing track")}</button>
         {analysis && <>
           <p><strong>{analysis.bpm} BPM</strong> · {t("first candidate beat {seconds} s · analyzed {duration} s", { seconds: analysis.firstBeatSeconds.toFixed(2), duration: Math.round(analysis.analyzedSeconds) })}</p>
+          <label>{t("Minimum onset confidence · {value}%", { value: confidenceFloor })}<input type="range" min={25} max={95} step={5} value={confidenceFloor} onChange={event=>setConfidenceFloor(Number(event.target.value))}/></label>
+          <p>{t("{kept} of {total} transient candidates pass the confidence filter.", { kept: reviewedAnalysis?.hits.length ?? 0, total: analysis.hits.length })}</p>
+          <details className="song-builder-audio-candidate-review"><summary>Review and correct individual detections</summary><p>Include or reject a transient and correct its likely drum voice before building patterns. These local signal estimates can be wrong on mixed audio.</p><div className="song-builder-analysis-measures">{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).slice(0,160).map(hit=>{const key=candidateKey(hit),included=!excludedCandidates.includes(key);return <label key={key}><input type="checkbox" checked={included} onChange={event=>setExcludedCandidates(current=>event.target.checked?current.filter(item=>item!==key):[...current,key])}/><span><strong>{hit.timeSeconds.toFixed(2)} s · {Math.round(hit.confidence*100)}% onset</strong><small>Detected as {hit.voice}</small></span><select aria-label={`Voice for transient at ${hit.timeSeconds.toFixed(2)} seconds`} value={candidateVoiceOverrides[key]??hit.voice} disabled={!included} onChange={event=>setCandidateVoiceOverrides(current=>({...current,[key]:event.target.value as "kick"|"snare"|"hihat"}))}><option value="kick">Kick</option><option value="snare">Snare</option><option value="hihat">Hi-hat</option></select></label>;})}</div>{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).length>160&&<small>{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).length-160} more candidates use the current threshold and voice mappings.</small>}</details>
           <div className="song-builder-actions">
             <button type="button" onClick={() => onApplyTempo(analysis.bpm)}>{t("Use estimated BPM for song tempo")}</button>
             <button type="button" onClick={() => void change({ ...track, downbeat: analysis.firstBeatSeconds })}>{t("Align backing to estimated first beat")}</button>
@@ -306,10 +322,7 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
             <ol className="song-builder-analysis-hits">{suggestions.slice(0, 16).map((hit, index) => <li key={`${hit.instrument}:${hit.step}:${index}`}>{hit.instrument} · {t("step {step}", { step: hit.step + 1 })} · {t("velocity {velocity}", { velocity: hit.velocity ?? 86 })}</li>)}</ol>
             <button type="button" disabled={!targetPart} onClick={() => onApplyHits(suggestions)}>{t("Add suggestions to selected pattern")}</button>
           </>}
-          {analysis.hits.length > 0 && <small>{t("Raw candidates: {candidates}{more}", {
-            candidates: analysis.hits.slice(0, 8).map((hit) => `${hit.voice} ${hit.timeSeconds.toFixed(2)} s`).join(" · "),
-            more: analysis.hits.length > 8 ? " · …" : "",
-          })}</small>}
+          {arrangementSuggestions.length > 0 && <section className="song-builder-analysis-arrangement" aria-label="Full arrangement audio suggestions"><h3>Review full-song suggestions by measure</h3><p>{arrangementSuggestions.length} measures have detected hits. Confidence estimates onset strength; it cannot reliably identify instruments in a mixed recording.</p><div className="song-builder-actions"><button type="button" onClick={() => setSelectedSuggestionBars(arrangementSuggestions.map(item => item.barIndex))}>Select detected measures</button><button type="button" onClick={() => setSelectedSuggestionBars([])}>Clear selection</button><button type="button" disabled={!chosenArrangementSuggestions.length} onClick={() => { onApplyArrangementHits(chosenArrangementSuggestions); setAnalysisMessage(t("Added suggestions from {measures} measures. Review the arrangement and undo if needed.", { measures: chosenArrangementSuggestions.length })); }}>{t("Add selected measures ({count})", { count: chosenArrangementSuggestions.length })}</button></div><div className="song-builder-analysis-measures">{arrangementSuggestions.map(item => <label key={item.barIndex}><input type="checkbox" checked={selectedSuggestionBars.includes(item.barIndex)} onChange={event => setSelectedSuggestionBars(current => event.target.checked ? [...new Set([...current, item.barIndex])] : current.filter(index => index !== item.barIndex))}/><span><strong>Measure {item.measure} · {item.sectionName}</strong><small>{item.partName} · {item.hits.length} snapped notes · {Math.round(item.confidence * 100)}% onset confidence</small><small>{item.hits.slice(0, 8).map(hit => `${hit.instrument} ${hit.step + 1}`).join(" · ")}{item.hits.length > 8 ? " · …" : ""}</small></span></label>)}</div></section>}
         </>}
         <p role="status">{analysisMessage}</p>
       </details>

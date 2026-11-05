@@ -6,15 +6,11 @@ import { lessons } from "@/lib/curriculum";
 import { useAssessment } from "./useAssessment";
 import { calculateStreak, recommendNext } from "@/lib/progress";
 import { DailyPracticePlan } from "./DailyPracticePlan";
+import { HomeReviewQueue, type ReviewRecommendation } from "./HomeReviewQueue";
+import { HomeShortcutPicker } from "./HomeShortcutPicker";
 import { useProgress } from "./ProgressProvider";
 import { useLocalization } from "./LocalizationProvider";
-import { useState } from "react";
-
-const exploreLinks = [
-  { href: "/learn", id: "learn" },
-  { href: "/grooves", id: "grooves" },
-  { href: "/rudiments", id: "rudiments" }
-];
+import { useCallback, useState } from "react";
 
 export function Dashboard() {
   const { progress, profileId } = useProgress();
@@ -23,6 +19,8 @@ export function Dashboard() {
   const suggested = baseline ? assessmentRecommendation(baseline) : null;
   const { t, formatNumber } = useLocalization();
   const [firstSessionPath, setFirstSessionPath] = useState<"lesson" | "pads" | "edrum">("lesson");
+  const [reviewRecommendation, setReviewRecommendation] = useState<ReviewRecommendation | null>(null);
+  const receiveReviewRecommendation = useCallback((item: ReviewRecommendation | null) => setReviewRecommendation(item), []);
   const assessedLesson = lessons.find(l => l.id === suggested);
   const next = assessedLesson ?? recommendNext(progress.completedLessons);
   const recommendationReason = assessedLesson && baseline
@@ -45,12 +43,12 @@ export function Dashboard() {
         <h1>{t("Build the beat.")}<br/><span>{t("Own the pocket.")}</span></h1>
         <p>{t("Clear lessons, playable patterns, and timing feedback for drummers at every stage. No account. No noise complaints required.")}</p>
       </div>
-      <Link className="hero-action dashboard-recommendation" href={next.practicePatternId ? `/practice?pattern=${encodeURIComponent(next.practicePatternId)}` : "/learn"}>
-        <span className="label">{t("Recommended next")}</span>
-        <strong>{t(next.title)}</strong>
-        <span>{t(recommendationReason)}</span>
-        <span>{t(next.level)} · {formatNumber(next.duration)} min · {streak ? `${formatNumber(streak)} ${t("day streak")}` : t("Start your streak")}</span>
-        <span className="dashboard-action-link">{t("Start learning")} <span aria-hidden="true">→</span></span>
+      <Link className="hero-action dashboard-recommendation" href={reviewRecommendation?.href ?? (next.practicePatternId ? `/practice?pattern=${encodeURIComponent(next.practicePatternId)}` : "/learn")}>
+        <span className="label">{reviewRecommendation ? t("Recommended review") : t("Recommended next")}</span>
+        <strong>{reviewRecommendation ? t(reviewRecommendation.title) : t(next.title)}</strong>
+        <span>{reviewRecommendation ? t(reviewRecommendation.reason, reviewRecommendation.reasonValues) : t(recommendationReason)}</span>
+        <span>{reviewRecommendation ? t(reviewRecommendation.kind === "song" ? "Song Library" : reviewRecommendation.kind === "lesson" ? "Lesson skill" : "Trainer timing") : `${t(next.level)} · ${formatNumber(next.duration)} min · ${streak ? `${formatNumber(streak)} ${t("day streak")}` : t("Start your streak")}`}</span>
+        <span className="dashboard-action-link">{t(reviewRecommendation ? "Review this skill" : "Start learning")} <span aria-hidden="true">→</span></span>
       </Link>
     </section>
 
@@ -60,6 +58,7 @@ export function Dashboard() {
     </section>}
 
     <p><Link className="button-secondary" href="/assessment">{t("Initial skill assessment")}</Link></p>
+    <HomeReviewQueue profileId={profileId} progress={progress} onRecommendation={receiveReviewRecommendation} />
     <DailyPracticePlan />
 
     {progress.practiceDates.length === 0 && <section className="first-practice card" aria-labelledby="first-practice-heading">
@@ -77,10 +76,7 @@ export function Dashboard() {
           <div><strong>{formatNumber(progress.practiceDates.length)}</strong><span>{t("Practice days")}</span></div>
         </div>
       </div>
-      <div className="dashboard-explore">
-        <div className="section-heading dashboard-section-heading"><div><span className="eyebrow">{t("Explore")}</span><h2>{t("Build your skills.")}</h2></div></div>
-        <div className="dashboard-shortcuts">{exploreLinks.map((item) => <Link className="dashboard-shortcut" href={item.href} key={item.href}><span>{t(`dashboard.tool.${item.id}.title`)}</span><span aria-hidden="true">↗</span></Link>)}</div>
-      </div>
+      <HomeShortcutPicker profileId={profileId} />
     </section>
   </main>;
 }

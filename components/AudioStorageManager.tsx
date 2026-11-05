@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AUDIO_STORAGE_EVENT, deleteStoredAudio, downloadStoredAudio, listStoredAudio, type StoredAudio } from '@/lib/audio-storage';
 import { useLocalization } from './LocalizationProvider';
+import { LEARNER_PROFILE_CHANGE_EVENT } from '@/lib/learner-profiles';
 
 function itemId(item: StoredAudio) { return `${item.kind}:${item.id}`; }
 
@@ -28,7 +29,9 @@ export function AudioStorageManager() {
   useEffect(() => {
     const changed = () => void refresh(false);
     window.addEventListener(AUDIO_STORAGE_EVENT, changed);
-    return () => window.removeEventListener(AUDIO_STORAGE_EVENT, changed);
+    window.addEventListener(LEARNER_PROFILE_CHANGE_EVENT, changed);
+    window.addEventListener('storage', changed);
+    return () => { window.removeEventListener(AUDIO_STORAGE_EVENT, changed); window.removeEventListener(LEARNER_PROFILE_CHANGE_EVENT, changed); window.removeEventListener('storage', changed); };
   }, [refresh]);
 
   const remove = async () => {
@@ -53,7 +56,7 @@ export function AudioStorageManager() {
 
   return <details id="local-audio-storage" className="audio-storage-manager song-tool-panel" onToggle={(event) => { if (event.currentTarget.open) void refresh(); }}>
     <summary>{t('Manage local audio storage')}</summary>
-    <p>{(totalBytes / 1_048_576).toFixed(2)} MiB across {items.length} local audio items, including imported backing tracks. Sizes exclude database overhead, custom drum samples, and the offline page cache. Export originals before deleting them.</p>
+    <p>{(totalBytes / 1_048_576).toFixed(2)} MiB across {items.length} local audio items, including imported backing tracks. {t('Song Library recordings follow the active learner profile; Trainer takes and imported backing tracks are shared on this device.')} {t('Sizes exclude database overhead, custom drum samples, and the offline page cache. Export originals before deleting them.')}</p>
     <div className="song-actions">
       <button type="button" disabled={busy} onClick={() => void refresh()}>{t('Refresh audio storage')}</button>
       <button type="button" disabled={busy || !items.length} onClick={() => { setSelected(items.map(itemId)); setConfirm(false); }}>{t('Select all audio')}</button>

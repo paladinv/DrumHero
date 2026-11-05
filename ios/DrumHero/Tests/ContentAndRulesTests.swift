@@ -41,7 +41,7 @@ final class ContentAndRulesTests: XCTestCase {
             XCTAssertEqual(Set(exercise.hits.map { "\($0.step)-\($0.instrument.rawValue)" }).count, exercise.hits.count)
         }
         var odd = SightSettings(); odd.level = .advanced; odd.meter = "7/8"; odd.bpm = 60
-        XCTAssertEqual(SightExercise.generate(odd, seed: 1).duration, 7)
+        XCTAssertEqual(SightExercise.generate(odd, seed: 1).duration, 14)
     }
 
     @MainActor
@@ -57,11 +57,24 @@ final class ContentAndRulesTests: XCTestCase {
         let source = SightReadingController(audio: StubAudioService())
         source.fresh(settings)
         let expected = try XCTUnwrap(source.exercise)
-        let code = try XCTUnwrap(source.assignmentCode())
+        let code = try XCTUnwrap(source.createAssignmentCode(settings: settings, title: "Odd meter reading", dueDate: "2026-10-31", minimumAccuracy: 85))
         let student = SightReadingController(audio: StubAudioService())
-        XCTAssertEqual(student.loadAssignment("DH-SR1:" + code), settings.normalized)
+        XCTAssertEqual(student.loadAssignment("DH-SA1:" + code), settings.normalized)
         XCTAssertEqual(student.exercise?.fingerprint, expected.fingerprint)
+        XCTAssertEqual(student.assignment?.title, "Odd meter reading")
+        XCTAssertEqual(student.assignment?.minimumAccuracy, 85)
         XCTAssertEqual(student.phase, .setup)
+        let legacySettings = try JSONEncoder().encode(settings)
+        let legacyPayload = legacySettings.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        XCTAssertEqual(student.loadAssignment("DH-SR1:123.\(legacyPayload)"), settings.normalized)
+        XCTAssertNil(student.assignment)
+        let submission = SightSubmission(title: "Odd meter reading", dueDate: "2026-10-31", minimumAccuracy: 85, meter: "5/4", level: "Advanced", bpm: 90, accuracy: 90, score: 92, classification: "reading")
+        XCTAssertTrue(submission.valid)
+        XCTAssertFalse(SightSubmission(title: nil, dueDate: nil, minimumAccuracy: nil, meter: "4/4", level: "Beginner", bpm: 80, accuracy: 101, score: 80, classification: "reading").valid)
+        let submissionCode = try XCTUnwrap(String(data: JSONEncoder().encode(submission), encoding: .utf8))
+        let submissionData = Data(submissionCode.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        XCTAssertNil(student.loadAssignment("DH-SUB1:" + submissionData))
+        XCTAssertTrue(student.assignmentFeedback.contains("target met"))
     }
 
     func testSightGoalValidationAndBackupCompatibility() throws {

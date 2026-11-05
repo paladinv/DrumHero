@@ -12,7 +12,7 @@ import { ThemeSettings } from "@/components/ThemeSettings";
 
 const groups = [
   { title: "Learn", primary: ["/learn", "Learn"], links: [["/rudiments", "Rudiments"], ["/grooves", "Grooves"], ["/kit", "Kit Guide"]] },
-  { title: "Practice", primary: ["/practice", "Practice"], links: [["/trainer", "Trainer"], ["/improvisation", "Improvisation"], ["/sight-reading", "Sight reading"], ["/ear-training", "Ear Training"], ["/play-alongs", "Play-alongs"]] },
+  { title: "Practice", primary: ["/practice", "Practice"], links: [["/practice/session", "Guided session"], ["/trainer", "Trainer"], ["/improvisation", "Improvisation"], ["/sight-reading", "Sight reading"], ["/ear-training", "Ear Training"], ["/play-alongs", "Play-alongs"]] },
   { title: "Songs", primary: ["/song-library", "Songs"], links: [["/song-builder", "Song Builder"]] }
 ] as const;
 

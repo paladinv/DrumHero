@@ -20,10 +20,11 @@ export type TrainerProgressSummary = {
 };
 
 function comparableProgressRounds(rounds: TrainerRound[], current: TrainerRound) {
-  return rounds.filter((round) => round.patternId === current.patternId &&
+  return rounds.filter((round) => (round.voicePractice ?? "all") === "all" && (current.voicePractice ?? "all") === "all" && round.patternId === current.patternId &&
     (round.variationId ?? "base") === (current.variationId ?? "base") && round.mode === "scored" &&
     round.source === current.source && (round.feel ?? "straight") === (current.feel ?? "straight") &&
     (round.limbFocus ?? "all") === (current.limbFocus ?? "all") && (round.adaptation ?? "standard") === (current.adaptation ?? "standard") &&
+    (round.voicePractice ?? "all") === (current.voicePractice ?? "all") && round.voiceFocus === current.voiceFocus && round.voiceLayerCount === current.voiceLayerCount &&
     (round.swingRatio ?? 2 / 3) === (current.swingRatio ?? 2 / 3) && (round.pocketMs ?? 35) === (current.pocketMs ?? 35) &&
     (round.inputProfile ?? round.source) === (current.inputProfile ?? current.source) && round.targetVoice === current.targetVoice &&
     !round.inputClipped && !round.uncertainDetections && !current.inputClipped && !current.uncertainDetections &&

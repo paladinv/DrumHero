@@ -94,10 +94,13 @@ final class TrainerRoundRecord {
     var accuracy: Int?
     var inputProfile: String?
     var assessmentAdaptation: String?
+    var timingCorrectionMs: Double?
+    var timingCalibrated: Bool?
 
     init(id: String = UUID().uuidString, patternID: String, patternName: String, bpm: Int,
          playedAt: Date = .now, mode: String, repetitions: Int, ratings: [TrainerRating],
-         score: Int? = nil, accuracy: Int? = nil, inputProfile: String? = nil, assessmentAdaptation: String? = nil) {
+         score: Int? = nil, accuracy: Int? = nil, inputProfile: String? = nil, assessmentAdaptation: String? = nil,
+         timingCorrectionMs: Double? = nil, timingCalibrated: Bool? = nil) {
         self.id = id
         self.patternID = patternID
         self.patternName = patternName
@@ -110,6 +113,8 @@ final class TrainerRoundRecord {
         self.accuracy = accuracy
         self.inputProfile = inputProfile
         self.assessmentAdaptation = assessmentAdaptation
+        self.timingCorrectionMs = timingCorrectionMs
+        self.timingCalibrated = timingCalibrated
     }
 
     var ratings: [TrainerRating] { (try? JSONDecoder().decode([TrainerRating].self, from: ratingsData)) ?? [] }

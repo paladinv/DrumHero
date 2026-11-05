@@ -46,7 +46,7 @@ export function pasteSections(song:DrumSong, sections:SongSection[]):DrumSong {
   const copies=sections.map(section=>{
     const ids=new Map(section.parts.map(p=>[p.id,crypto.randomUUID()]));
     const sourceClips: SongClip[] = section.clips ?? section.parts.map(p=>({id:crypto.randomUUID(),partId:p.id,repeats:1}));
-    return {...structuredClone(section),id:crypto.randomUUID(),endingGroup:section.endingGroup?groups.get(section.endingGroup):undefined,parts:section.parts.map(p=>({...structuredClone(p),id:ids.get(p.id)!,linkedBaseId:p.linkedBaseId?ids.get(p.linkedBaseId):undefined})),clips:sourceClips.map(c=>({...c,id:crypto.randomUUID(),partId:ids.get(c.partId)!,repeatVariants:c.repeatVariants?.filter(variant=>ids.has(variant.partId)).map(variant=>({...variant,partId:ids.get(variant.partId)!}))}))};
+    return {...structuredClone(section),id:crypto.randomUUID(),endingGroup:section.endingGroup?groups.get(section.endingGroup):undefined,parts:section.parts.map(p=>({...structuredClone(p),id:ids.get(p.id)!,linkedBaseId:p.linkedBaseId?ids.get(p.linkedBaseId):undefined})),clips:sourceClips.map(c=>({...c,id:crypto.randomUUID(),partId:ids.get(c.partId)!,layers:c.layers?.filter(id=>ids.has(id)).map(id=>ids.get(id)!),overrides:c.overrides?{...c.overrides,mutedLayers:c.overrides.mutedLayers?.filter(id=>ids.has(id)).map(id=>ids.get(id)!),soloLayer:c.overrides.soloLayer?ids.get(c.overrides.soloLayer):undefined}:undefined,repeatVariants:c.repeatVariants?.filter(variant=>ids.has(variant.partId)).map(variant=>({...variant,partId:ids.get(variant.partId)!}))}))};
   });
   return {...song,sections:[...song.sections,...copies]};
 }

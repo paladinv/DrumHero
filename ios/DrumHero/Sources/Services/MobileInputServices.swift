@@ -17,12 +17,30 @@ struct MobileMIDISource: Identifiable, Hashable {
 enum NativeMIDICalibration {
     static let legacyKey = "drumHero.nativeInputOffset.midi"
     static func key(for sourceID: String) -> String { "drumHero.nativeInputOffset.\(sourceID)" }
+    static func spreadKey(for sourceID: String) -> String { "\(key(for: sourceID)).spread" }
+    static func calibratedKey(for sourceID: String) -> String { "\(key(for: sourceID)).calibrated" }
+    static func dateKey(for sourceID: String) -> String { "\(key(for: sourceID)).date" }
+    static func wasCalibrated(for sourceID: String) -> Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: calibratedKey(for: sourceID)) != nil { return defaults.bool(forKey: calibratedKey(for: sourceID)) }
+        return defaults.object(forKey: key(for: sourceID)) != nil || defaults.object(forKey: legacyKey) != nil
+    }
+    static func spread(for sourceID: String) -> Double? { UserDefaults.standard.object(forKey: spreadKey(for: sourceID)) == nil ? nil : UserDefaults.standard.double(forKey: spreadKey(for: sourceID)) }
+    static func calibrationDate(for sourceID: String) -> Date? { UserDefaults.standard.object(forKey: dateKey(for: sourceID)) as? Date }
+    static var touchWasCalibrated: Bool { UserDefaults.standard.object(forKey: "drumHero.nativeInputOffset.touch") != nil }
+    static var microphoneWasCalibrated: Bool { UserDefaults.standard.object(forKey: "drumHero.nativeInputOffset.microphone") != nil }
     static func correction(for sourceID: String) -> Double {
         let defaults = UserDefaults.standard, key = key(for: sourceID)
         return defaults.object(forKey: key) == nil ? defaults.double(forKey: legacyKey) : defaults.double(forKey: key)
     }
-    static func save(_ correction: Double, for sourceID: String) {
-        UserDefaults.standard.set(min(250, max(-250, correction)), forKey: key(for: sourceID))
+    static func save(_ correction: Double, spread: Double? = nil, calibrated: Bool = false, for sourceID: String) {
+        let defaults = UserDefaults.standard
+        defaults.set(min(250, max(-250, correction)), forKey: key(for: sourceID))
+        defaults.set(calibrated, forKey: calibratedKey(for: sourceID))
+        if calibrated {
+            if let spread { defaults.set(min(240, max(0, spread)), forKey: spreadKey(for: sourceID)) }
+            defaults.set(Date(), forKey: dateKey(for: sourceID))
+        } else { defaults.removeObject(forKey: spreadKey(for: sourceID)); defaults.removeObject(forKey: dateKey(for: sourceID)) }
     }
 }
 
@@ -69,6 +87,7 @@ final class MobileMIDIInput: ObservableObject {
     private var onVelocityHit: (@MainActor (DrumVoice, TimeInterval, Int) -> Void)?
     private var onHit: (@MainActor (DrumVoice, TimeInterval) -> Void)?
     private var onSourceVelocityHit: (@MainActor (DrumVoice, TimeInterval, Int, String) -> Void)?
+    private var onLearnNote: (@MainActor (Int) -> Void)?
     private var activeSourceID: String?
     private var sourceEndpoints: [String: MIDIEndpointRef] = [:]
 
@@ -99,6 +118,15 @@ final class MobileMIDIInput: ObservableObject {
         for voice in DrumVoice.allCases {
             UserDefaults.standard.set(Self.defaultNotes[voice], forKey: "drumHero.midiNote.\(voice.rawValue)")
         }
+    }
+
+    func learnNextNote(for voice: DrumVoice) {
+        guard !endpoints.isEmpty else { status = "Connect the selected MIDI source before learning a pad."; return }
+        onLearnNote = { [weak self] note in
+            guard let self else { return }
+            _ = self.setNote(note, for: voice)
+        }
+        status = "Strike the (voice.title) pad to learn its MIDI note."
     }
 
     func connectWithVelocity(onHit: @escaping @MainActor (DrumVoice, TimeInterval, Int) -> Void) {
@@ -175,6 +203,7 @@ final class MobileMIDIInput: ObservableObject {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     for event in events {
+                        if let learn = self.onLearnNote { self.onLearnNote = nil; learn(event.note); continue }
                         guard let voice = self.noteNumbers.first(where: { $0.value == event.note })?.key else { continue }
                         self.onHit?(voice, event.at)
                         self.onVelocityHit?(voice, event.at, event.velocity)
@@ -197,6 +226,7 @@ final class MobileMIDIInput: ObservableObject {
         onHit = nil
         onVelocityHit = nil
         onSourceVelocityHit = nil
+        onLearnNote = nil
         activeSourceID = nil
         status = "MIDI is disconnected."
     }

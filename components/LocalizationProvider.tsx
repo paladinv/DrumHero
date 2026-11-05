@@ -82,7 +82,7 @@ export function LocalizationProvider({ children, initialLocale, initialPreferenc
     const titles: Record<string, string> = {
       "/learn": "Learn", "/practice": "Practice Pad", "/trainer": "Trainer", "/ear-training": "Rhythm Ear Training", "/sight-reading": "Sight reading", "/rudiments": "Rudiments",
       "/grooves": "Grooves", "/kit": "Kit Guide", "/song-library": "Song Library", "/song-builder": "Song Builder",
-      "/progress": "Progress", "/about": "About"
+      "/progress": "Progress", "/practice/session": "Guided practice", "/about": "About"
     };
     document.title = pathname === "/" ? "Drum Hero" : `${translateFromCatalog(locale, catalog, titles[pathname] ?? "Drum Hero")} | Drum Hero`;
   }, [catalog, locale, pathname]);

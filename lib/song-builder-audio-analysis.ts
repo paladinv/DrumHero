@@ -1,8 +1,11 @@
 import type { DrumPart } from './song-library';
 import type { SongInstrument } from './types';
+import type { ArrangementBar } from './song-builder';
 
 export type BackingHitSuggestion = { timeSeconds: number; voice: 'kick' | 'snare' | 'hihat'; confidence: number };
 export type BackingAudioAnalysis = { bpm: number; firstBeatSeconds: number; analyzedSeconds: number; hits: BackingHitSuggestion[] };
+export type MicrophoneOnset = { timeSeconds: number; confidence: number };
+export type ArrangementHitSuggestion = { barIndex: number; measure: number; sectionId: string; sectionName: string; partId: string; partName: string; hits: DrumPart['hits']; confidence: number };
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 
@@ -32,7 +35,8 @@ export async function analyzeBackingAudio(blob: Blob): Promise<BackingAudioAnaly
   const context = new AudioContextClass();
   try {
     const buffer = await context.decodeAudioData(await blob.arrayBuffer());
-    const analyzedSeconds = Math.min(buffer.duration, 180);
+    if (buffer.duration > 10 * 60) throw new Error('This browser can analyze backing tracks up to ten minutes long. Trim the audio and try again.');
+    const analyzedSeconds = buffer.duration;
     if (analyzedSeconds < 2) throw new Error('Choose a backing track that is at least two seconds long.');
     const source = buffer.getChannelData(0);
     const sampleRate = buffer.sampleRate;
@@ -77,7 +81,7 @@ export async function analyzeBackingAudio(blob: Blob): Promise<BackingAudioAnaly
       if (normalized > bestScore) { bestScore = normalized; bestBpm = bpm; }
     }
     const bpm = Math.round(clamp(bestBpm, 40, 200));
-    const strongest = candidates.slice(0, 500);
+    const strongest = candidates.slice(0, 10_000);
     const maxStrength = Math.max(1e-9, ...strongest.map(candidate => candidate.strength));
     const hits = strongest.map(candidate => {
       const timeSeconds = candidate.frame / 100;
@@ -87,6 +91,39 @@ export async function analyzeBackingAudio(blob: Blob): Promise<BackingAudioAnaly
   } finally {
     await context.close();
   }
+}
+
+/** Detects likely acoustic drum strikes in a short microphone take. Results are deliberately unclassified. */
+export async function analyzeMicrophoneOnsets(blob: Blob): Promise<MicrophoneOnset[]> {
+  const Context = window.AudioContext;
+  if (!Context) throw new Error('Microphone audio analysis is unavailable in this browser.');
+  const context = new Context();
+  try {
+    const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+    const frameSize = Math.max(128, Math.round(buffer.sampleRate * 0.01));
+    const frames = Math.ceil(buffer.length / frameSize);
+    const energy = new Float32Array(frames);
+    for (let frame = 0; frame < frames; frame += 1) {
+      const start = frame * frameSize, end = Math.min(buffer.length, start + frameSize);
+      let sum = 0;
+      for (const channel of channels) for (let index = start; index < end; index += 1) sum += (channel[index] ?? 0) ** 2;
+      energy[frame] = Math.sqrt(sum / Math.max(1, (end - start) * channels.length));
+    }
+    const flux = new Float32Array(frames);
+    for (let frame = 1; frame < frames; frame += 1) flux[frame] = Math.max(0, energy[frame]! - energy[frame - 1]!);
+    const sorted = Array.from(flux).sort((a, b) => a - b);
+    const threshold = Math.max(sorted[Math.floor(sorted.length * 0.68)]! * 1.8, sorted[Math.floor(sorted.length * 0.92)]! * 0.22, 0.0005);
+    const onsets: MicrophoneOnset[] = [];
+    let lastFrame = -20;
+    for (let frame = 2; frame < frames - 1; frame += 1) {
+      const value = flux[frame]!;
+      if (value < threshold || value < flux[frame - 1]! || value < flux[frame + 1]! || frame - lastFrame < 8) continue;
+      onsets.push({ timeSeconds: Math.round(frame * frameSize / buffer.sampleRate * 1000) / 1000, confidence: Math.min(0.99, Math.max(0.25, value / Math.max(threshold, sorted.at(-1) ?? threshold))) });
+      lastFrame = frame;
+    }
+    return onsets.slice(0, 512);
+  } finally { await context.close(); }
 }
 
 /** Keep only suggestions that fit the target pattern and snap them to its existing editable grid. */
@@ -105,4 +142,36 @@ export function backingSuggestionsForPart(analysis: BackingAudioAnalysis, part: 
     best.set(key, { instrument: candidate.voice as SongInstrument, step, velocity: Math.round(55 + candidate.confidence * 55), accent: candidate.confidence > 0.72 });
   }
   return [...best.values()].sort((a, b) => a.step - b.step);
+}
+
+/** Map audio transients across the arrangement timeline, keeping each measure reviewable. */
+export function backingSuggestionsForArrangement(analysis: BackingAudioAnalysis, bars: ArrangementBar[], downbeatSeconds: number): ArrangementHitSuggestion[] {
+  const starts: number[] = [];
+  let cursor = 0;
+  for (const bar of bars) { starts.push(cursor); cursor += bar.beats * 60 / bar.bpm; }
+  const groups = new Map<number, { bar: ArrangementBar; hits: Map<string, DrumPart['hits'][number]>; confidence: number; count: number }>();
+  for (const candidate of analysis.hits) {
+    const elapsed = candidate.timeSeconds - downbeatSeconds;
+    if (elapsed < 0 || elapsed >= cursor) continue;
+    let barIndex = starts.findIndex((start, index) => elapsed >= start && elapsed < start + bars[index]!.beats * 60 / bars[index]!.bpm);
+    if (barIndex < 0) continue;
+    const bar = bars[barIndex];
+    if (!bar) continue;
+    const beat = bar.partBeatOffset + (elapsed - starts[barIndex]!) * bar.bpm / 60;
+    const step = Math.round(beat * bar.subdivision / 4);
+    if (step < 0 || step >= Math.ceil(bar.partBeats * bar.subdivision / 4)) continue;
+    const key = `${candidate.voice}:${step}`;
+    const group = groups.get(barIndex) ?? { bar, hits: new Map(), confidence: 0, count: 0 };
+    const velocity = Math.round(55 + candidate.confidence * 55);
+    const previous = group.hits.get(key);
+    if (!previous || (previous.velocity ?? 0) < velocity) group.hits.set(key, { instrument: candidate.voice, step, velocity, accent: candidate.confidence > 0.72 });
+    group.confidence += candidate.confidence;
+    group.count += 1;
+    groups.set(barIndex, group);
+  }
+  return [...groups.entries()].map(([barIndex, group]) => ({
+    barIndex, measure: group.bar.number, sectionId: group.bar.sectionId, sectionName: group.bar.sectionName,
+    partId: group.bar.partId, partName: group.bar.partName,
+    hits: [...group.hits.values()].sort((a, b) => a.step - b.step), confidence: group.confidence / Math.max(1, group.count)
+  })).sort((a, b) => a.barIndex - b.barIndex);
 }
