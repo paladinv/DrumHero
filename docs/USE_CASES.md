@@ -114,9 +114,9 @@ This catalogue is the product contract for the Drum Hero web MVP. “Learner” 
 - **UC-99 — Supported browsers:** Current Chromium and WebKit desktop engines support primary flows; mobile Chromium viewport supports responsive flows.
 
 
-## Song Library (initial web release)
+## Song Library (web)
 
-- **UC-S01 — Local repertoire:** Browse 12 original examples and add personal songs with title, artist, difficulty, tempo, meter, tags, notes, source attribution, and authorization metadata.
+- **UC-S01 — Local repertoire:** Browse 18 original examples and add personal songs with title, artist, difficulty, tempo, meter, tags, notes, source attribution, and authorization metadata.
 - **UC-S02 — Drum arrangement:** Add sections and editable eight-voice grid parts, with bounded beat count, subdivision, and tempo.
 - **UC-S03 — Practice handoff:** Open a part in Practice Pad or Trainer and save completed section scores to the local library.
 - **UC-S04 — Organize:** Search songs, mark favorites, archive, create collections, practice queues, and setlists.
@@ -142,6 +142,10 @@ Section reviews, tempo ramps, readiness estimates, arrangement snapshots, checkl
 - **UC-S21 — Compare attempts:** Select two complete scored attempts of the same arrangement part and compare misses and timing by bar and voice.
 - **UC-S22 — Edit learning targets:** Update a custom path step’s song, section, part, label, tempo, score threshold, and required passes after adding it.
 - **UC-S23 — Search arrangement detail:** Search section and part names, coaching notes, sticking, dynamics, and hit articulations alongside song metadata.
+- **UC-S25 — Read from notation:** Use staff or drum tab as the primary arrangement and practice view, follow the active measure, and loop a measure directly from the score. Keep the step grid available as a secondary editing tool.
+- **UC-S26 — Exchange written scores:** Review MusicXML percussion voices and measure timing, map source instruments to kit voices, inspect rounded or merged notes, import a local copy, and export the current arrangement as MusicXML.
+- **UC-S27 — Review catalog quality:** See whether an original example is awaiting review, current, stale after edits, or missing checklist items; record an educator’s score, meter, sticking, and skill-metadata review without implying credential verification.
+- **UC-S28 — Review scored performance:** Compare expected hits with missed, early, late, and extra-hit markers on the relevant score measures, then open a focused practice loop from the annotated notation.
 - **UC-S19 — Find a playable groove:** Filter by BPM range, drum voice, subdivision, feel, and fill presence; retain these values in saved searches.
 - **UC-S20 — Resolve concurrent edits:** Review changed song fields and sections, plus changed collections, queues, setlists, and learning paths. Choose device, cloud, or keep both for each conflicting record.
 - **UC-S21 — Build a learning path:** Create a custom ordered path from song sections, set target tempos and pass requirements, and unlock steps in sequence.
@@ -183,3 +187,12 @@ Section reviews, tempo ramps, readiness estimates, arrangement snapshots, checkl
 - Assign a learner a specific song section and drum part with target tempo, minimum accuracy, required scored rounds, and due date; open the assignment directly in Song Library practice and track matching evidence.
 - Export a reviewed multi-song transfer pack between web and iOS. Match duplicates by ID or title and artist, select add/replace/copy/skip per song, and review iOS voice compatibility before importing.
 - In selected-song shares, reply to anchored arrangement comments; owners and editors can resolve or reopen threads after applying the comment-thread migration.
+- **UC-S29 — Operate the score accessibly:** Navigate measures, fit a single measure to a narrow screen, and edit measure, beat, drum voice, and edit action with labeled controls usable by keyboard and screen readers.
+- **UC-S30 — Seek from score to recording:** For a nearby local take whose saved drum-part fingerprint matches the reviewed attempt, choose a score hit to seek to its approximate time and replay at a slower speed.
+- **UC-S31 — Compare MusicXML visually:** Inspect parsed source hit timing beside the mapped drum staff one measure at a time before importing.
+- **UC-S32 — Refresh a score and retain practice:** Import an updated MusicXML file into an existing song, review changed measures and voices, then keep local notes, song identity, and prior practice records.
+- **UC-S33 — Review practice across arrangement versions:** Compare attempts from different saved part revisions when input and tempo are similar, with timing and calibrated dynamics shown as separate evidence.
+- **UC-S34 — Assign a shared review:** Route a snapshot-specific review request to a collaborator, add a due date, and filter the pending inbox to assigned or overdue requests.
+- **UC-S35 — Prepare a score for sharing:** Record source, attribution, permission, and redistribution review for the current source before sharing a snapshot or exporting notation.
+- **UC-S32 — Save learner notation layouts:** Name and reuse local notation profiles scoped to the active learner and optional kit profile.
+- **UC-S33 — Request a revision-specific review:** Ask a collaborator to review a shared snapshot with a focus and note, reply in the thread, and let an owner or editor mark the request complete. Display names do not verify educator credentials.

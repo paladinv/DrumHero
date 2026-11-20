@@ -5,7 +5,7 @@ import type { DrumPart } from "@/lib/song-library";
 import type { TempoAnchor } from "@/lib/song-builder-tools";
 import type { ArrangementBar } from "@/lib/song-builder";
 import { mappedSeconds } from "@/lib/song-builder-tools";
-import { deleteBuilderBacking, readBuilderBacking, saveBuilderBacking, type BuilderBacking } from "@/lib/song-builder-storage";
+import { deleteBuilderBackingFile, readBuilderBackings, saveBuilderBacking, type BuilderBacking } from "@/lib/song-builder-storage";
 import { analyzeBackingAudio, backingSuggestionsForArrangement, backingSuggestionsForPart, type ArrangementHitSuggestion, type BackingAudioAnalysis } from "@/lib/song-builder-audio-analysis";
 import { useLocalization } from "./LocalizationProvider";
 
@@ -35,16 +35,19 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
 ) {
   const { t } = useLocalization();
   const [track, setTrack] = useState<BuilderBacking | null>(null);
-  const [url, setUrl] = useState("");
+  const [tracks, setTracks] = useState<BuilderBacking[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [analysis, setAnalysis] = useState<BackingAudioAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisMessage, setAnalysisMessage] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
+  const secondaryAudioRefs = useRef(new Map<string, HTMLAudioElement>());
+  const unlockedTrackIds = useRef(new Set<string>());
+  const playPendingTrackIds = useRef(new Set<string>());
+  const unlockNotices = useRef(new Set<string>());
+  const createdUrls = useRef(new Set<string>());
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const playPending = useRef(false);
-  const playbackUnlocked = useRef(false);
-  const unlockNotice = useRef(false);
   const loadRequest = useRef(0);
   const dragRef = useRef<{ pointerId: number; kind: "downbeat" | "anchor"; beat?: number } | null>(null);
   const [anchorMeasure, setAnchorMeasure] = useState(1);
@@ -53,32 +56,35 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
   const [selectedSuggestionBars, setSelectedSuggestionBars] = useState<number[]>([]);
   const [confidenceFloor, setConfidenceFloor] = useState(45);
   const [excludedCandidates, setExcludedCandidates] = useState<string[]>([]);
-  const [candidateVoiceOverrides, setCandidateVoiceOverrides] = useState<Record<string, "kick" | "snare" | "hihat">>({});
+  const [candidateVoiceOverrides, setCandidateVoiceOverrides] = useState<Record<string, BackingAudioAnalysis["hits"][number]["voice"]>>({});
 
   useEffect(() => {
     let active = true;
-    let objectUrl = "";
+    let objectUrls: Record<string, string> = {};
+    const objectUrlRegistry = createdUrls.current;
     loadRequest.current += 1;
-    void readBuilderBacking(songId).then((value) => {
+    void readBuilderBackings(songId).then((values) => {
       if (!active) return;
-      setTrack(value ?? null);
-      objectUrl = value ? URL.createObjectURL(value.blob) : "";
-      setUrl(objectUrl);
+      objectUrls = Object.fromEntries(values.map(value => [value.id, URL.createObjectURL(value.blob)]));
+      Object.values(objectUrls).forEach(value => createdUrls.current.add(value));
+      setTracks(values);
+      setTrack(values.find(value => value.stemId === "main" || value.id === songId) ?? values[0] ?? null);
+      setUrls(objectUrls);
     }).catch(() => {
       if (!active) return;
       setTrack(null);
-      setUrl("");
+      setTracks([]);
+      setUrls({});
       setMessage(t("Backing audio storage is unavailable in this browser."));
     });
     return () => {
       active = false;
-      URL.revokeObjectURL(objectUrl);
+      objectUrlRegistry.forEach(URL.revokeObjectURL);
+      objectUrlRegistry.clear();
     };
   }, [songId, t]);
 
-  useEffect(() => () => {
-    if (url) URL.revokeObjectURL(url);
-  }, [url]);
+  const url = track ? urls[track.id] ?? "" : "";
 
   useEffect(() => {
     const redrawForTheme = () => setThemeRevision((revision) => revision + 1);
@@ -154,39 +160,39 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
   };
 
   useEffect(() => {
-    playbackUnlocked.current = false;
-    unlockNotice.current = false;
-  }, [track?.id]);
+    unlockedTrackIds.current.clear();
+    playPendingTrackIds.current.clear();
+    unlockNotices.current.clear();
+  }, [songId]);
 
   useImperativeHandle(ref, () => ({
-    pause: () => audioRef.current?.pause(),
+    pause: () => { audioRef.current?.pause(); secondaryAudioRefs.current.forEach(audio => audio.pause()); },
     getTempo: () => track?.bpm ?? analysis?.bpm,
     sync: (milliseconds, rate = 1) => {
-      const audio = audioRef.current;
-      if (!audio || !track) return;
-      const target = milliseconds / 1000 + track.downbeat;
-      if (target < 0 || target >= track.duration) {
-        audio.pause();
-        return;
-      }
-      audio.volume = track.volume;
-      audio.preservesPitch = track.preservePitch !== false;
-      audio.playbackRate = Math.max(0.25, Math.min(4, rate));
-      if (Math.abs(audio.currentTime - target) > 0.18) audio.currentTime = target;
-      if (audio.paused && !playPending.current && playbackUnlocked.current) {
-        playPending.current = true;
-        void audio.play().catch(() => {
-          playbackUnlocked.current = false;
-          setMessage(t("Play the backing audio preview once to enable synchronized playback in this browser."));
-        }).finally(() => {
-          playPending.current = false;
-        });
-      } else if (audio.paused && !playbackUnlocked.current && !unlockNotice.current) {
-        unlockNotice.current = true;
-        setMessage(t("Play the backing audio preview once to enable synchronized playback in this browser."));
+      const audibleTracks = tracks.filter(item => !item.muted), hasSolo = audibleTracks.some(item => item.solo);
+      for (const item of tracks) {
+        const audio = item.id === track?.id ? audioRef.current : secondaryAudioRefs.current.get(item.id);
+        if (!audio) continue;
+        if (item.muted || (hasSolo && !item.solo)) { audio.pause(); continue; }
+        const target = milliseconds / 1000 + item.downbeat;
+        if (target < 0 || target >= item.duration) { audio.pause(); continue; }
+        audio.volume = Math.max(0, Math.min(1, item.volume));
+        audio.preservesPitch = item.preservePitch !== false;
+        audio.playbackRate = Math.max(0.25, Math.min(4, rate));
+        if (Math.abs(audio.currentTime - target) > 0.18) audio.currentTime = target;
+        if (audio.paused && !playPendingTrackIds.current.has(item.id) && unlockedTrackIds.current.has(item.id)) {
+          playPendingTrackIds.current.add(item.id);
+          void audio.play().catch(() => {
+            unlockedTrackIds.current.delete(item.id);
+            setMessage(t("Play each reference audio preview once to allow synchronized playback in this browser."));
+          }).finally(() => playPendingTrackIds.current.delete(item.id));
+        } else if (audio.paused && !unlockedTrackIds.current.has(item.id) && !unlockNotices.current.has(item.id)) {
+          unlockNotices.current.add(item.id);
+          setMessage(t("Play each reference audio preview once to allow synchronized playback in this browser."));
+        }
       }
     },
-  }), [analysis?.bpm, t, track]);
+  }), [analysis?.bpm, t, track, tracks]);
 
   const importFile = async (file?: File) => {
     if (!file) return;
@@ -209,8 +215,12 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
         return peak;
       });
       if (request !== loadRequest.current) return;
+      const hasMain = tracks.some(item => item.stemId === "main" || item.id === songId);
+      const id = hasMain ? crypto.randomUUID() : songId;
       const next: BuilderBacking = {
-        id: songId,
+        id,
+        songId,
+        stemId: hasMain ? `reference-${crypto.randomUUID().slice(0, 8)}` : "main",
         name: file.name,
         blob: file.slice(0, file.size, file.type),
         duration: buffer.duration,
@@ -221,11 +231,13 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
       };
       await saveBuilderBacking(next, true);
       if (request !== loadRequest.current) return;
-      setTrack(next);
-      setAnalysis(null);
-      setAnalysisMessage("");
-      setUrl(URL.createObjectURL(next.blob));
-      setMessage(t("Backing track saved locally. Set the time of its first downbeat to align the song."));
+      const objectUrl = URL.createObjectURL(next.blob);
+      createdUrls.current.add(objectUrl);
+      setTracks(current => [...current, next]);
+      setUrls(current => ({ ...current, [next.id]: objectUrl }));
+      unlockedTrackIds.current.delete(next.id);
+      if (!hasMain) { setTrack(next); setAnalysis(null); setAnalysisMessage(""); }
+      setMessage(hasMain ? t("Reference stem added. Set its downbeat and mix it with the other tracks.") : t("Backing track saved locally. Set the time of its first downbeat to align the song."));
     } catch (error) {
       if (request === loadRequest.current) setMessage(error instanceof Error ? error.message : t("Could not import backing audio."));
     } finally {
@@ -235,11 +247,49 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
 
   const change = async (next: BuilderBacking) => {
     setTrack(next);
+    setTracks(current => current.map(item => item.id === next.id ? next : item));
+    if (audioRef.current) { audioRef.current.volume = next.volume; audioRef.current.preservesPitch = next.preservePitch !== false; }
     try {
       await saveBuilderBacking(next);
     } catch {
       setMessage(t("Could not save backing settings."));
     }
+  };
+
+  const changeReference = async (next: BuilderBacking) => {
+    setTracks(current => current.map(item => item.id === next.id ? next : item));
+    const audio = secondaryAudioRefs.current.get(next.id);
+    if (audio) { audio.volume = next.volume; audio.preservesPitch = next.preservePitch !== false; }
+    try { await saveBuilderBacking(next); }
+    catch { setMessage(t("Could not save reference stem settings.")); }
+  };
+
+  const removeTrack = async (id: string) => {
+    const removed = tracks.find(item => item.id === id);
+    if (!removed) return;
+    try {
+      if (id === track?.id) audioRef.current?.pause();
+      secondaryAudioRefs.current.get(id)?.pause();
+      await deleteBuilderBackingFile(id);
+      const remaining = tracks.filter(item => item.id !== id);
+      const nextPrimary = id === track?.id ? remaining[0] : track;
+      if (id === track?.id && nextPrimary && nextPrimary.stemId !== "main") {
+        const promoted = { ...nextPrimary, stemId: "main" };
+        await saveBuilderBacking(promoted, true);
+        setTracks(remaining.map(item => item.id === promoted.id ? promoted : item));
+        setTrack(promoted);
+      } else {
+        setTracks(remaining);
+        if (id === track?.id) setTrack(nextPrimary ?? null);
+      }
+      const objectUrl = urls[id];
+      if (objectUrl) { URL.revokeObjectURL(objectUrl); createdUrls.current.delete(objectUrl); }
+      setUrls(current => { const next = { ...current }; delete next[id]; return next; });
+      secondaryAudioRefs.current.delete(id);
+      unlockedTrackIds.current.delete(id);
+      if (id === track?.id) { setAnalysis(null); setAnalysisMessage(""); }
+      setMessage(t("Reference audio removed."));
+    } catch { setMessage(t("Could not remove that reference audio.")); }
   };
 
   const analyze = async () => {
@@ -267,50 +317,59 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
   const excludedCandidateSet = useMemo(() => new Set(excludedCandidates), [excludedCandidates]);
   const reviewedAnalysis = useMemo(() => analysis ? ({ ...analysis, hits: analysis.hits.filter(hit => hit.confidence * 100 >= confidenceFloor && !excludedCandidateSet.has(candidateKey(hit))).map(hit => ({ ...hit, voice: candidateVoiceOverrides[candidateKey(hit)] ?? hit.voice })) }) : null, [analysis, confidenceFloor, excludedCandidateSet, candidateVoiceOverrides]);
   const suggestions = reviewedAnalysis && targetPart ? backingSuggestionsForPart(reviewedAnalysis, targetPart) : [];
-  const arrangementSuggestions = useMemo(() => reviewedAnalysis && track ? backingSuggestionsForArrangement(reviewedAnalysis, bars, track.downbeat) : [], [reviewedAnalysis, track?.downbeat, bars]);
+  const arrangementSuggestions = useMemo(() => reviewedAnalysis && track ? backingSuggestionsForArrangement(reviewedAnalysis, bars, track.downbeat) : [], [reviewedAnalysis, track, bars]);
   const chosenArrangementSuggestions = arrangementSuggestions.filter(item => selectedSuggestionBars.includes(item.barIndex));
 
   return <section className="card song-builder-backing" aria-label={t("Backing track")}>
     <h2>{t("Play with a backing track")}</h2>
-    <p>{t("Import audio you own or have permission to use. Stereo tracks sync best. Set its BPM and first downbeat, then match the form length. Start the audio preview once to allow synchronized playback. Audio stays on this device.")}</p>
+    <p>{t("Import audio you own or have permission to use. Add multiple backing stems, set their volumes, mute or solo them, and align their downbeats. Start each preview once to allow synchronized playback. Audio stays on this device.")}</p>
     <label>{t("Import backing audio")}<input type="file" accept="audio/*" onChange={(event) => { void importFile(event.target.files?.[0]); event.target.value = ""; }} /></label>
     {track && <>
       <strong>{track.name} · {Math.round(track.duration)} {t("seconds")}</strong>
       <label>{t("Tempo marker measure boundary")}<input type="number" min={1} max={bars.length+1} value={anchorMeasure} onChange={event=>setAnchorMeasure(Math.max(1,Math.min(bars.length+1,Number(event.target.value)||1)))}/></label><p>{t("Drag the red line to align the first downbeat. Drag a blue marker to adjust its tempo anchor, or click the waveform to place the selected measure marker.")}</p><canvas ref={canvasRef} width={1000} height={100} role="img" aria-label={t("Backing track waveform; red is the first downbeat and blue lines are tempo markers")} onPointerDown={beginWaveDrag} onPointerMove={moveWaveDrag} onPointerUp={endWaveDrag} onPointerCancel={endWaveDrag} />
-      <audio ref={audioRef} src={url} controls preload="auto" aria-label={t("Backing audio preview")} onLoadedMetadata={event=>{event.currentTarget.preservesPitch=track.preservePitch!==false;}} onPlay={() => {
-        playbackUnlocked.current = true;
-        unlockNotice.current = false;
+      <audio ref={audioRef} src={url} controls preload="auto" aria-label={t("Backing audio preview")} onLoadedMetadata={event=>{event.currentTarget.preservesPitch=track.preservePitch!==false;event.currentTarget.volume=track.volume;}} onPlay={() => {
+        unlockedTrackIds.current.add(track.id);
+        unlockNotices.current.delete(track.id);
         setMessage(t("Backing audio is ready for synchronized playback."));
       }} />
+      <div className="song-builder-backing-mixer" aria-label={t("Reference track mixer")}>
+        <h3>{t("Reference track mix")}</h3>
+        {tracks.map(item => item.id === track.id ? <div className="song-builder-backing-mixer-row" key={item.id}>
+          <strong>{item.name} · {t("Main alignment track")}</strong>
+          <label>{t("Volume · {volume}%", { volume: Math.round(item.volume * 100) })}<input type="range" min={0} max={1} step={0.01} value={item.volume} onChange={event=>void change({...item,volume:Number(event.target.value)})}/></label>
+          <label><input type="checkbox" checked={item.muted===true} onChange={event=>void change({...item,muted:event.target.checked})}/>{t("Mute")}</label>
+          <label><input type="checkbox" checked={item.solo===true} onChange={event=>void change({...item,solo:event.target.checked})}/>{t("Solo")}</label>
+          <button type="button" onClick={()=>void removeTrack(item.id)}>{t("Remove track")}</button>
+        </div> : <div className="song-builder-backing-mixer-row" key={item.id}>
+          <strong>{item.name}</strong>
+          <audio ref={element=>{if(element)secondaryAudioRefs.current.set(item.id,element);else secondaryAudioRefs.current.delete(item.id);}} src={urls[item.id]} controls preload="auto" aria-label={t("{name} reference preview",{name:item.name})} onLoadedMetadata={event=>{event.currentTarget.preservesPitch=item.preservePitch!==false;event.currentTarget.volume=item.volume;}} onPlay={()=>{unlockedTrackIds.current.add(item.id);unlockNotices.current.delete(item.id);setMessage(t("Reference audio is ready for synchronized playback."));}} />
+          <label>{t("Downbeat · seconds")}<input type="number" min={-30} max={item.duration} step={0.01} value={item.downbeat} onChange={event=>void changeReference({...item,downbeat:Math.max(-30,Math.min(item.duration,Number(event.target.value)||0))})}/></label>
+          <label>{t("Volume · {volume}%",{volume:Math.round(item.volume*100)})}<input type="range" min={0} max={1} step={0.01} value={item.volume} onChange={event=>void changeReference({...item,volume:Number(event.target.value)})}/></label>
+          <label><input type="checkbox" checked={item.muted===true} onChange={event=>void changeReference({...item,muted:event.target.checked})}/>{t("Mute")}</label>
+          <label><input type="checkbox" checked={item.solo===true} onChange={event=>void changeReference({...item,solo:event.target.checked})}/>{t("Solo")}</label>
+          <label><input type="checkbox" checked={item.preservePitch!==false} onChange={event=>{const next={...item,preservePitch:event.target.checked};const audio=secondaryAudioRefs.current.get(item.id);if(audio)audio.preservesPitch=event.target.checked;void changeReference(next);}}/>{t("Preserve pitch")}</label>
+          <button type="button" onClick={()=>void removeTrack(item.id)}>{t("Remove track")}</button>
+        </div>)}
+      </div>
       <div className="song-builder-tool-fields">
         <label>{t("Backing track tempo · BPM")}<input type="number" min={40} max={200} step={1} value={track.bpm ?? ""} placeholder={analysis ? String(analysis.bpm) : t("Set or analyze")} onChange={(event) => {
           const raw = event.target.value;
           void change({ ...track, bpm: raw === "" ? undefined : Math.max(40, Math.min(200, Number(raw) || 40)) });
         }} /></label>
         <label>{t("First downbeat in audio · seconds")}<input type="number" min={-30} max={track.duration} step={0.01} value={track.downbeat} onChange={(event) => void change({ ...track, downbeat: Math.max(-30, Math.min(track.duration, Number(event.target.value) || 0)) })} /></label>
-        <label>{t("Backing volume · {volume}%", { volume: Math.round(track.volume * 100) })}<input type="range" min={0} max={1} step={0.01} value={track.volume} onChange={(event) => void change({ ...track, volume: Number(event.target.value) })} /></label>
         <label><input type="checkbox" checked={showBeatGrid} onChange={event=>setShowBeatGrid(event.target.checked)}/>{t("Show arrangement beat grid")}</label>
         <label><input type="checkbox" checked={track.preservePitch !== false} onChange={event=>{const next={...track,preservePitch:event.target.checked};if(audioRef.current)audioRef.current.preservesPitch=event.target.checked;void change(next);}}/>{t("Preserve backing pitch while tempo matching")}</label>
         {analysis && <button type="button" onClick={() => void change({ ...track, bpm: analysis.bpm })}>{t("Use estimated {bpm} BPM for backing sync", { bpm: analysis.bpm })}</button>}
-        <button type="button" onClick={() => {
-          audioRef.current?.pause();
-          void deleteBuilderBacking(songId).then(() => {
-            setTrack(null);
-            setUrl("");
-            setAnalysis(null);
-            setMessage(t("Backing audio removed."));
-          }).catch(() => setMessage(t("Could not remove backing audio.")));
-        }}>{t("Remove backing audio")}</button>
       </div>
       <details className="song-builder-extra">
         <summary>{t("Analyze tempo and suggest drum hits")}</summary>
-        <p>{t("Local audio analysis estimates a steady pulse and classifies transient peaks as kick, snare, or hi-hat across the full track. These are reviewable guesses: mixed audio can produce false hits.")}</p>
+        <p>{t("Local audio analysis estimates a steady pulse and suggests kick, snare, hi-hat, open hi-hat, tom, crash, and ride hits from frequency and decay cues. These are reviewable guesses; mixed audio can produce false hits.")}</p>
         <button type="button" disabled={analyzing} onClick={() => void analyze()}>{analyzing ? t("Analyzing…") : t("Analyze backing track")}</button>
         {analysis && <>
           <p><strong>{analysis.bpm} BPM</strong> · {t("first candidate beat {seconds} s · analyzed {duration} s", { seconds: analysis.firstBeatSeconds.toFixed(2), duration: Math.round(analysis.analyzedSeconds) })}</p>
           <label>{t("Minimum onset confidence · {value}%", { value: confidenceFloor })}<input type="range" min={25} max={95} step={5} value={confidenceFloor} onChange={event=>setConfidenceFloor(Number(event.target.value))}/></label>
           <p>{t("{kept} of {total} transient candidates pass the confidence filter.", { kept: reviewedAnalysis?.hits.length ?? 0, total: analysis.hits.length })}</p>
-          <details className="song-builder-audio-candidate-review"><summary>Review and correct individual detections</summary><p>Include or reject a transient and correct its likely drum voice before building patterns. These local signal estimates can be wrong on mixed audio.</p><div className="song-builder-analysis-measures">{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).slice(0,160).map(hit=>{const key=candidateKey(hit),included=!excludedCandidates.includes(key);return <label key={key}><input type="checkbox" checked={included} onChange={event=>setExcludedCandidates(current=>event.target.checked?current.filter(item=>item!==key):[...current,key])}/><span><strong>{hit.timeSeconds.toFixed(2)} s · {Math.round(hit.confidence*100)}% onset</strong><small>Detected as {hit.voice}</small></span><select aria-label={`Voice for transient at ${hit.timeSeconds.toFixed(2)} seconds`} value={candidateVoiceOverrides[key]??hit.voice} disabled={!included} onChange={event=>setCandidateVoiceOverrides(current=>({...current,[key]:event.target.value as "kick"|"snare"|"hihat"}))}><option value="kick">Kick</option><option value="snare">Snare</option><option value="hihat">Hi-hat</option></select></label>;})}</div>{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).length>160&&<small>{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).length-160} more candidates use the current threshold and voice mappings.</small>}</details>
+          <details className="song-builder-audio-candidate-review"><summary>Review and correct individual detections</summary><p>Include or reject a transient and correct its likely drum voice before building patterns. These local signal estimates can be wrong on mixed audio.</p><div className="song-builder-analysis-measures">{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).slice(0,160).map(hit=>{const key=candidateKey(hit),included=!excludedCandidates.includes(key);return <label key={key}><input type="checkbox" checked={included} onChange={event=>setExcludedCandidates(current=>event.target.checked?current.filter(item=>item!==key):[...current,key])}/><span><strong>{hit.timeSeconds.toFixed(2)} s · {Math.round(hit.confidence*100)}% onset · {Math.round((hit.voiceConfidence??0.5)*100)}% voice</strong><small>Detected as {hit.voice}</small></span><select aria-label={`Voice for transient at ${hit.timeSeconds.toFixed(2)} seconds`} value={candidateVoiceOverrides[key]??hit.voice} disabled={!included} onChange={event=>setCandidateVoiceOverrides(current=>({...current,[key]:event.target.value as BackingAudioAnalysis["hits"][number]["voice"]}))}>{([["kick","Kick"],["snare","Snare"],["hihat","Closed hi-hat"],["openhat","Open hi-hat"],["tom","Tom"],["crash","Crash"],["ride","Ride"]] as const).map(([voice,label])=><option key={voice} value={voice}>{label}</option>)}</select></label>;})}</div>{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).length>160&&<small>{analysis.hits.filter(hit=>hit.confidence*100>=confidenceFloor).length-160} more candidates use the current threshold and voice mappings.</small>}</details>
           <div className="song-builder-actions">
             <button type="button" onClick={() => onApplyTempo(analysis.bpm)}>{t("Use estimated BPM for song tempo")}</button>
             <button type="button" onClick={() => void change({ ...track, downbeat: analysis.firstBeatSeconds })}>{t("Align backing to estimated first beat")}</button>

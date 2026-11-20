@@ -1,6 +1,7 @@
 import { classifyOffset, findClosestExpected, stepDurationMs, summarizeHits } from "./scoring";
 import type { Instrument, MidiArticulation, PatternHit, PracticePattern, RatedHit, SessionResult } from "./types";
 import { learnerProfileIdFromBrowser, learnerStorageKey } from "./learner-profiles";
+import { normalizeTrainerCueSequence } from "./trainer-cue-sequences";
 
 export type TrainerMode = "self" | "scored";
 export type TrainerRating = "clean" | "needsWork" | "missed";
@@ -22,10 +23,18 @@ export type TrainerRound = {
   voiceFocus?: Instrument;
   voiceLayerCount?: number;
   rudimentHandCheck?: boolean;
+  transferFromPatternId?: string;
+  /** This imported result has score and accuracy only, without per-hit timing. */
+  summaryOnly?: true;
 };
+export type TrainerPortableRoutine = { name: string; steps: Array<{ patternId: string; bpm: number; repetitions: 4 | 8 | 10 | 16; fillPatternId: string; fillAfterBars: 1 | 2 | 4 }>; gated: boolean; accuracyTarget: 70 | 80 | 85 | 90 | 95; timingTarget: 25 | 35 | 50 | 75 };
+export type TrainerPortableCueSequence = { id: string; name: string; cues: Array<{ beat: number; action: "crash" | "loud" | "soft" | "dropout" | "accent-shift"; voice?: Instrument }> };
+export type TrainerPortableCoachFeedback = { id: string; takeId: string; patternName: string; bpm: number; receivedAt: string; comments: Array<{ id: string; timeMs: number; note: string; createdAt: string }> };
+export type TrainerPortableRound = Pick<TrainerRound, "id" | "patternId" | "patternName" | "bpm" | "playedAt" | "mode" | "source" | "ratings" | "repetitions" | "durationSeconds" | "result" | "focusedDrill" | "feel" | "limbFocus" | "adaptation" | "variationId" | "backingChallenge" | "notes" | "tags" | "voicePractice" | "voiceFocus" | "voiceLayerCount" | "rudimentHandCheck" | "transferFromPatternId"> & { summaryOnly: true; hits?: RatedHit[] };
+export type TrainerPortableData = { rounds: TrainerPortableRound[]; routine?: TrainerPortableRoutine; cueSequences?: TrainerPortableCueSequence[]; coachFeedback?: TrainerPortableCoachFeedback[] };
 export type AudioDynamicsCalibration = { noiseRms?: number; ghostRms?: number; accentRms?: number };
-export type TrainerDeviceProfile = { latencyMs: number; latencyCalibrated?: boolean; latencySpreadMs?: number | null; latencyCalibratedAt?: string | null; midiMap: Record<number, Instrument | null>; midiArticulations: Record<number, MidiArticulation | null>; audioTemplates: Partial<Record<Instrument, number[]>>; audioDynamics?: Partial<Record<Instrument, AudioDynamicsCalibration>> };
-export type TrainerState = { version: 2; rounds: TrainerRound[]; latencyMs: number; midiMap: Record<number, Instrument | null>; deviceProfiles: Record<string, TrainerDeviceProfile> };
+export type TrainerDeviceProfile = { latencyMs: number; latencyCalibrated?: boolean; latencySpreadMs?: number | null; latencyCalibratedAt?: string | null; midiMap: Record<number, Instrument | null>; midiArticulations: Record<number, MidiArticulation | null>; midiVelocityRanges?: Record<number, { soft: number; hard: number }>; audioTemplates: Partial<Record<Instrument, number[]>>; audioDynamics?: Partial<Record<Instrument, AudioDynamicsCalibration>> };
+export type TrainerState = { version: 2; rounds: TrainerRound[]; latencyMs: number; midiMap: Record<number, Instrument | null>; deviceProfiles: Record<string, TrainerDeviceProfile>; routine?: TrainerPortableRoutine; cueSequences?: TrainerPortableCueSequence[]; coachFeedback?: TrainerPortableCoachFeedback[] };
 type PersistedTrainerState = Omit<Partial<TrainerState>, "version"> & { version?: number };
 export const TRAINER_KEY = "drum-hero:trainer:v1";
 export const TRAINER_PREFERENCES_KEY = "drum-hero:trainer-preferences:v1";
@@ -41,13 +50,91 @@ export function updateTrainerPreferredBpm(bpm: number) {
   } catch { /* Keep the existing Trainer preferences if storage is unavailable or malformed. */ }
 }
 export const DEFAULT_MIDI_MAP: Record<number, Instrument> = {
-  35: "kick", 36: "kick", 38: "snare", 40: "snare", 42: "hihat", 44: "hihat", 46: "hihat",
-  41: "tom", 43: "tom", 45: "tom", 47: "tom", 48: "tom", 49: "crash", 55: "crash", 57: "crash"
+  35: "kick", 36: "kick", 37: "snare", 38: "snare", 40: "snare", 42: "hihat", 44: "hihat", 46: "hihat",
+  41: "tom", 43: "tom", 45: "tom", 47: "tom", 48: "tom", 49: "crash", 51: "hihat", 53: "hihat", 55: "crash", 57: "crash", 59: "hihat"
+};
+export const DEFAULT_MIDI_ARTICULATIONS: Record<number, MidiArticulation> = {
+  37: "side-stick", 40: "rimshot", 42: "closed-hat", 44: "pedal-hat", 46: "open-hat", 49: "crash", 51: "ride", 53: "ride", 57: "crash", 59: "ride"
 };
 export const defaultTrainerState: TrainerState = { version: 2, rounds: [], latencyMs: 0, midiMap: DEFAULT_MIDI_MAP, deviceProfiles: {} };
 const voices: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
-export function defaultTrainerDeviceProfile(state: TrainerState): TrainerDeviceProfile { return { latencyMs: state.latencyMs, latencyCalibrated: false, midiMap: { ...state.midiMap }, midiArticulations: {}, audioTemplates: {} }; }
+export function defaultTrainerDeviceProfile(state: TrainerState): TrainerDeviceProfile { return { latencyMs: state.latencyMs, latencyCalibrated: false, midiMap: { ...state.midiMap }, midiArticulations: { ...DEFAULT_MIDI_ARTICULATIONS }, midiVelocityRanges: {}, audioTemplates: {} }; }
 export function getTrainerDeviceProfile(state: TrainerState, key: string): TrainerDeviceProfile { return state.deviceProfiles[key] ?? defaultTrainerDeviceProfile(state); }
+const PORTABLE_ROUND_KEYS = new Set(["id", "patternId", "patternName", "bpm", "playedAt", "mode", "source", "ratings", "repetitions", "durationSeconds", "result", "focusedDrill", "feel", "limbFocus", "adaptation", "variationId", "backingChallenge", "notes", "tags", "voicePractice", "voiceFocus", "voiceLayerCount", "rudimentHandCheck", "transferFromPatternId", "summaryOnly", "hits"]);
+export function portableTrainerRound(round: TrainerRound, includeTiming = false): TrainerPortableRound {
+  const { id, patternId, patternName, bpm, playedAt, mode, source, ratings, repetitions, durationSeconds, result, focusedDrill, feel, limbFocus, adaptation, variationId, backingChallenge, notes, tags, voicePractice, voiceFocus, voiceLayerCount, rudimentHandCheck, transferFromPatternId } = round;
+  return { id, patternId, patternName, bpm, playedAt, mode, source, ratings, ...(repetitions === undefined ? {} : { repetitions }), ...(durationSeconds === undefined ? {} : { durationSeconds }), result, ...(focusedDrill ? { focusedDrill } : {}), ...(feel ? { feel } : {}), ...(limbFocus ? { limbFocus } : {}), ...(adaptation ? { adaptation } : {}), ...(variationId ? { variationId } : {}), ...(backingChallenge ? { backingChallenge } : {}), ...(notes ? { notes } : {}), ...(tags ? { tags } : {}), ...(voicePractice ? { voicePractice } : {}), ...(voiceFocus ? { voiceFocus } : {}), ...(voiceLayerCount ? { voiceLayerCount } : {}), ...(rudimentHandCheck === undefined ? {} : { rudimentHandCheck }), ...(transferFromPatternId ? { transferFromPatternId } : {}), ...(includeTiming && round.hits?.length ? { hits: round.hits.slice(0, 600) } : {}), summaryOnly: true };
+}
+export function trainerStateForCloud(state: TrainerState): TrainerState {
+  return {
+    version: 2,
+    rounds: state.rounds.slice(0, 50).map(round => portableTrainerRound(round)),
+    latencyMs: 0,
+    midiMap: { ...DEFAULT_MIDI_MAP },
+    deviceProfiles: {},
+    ...(state.routine ? { routine: state.routine } : {}),
+    ...(state.cueSequences ? { cueSequences: state.cueSequences } : {}),
+    ...(state.coachFeedback ? { coachFeedback: state.coachFeedback.slice(-100) } : {}),
+  };
+}
+export function parseTrainerPortableRounds(value: unknown): TrainerPortableRound[] | null {
+  if (!Array.isArray(value) || value.length > 50) return null;
+  const ids = new Set<string>();
+  for (const round of value) {
+    if (!round || typeof round !== "object" || Array.isArray(round)) return null;
+    const item = round as Record<string, unknown>;
+    if (Object.keys(item).some(key => !PORTABLE_ROUND_KEYS.has(key)) || item.summaryOnly !== true || typeof item.id !== "string" || !item.id || item.id.length > 120 || ids.has(item.id) || (item.hits !== undefined && (!Array.isArray(item.hits) || item.hits.length > 600))) return null;
+    ids.add(item.id);
+  }
+  const parsed = parseTrainerState(JSON.stringify({ version: 2, rounds: value, latencyMs: 0, midiMap: DEFAULT_MIDI_MAP, deviceProfiles: {} }));
+  return parsed.rounds.length === value.length ? parsed.rounds.map((round, index) => portableTrainerRound(round, Array.isArray((value[index] as Record<string, unknown>).hits))) : null;
+}
+export function parseTrainerPortableRoutine(value: unknown): TrainerPortableRoutine | null {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Partial<TrainerPortableRoutine>;
+  if (typeof item.name !== "string" || !item.name.trim() || item.name.length > 50 || !Array.isArray(item.steps) || item.steps.length > 20 ||
+      typeof item.gated !== "boolean" || ![70, 80, 85, 90, 95].includes(Number(item.accuracyTarget)) || ![25, 35, 50, 75].includes(Number(item.timingTarget))) return null;
+  const steps = item.steps.filter(step => step && typeof step.patternId === "string" && step.patternId.length > 0 && step.patternId.length <= 200 &&
+    Number.isInteger(step.bpm) && step.bpm >= 40 && step.bpm <= 220 && [4, 8, 10, 16].includes(step.repetitions) &&
+    typeof step.fillPatternId === "string" && step.fillPatternId.length <= 200 && [1, 2, 4].includes(step.fillAfterBars));
+  if (steps.length !== item.steps.length) return null;
+  return { name: item.name.trim(), steps, gated: item.gated, accuracyTarget: item.accuracyTarget!, timingTarget: item.timingTarget! };
+}
+export function parseTrainerPortableCueSequences(value: unknown): TrainerPortableCueSequence[] | null {
+  if (!Array.isArray(value) || value.length > 30) return null;
+  const seen = new Set<string>();
+  const result = value.flatMap((entry): TrainerPortableCueSequence[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Record<string, unknown>;
+    const sequence = normalizeTrainerCueSequence(item);
+    if (typeof item.id !== "string" || !item.id || item.id.length > 100 || seen.has(item.id) || !sequence) return [];
+    seen.add(item.id);
+    return [{ id: item.id, ...sequence }];
+  });
+  return result.length === value.length ? result : null;
+}
+export function parseTrainerPortableCoachFeedback(value: unknown): TrainerPortableCoachFeedback[] | null {
+  if (!Array.isArray(value) || value.length > 100) return null;
+  const seen = new Set<string>();
+  const result = value.flatMap((entry): TrainerPortableCoachFeedback[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Partial<TrainerPortableCoachFeedback>;
+    if (typeof item.id !== "string" || !item.id || item.id.length > 200 || seen.has(item.id) || typeof item.takeId !== "string" || !item.takeId || item.takeId.length > 200 ||
+        typeof item.patternName !== "string" || !item.patternName || item.patternName.length > 200 || !Number.isInteger(item.bpm) || item.bpm! < 40 || item.bpm! > 220 ||
+        typeof item.receivedAt !== "string" || !Number.isFinite(Date.parse(item.receivedAt)) || !Array.isArray(item.comments) || item.comments.length > 100) return [];
+    const comments = item.comments.filter(comment => comment && typeof comment.id === "string" && !!comment.id && comment.id.length <= 100 && Number.isFinite(comment.timeMs) && comment.timeMs >= 0 && comment.timeMs <= 3_600_000 && typeof comment.note === "string" && !!comment.note.trim() && comment.note.length <= 600 && typeof comment.createdAt === "string" && Number.isFinite(Date.parse(comment.createdAt)));
+    if (comments.length !== item.comments.length) return [];
+    seen.add(item.id);
+    return [{ id: item.id, takeId: item.takeId, patternName: item.patternName, bpm: item.bpm!, receivedAt: item.receivedAt, comments }];
+  });
+  return result.length === value.length ? result : null;
+}
+export function normalizeMidiPadVelocity(raw: number, range?: { soft: number; hard: number }) {
+  const velocity = Math.max(1, Math.min(127, Math.round(raw)));
+  if (!range || range.hard < range.soft + 4) return velocity;
+  // Keep a calibrated soft stroke above the ghost-note threshold while preserving headroom.
+  return Math.max(1, Math.min(127, Math.round(48 + (velocity - range.soft) * 64 / (range.hard - range.soft))));
+}
 export function parseTrainerState(raw: string | null): TrainerState {
   if (!raw) return { ...defaultTrainerState, midiMap: { ...DEFAULT_MIDI_MAP } };
   try {
@@ -63,9 +150,11 @@ export function parseTrainerState(raw: string | null): TrainerState {
         if (!key || key.length > 200 || !profile || typeof profile !== "object") continue;
         const mapped: Record<number, Instrument | null> = { ...DEFAULT_MIDI_MAP };
         for (const [note, voice] of Object.entries(profile.midiMap ?? {})) if (/^\d+$/.test(note) && Number(note) <= 127 && (voice === null || voices.includes(voice))) mapped[Number(note)] = voice;
-        const articulations: Record<number, MidiArticulation | null> = {};
-        const validArticulations: MidiArticulation[] = ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot"];
+        const articulations: Record<number, MidiArticulation | null> = { ...DEFAULT_MIDI_ARTICULATIONS };
+        const validArticulations: MidiArticulation[] = ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot", "side-stick"];
         for (const [note, articulation] of Object.entries(profile.midiArticulations ?? {})) if (/^\d+$/.test(note) && Number(note) <= 127 && (articulation === null || validArticulations.includes(articulation))) articulations[Number(note)] = articulation;
+        const midiVelocityRanges: NonNullable<TrainerDeviceProfile["midiVelocityRanges"]> = {};
+        for (const [note, range] of Object.entries(profile.midiVelocityRanges ?? {})) if (/^\d+$/.test(note) && Number(note) <= 127 && range && Number.isInteger(range.soft) && range.soft >= 1 && range.soft <= 127 && Number.isInteger(range.hard) && range.hard <= 127 && range.hard >= range.soft + 4) midiVelocityRanges[Number(note)] = { soft: range.soft, hard: range.hard };
         const audioTemplates: Partial<Record<Instrument, number[]>> = {};
         for (const voice of voices) { const template = profile.audioTemplates?.[voice]; if (Array.isArray(template) && template.length === 5 && template.every((v: unknown) => typeof v === "number" && Number.isFinite(v))) audioTemplates[voice] = template.map((v: number) => Math.max(0, Math.min(1, v))); }
         const audioDynamics: Partial<Record<Instrument, AudioDynamicsCalibration>> = {};
@@ -79,7 +168,7 @@ export function parseTrainerState(raw: string | null): TrainerState {
           if (Object.keys(parsed).length) audioDynamics[voice] = parsed;
         }
         const latencySpreadMs = typeof profile.latencySpreadMs === "number" && Number.isFinite(profile.latencySpreadMs) && profile.latencySpreadMs >= 0 && profile.latencySpreadMs <= 240 ? profile.latencySpreadMs : null;
-        deviceProfiles[key] = { latencyMs: Number.isFinite(profile.latencyMs) ? Math.max(-200, Math.min(200, Number(profile.latencyMs))) : 0, latencyCalibrated: profile.latencyCalibrated === true, latencySpreadMs, latencyCalibratedAt: typeof profile.latencyCalibratedAt === "string" && Number.isFinite(Date.parse(profile.latencyCalibratedAt)) ? profile.latencyCalibratedAt : null, midiMap: mapped, midiArticulations: articulations, audioTemplates, audioDynamics };
+        deviceProfiles[key] = { latencyMs: Number.isFinite(profile.latencyMs) ? Math.max(-200, Math.min(200, Number(profile.latencyMs))) : 0, latencyCalibrated: profile.latencyCalibrated === true, latencySpreadMs, latencyCalibratedAt: typeof profile.latencyCalibratedAt === "string" && Number.isFinite(Date.parse(profile.latencyCalibratedAt)) ? profile.latencyCalibratedAt : null, midiMap: mapped, midiArticulations: articulations, midiVelocityRanges, audioTemplates, audioDynamics };
       }
     }
     return { version: 2, rounds: value.rounds.filter((round): round is TrainerRound => {
@@ -87,8 +176,9 @@ export function parseTrainerState(raw: string | null): TrainerState {
           typeof round.patternName !== "string" || typeof round.playedAt !== "string" || Number.isNaN(Date.parse(round.playedAt)) ||
           !Number.isFinite(round.bpm) || round.bpm < 40 || round.bpm > 200 ||
           (round.mode !== "self" && round.mode !== "scored") || !Array.isArray(round.ratings) || round.ratings.length > 16 ||
+          (round.summaryOnly !== undefined && round.summaryOnly !== true) ||
           (round.durationSeconds !== undefined && ![30, 60, 120].includes(round.durationSeconds)) ||
-          (round.repetitions !== undefined && (round.durationSeconds ? !Number.isInteger(round.repetitions) || round.repetitions < 1 || round.repetitions > 2000 : ![4, 8, 10, 16].includes(round.repetitions))) ||
+          (round.repetitions !== undefined && (round.durationSeconds ? !Number.isInteger(round.repetitions) || round.repetitions < 1 || round.repetitions > 2000 : round.summaryOnly ? !Number.isInteger(round.repetitions) || round.repetitions < 1 || round.repetitions > 2000 : ![4, 8, 10, 16].includes(round.repetitions))) ||
           (round.focusedDrill !== undefined && (!round.focusedDrill || !voices.includes(round.focusedDrill.instrument) || !Number.isInteger(round.focusedDrill.beat) || round.focusedDrill.beat < 1 || round.focusedDrill.beat > 64 || (round.focusedDrill.sourceRoundId !== undefined && (typeof round.focusedDrill.sourceRoundId !== "string" || round.focusedDrill.sourceRoundId.length > 100)) || (round.focusedDrill.sourcePatternId !== undefined && (typeof round.focusedDrill.sourcePatternId !== "string" || round.focusedDrill.sourcePatternId.length > 200)))) ||
           (round.uncertainDetections !== undefined && (!Number.isInteger(round.uncertainDetections) || round.uncertainDetections < 0 || round.uncertainDetections > 100000)) ||
           (round.inputClipped !== undefined && typeof round.inputClipped !== "boolean") ||
@@ -109,6 +199,7 @@ export function parseTrainerState(raw: string | null): TrainerState {
           (round.voicePractice !== undefined && !["all", "single", "layers"].includes(round.voicePractice)) ||
           (round.voiceFocus !== undefined && !voices.includes(round.voiceFocus)) ||
           (round.voiceLayerCount !== undefined && (!Number.isInteger(round.voiceLayerCount) || round.voiceLayerCount < 1 || round.voiceLayerCount > 5)) ||
+          (round.transferFromPatternId !== undefined && (typeof round.transferFromPatternId !== "string" || round.transferFromPatternId.length > 200 || round.transferFromPatternId === round.patternId)) ||
           (round.rudimentHandCheck !== undefined && typeof round.rudimentHandCheck !== "boolean") ||
           !round.ratings.every((rating: TrainerRating) => ["clean", "needsWork", "missed"].includes(rating)) ||
           (round.result !== null && (!round.result || !Number.isFinite(round.result.score) || !Number.isFinite(round.result.accuracy)))) return false;
@@ -122,7 +213,8 @@ export function parseTrainerState(raw: string | null): TrainerState {
           (hit.articulationSpacingMs === undefined || (Number.isFinite(hit.articulationSpacingMs) && hit.articulationSpacingMs >= 5 && hit.articulationSpacingMs <= 100)) &&
           (hit.transition === undefined || hit.transition === "landing") &&
           (hit.feelZone === undefined || ["straight", "offbeat", "backbeat", "fill"].includes(hit.feelZone)) &&
-          (hit.midiArticulation === undefined || ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot"].includes(hit.midiArticulation)) &&
+          (hit.midiArticulation === undefined || ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot", "side-stick"].includes(hit.midiArticulation)) &&
+          (hit.midiArticulationTarget === undefined || ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot", "side-stick"].includes(hit.midiArticulationTarget)) &&
           (hit.sustainMs === undefined || (Number.isFinite(hit.sustainMs) && hit.sustainMs >= 0 && hit.sustainMs <= 180)) &&
           (hit.handTarget === undefined || hit.handTarget === "R" || hit.handTarget === "L") &&
           (hit.handPlayed === undefined || hit.handPlayed === "R" || hit.handPlayed === "L") &&
@@ -130,7 +222,10 @@ export function parseTrainerState(raw: string | null): TrainerState {
           (hit.step === undefined || (Number.isInteger(hit.step) && hit.step >= 0 && hit.step <= 4096)) &&
           (hit.repetition === undefined || (Number.isInteger(hit.repetition) && hit.repetition >= 0 && hit.repetition < 16))));
     }).slice(0, 50),
-      latencyMs: Number.isFinite(value.latencyMs) ? Math.max(-200, Math.min(200, Number(value.latencyMs))) : 0, midiMap, deviceProfiles };
+      latencyMs: Number.isFinite(value.latencyMs) ? Math.max(-200, Math.min(200, Number(value.latencyMs))) : 0, midiMap, deviceProfiles,
+      ...(parseTrainerPortableRoutine(value.routine) ? { routine: parseTrainerPortableRoutine(value.routine)! } : {}),
+      ...(parseTrainerPortableCueSequences(value.cueSequences) ? { cueSequences: parseTrainerPortableCueSequences(value.cueSequences)! } : {}),
+      ...(parseTrainerPortableCoachFeedback(value.coachFeedback) ? { coachFeedback: parseTrainerPortableCoachFeedback(value.coachFeedback)! } : {}) };
   } catch { return { ...defaultTrainerState, midiMap: { ...DEFAULT_MIDI_MAP }, deviceProfiles: {} }; }
 }
 export function roundDurationMs(pattern: PracticePattern, bpm: number) { return pattern.beats * (pattern.subdivision / 4) * stepDurationMs(bpm, pattern.subdivision); }
@@ -159,13 +254,16 @@ export function expectedRoundHits(pattern: PracticePattern, bpm: number, startAt
     return offsets.map((offset) => ({ atOffset: baseAt + offset, hit, graceSpacing }));
   });
   return Array.from({ length: repetitions }, (_, repetition) => events.map(({ atOffset, hit }) =>
-    ({ at: startAt + repetition * duration + atOffset, instrument: hit.instrument, accent: Boolean(hit.accent), sticking: hit.sticking, velocityTarget: hit.velocityTarget, articulation: hit.articulation, articulationSpacingMs: hit.articulation ? articulationGraceSpacingMs(hit.articulation, bpm) : undefined, matched: false, step: hit.step, repetition }))).flat();
+    ({ at: startAt + repetition * duration + atOffset, instrument: hit.instrument, accent: Boolean(hit.accent), sticking: hit.sticking, velocityTarget: hit.velocityTarget, articulation: hit.articulation, midiArticulationTarget: hit.midiArticulationTarget, articulationSpacingMs: hit.articulation ? articulationGraceSpacingMs(hit.articulation, bpm) : undefined, matched: false, step: hit.step, repetition }))).flat();
 }
-export function scoreTrainerHit(now: number, expected: Array<{ at: number; instrument: Instrument; accent?: boolean; sticking?: PatternHit["sticking"]; velocityTarget?: number; articulation?: PatternHit["articulation"]; articulationSpacingMs?: number; transition?: RatedHit["transition"]; feelZone?: RatedHit["feelZone"]; matched: boolean; step?: number; repetition?: number }>, instrument: Instrument, latencyMs = 0): RatedHit {
-  const closest = findClosestExpected(now - latencyMs, expected, instrument);
+export function scoreTrainerHit(now: number, expected: Array<{ at: number; instrument: Instrument; accent?: boolean; sticking?: PatternHit["sticking"]; velocityTarget?: number; articulation?: PatternHit["articulation"]; midiArticulationTarget?: PatternHit["midiArticulationTarget"]; articulationSpacingMs?: number; transition?: RatedHit["transition"]; feelZone?: RatedHit["feelZone"]; matched: boolean; step?: number; repetition?: number }>, instrument: Instrument, latencyMs = 0, midiArticulation?: MidiArticulation, enforceMidiArticulation = false): RatedHit {
+  const closest = findClosestExpected(now - latencyMs, expected, instrument, hit => {
+    const target = hit.midiArticulationTarget;
+    return !enforceMidiArticulation || !target || target === midiArticulation;
+  });
   if (closest.index < 0 || Math.abs(closest.offset) > 100) return { instrument, rating: "extra", offsetMs: null };
   expected[closest.index].matched = true;
-  return { instrument, rating: classifyOffset(closest.offset), offsetMs: Math.round(closest.offset), accentTarget: Boolean(expected[closest.index].accent), handTarget: expected[closest.index].sticking, velocityTarget: expected[closest.index].velocityTarget, articulation: expected[closest.index].articulation, articulationSpacingMs: expected[closest.index].articulationSpacingMs, transition: expected[closest.index].transition, feelZone: expected[closest.index].feelZone, step: expected[closest.index].step, repetition: expected[closest.index].repetition };
+  return { instrument, rating: classifyOffset(closest.offset), offsetMs: Math.round(closest.offset), accentTarget: Boolean(expected[closest.index].accent), handTarget: expected[closest.index].sticking, velocityTarget: expected[closest.index].velocityTarget, articulation: expected[closest.index].articulation, midiArticulationTarget: expected[closest.index].midiArticulationTarget, articulationSpacingMs: expected[closest.index].articulationSpacingMs, transition: expected[closest.index].transition, feelZone: expected[closest.index].feelZone, step: expected[closest.index].step, repetition: expected[closest.index].repetition };
 }
 export function summarizeTrainerRound(pattern: PracticePattern, bpm: number, mode: TrainerMode, source: TrainerRound["source"], ratings: TrainerRating[], hits: RatedHit[], repetitions = 10): TrainerRound {
   const playedAt = new Date().toISOString();

@@ -6,6 +6,28 @@ import type { SongInstrument, SongPartHit } from './types';
 export const PAD_VOICES: SongInstrument[] = ['kick','snare','hihat','tom','crash'];
 export const DEFAULT_SUBSTITUTIONS: Partial<Record<SongInstrument, SongInstrument>> = { openhat:'hihat', ride:'hihat', rimshot:'snare', cowbell:'crash', shaker:'hihat', tambourine:'hihat' };
 export type ArrangementDiffLine = { location: string; change: "added" | "removed" | "edited"; detail: string };
+export function suggestPartSticking(part: DrumPart, leadHand: "R" | "L" = "R"): DrumPart {
+ const otherHand = leadHand === "R" ? "L" : "R", cymbalPriority: Partial<Record<SongInstrument, number>> = { hihat: 0, openhat: 0, ride: 0, crash: 0, cowbell: 0, shaker: 0, tambourine: 0 };
+ const hits = [...part.hits].sort((a,b)=>a.step-b.step||(cymbalPriority[a.instrument]??1)-(cymbalPriority[b.instrument]??1)||a.instrument.localeCompare(b.instrument));
+ let nextHand: "R" | "L" = leadHand;
+ const result: SongPartHit[] = [];
+ for (const hit of hits) {
+  if (hit.instrument === "kick") { result.push({ ...hit, sticking: undefined }); continue; }
+  const sameStep = result.filter(previous=>previous.step===hit.step);
+  let hand: "R" | "L";
+  if (!sameStep.length) {
+   hand = nextHand;
+   nextHand = hand === "R" ? "L" : "R";
+  } else {
+   const cymbal = cymbalPriority[hit.instrument] === 0;
+   const preferred = cymbal ? leadHand : otherHand;
+   const usedHands = sameStep.flatMap(previous=>previous.sticking ? [previous.sticking] : []);
+   hand = usedHands.includes(preferred) ? (preferred === "R" ? "L" : "R") : preferred;
+  }
+  result.push({ ...hit, sticking: hand });
+ }
+ return { ...part, hits: result };
+}
 export function compareSongDrumArrangements(before: DrumSong, after: DrumSong, limit = 40): ArrangementDiffLine[] {
  const lines:ArrangementDiffLine[]=[];
  const oldSections=new Map(before.sections.map(section=>[section.id,section])),newSections=new Map(after.sections.map(section=>[section.id,section]));

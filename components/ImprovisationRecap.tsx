@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type RefObject } from 'react';
-import { isSwing, phraseAdvice, PROMPT_LABELS, REFLECTION_QUESTIONS, type ImprovisationSummary } from '@/lib/improvisation';
+import { improvisationPhraseSettings, isSwing, phraseAdvice, PROMPT_LABELS, REFLECTION_QUESTIONS, type ImprovisationSummary } from '@/lib/improvisation';
 import { useLocalization } from './LocalizationProvider';
 import styles from './ImprovisationStudio.module.css';
 
@@ -10,12 +10,12 @@ export function ImprovisationRecap({ result, headingRef, onUpdate, onRepeat, onE
   const [slower, setSlower] = useState(true);
   return <section className="card" aria-label={t('Improvisation recap')}>
     <h2 tabIndex={-1} ref={headingRef}>{t('Your improvisation recap')}</h2>
-    <p>{t(result.settings.mode === 'duet' ? 'Each phrase is shown under the player who took that turn. Creative note choices are not graded.' : 'Creative note choices are not graded. These results stay separate from pattern mastery.')}</p>
+    <p>{t(result.settings.mode === 'duet' || result.settings.mode === 'ensemble' ? 'Each phrase is shown under the player who took that turn. Creative note choices are not graded.' : 'Creative note choices are not graded. These results stay separate from pattern mastery.')}</p>
     <p>{t('Session meter')}: {result.settings.meter} · {result.settings.bpm} BPM · {t(result.settings.style)}</p>
     {result.settings.intention && <p><strong>{t('Your practice intention')}:</strong> {result.settings.intention}</p>}
     <label className={styles.check}><input type="checkbox" checked={slower} onChange={event => setSlower(event.target.checked)} />{t('Repeat focused phrases at 80% tempo')}</label>
     <div className={styles.results}>{result.phrases.map(phrase => <article className={styles.phrase} key={phrase.phrase}>
-      <h3>{phrase.activePlayer ? t('{name} · phrase {phrase}', { name: phrase.activePlayer === 1 ? result.settings.playerOneName : result.settings.playerTwoName, phrase: formatNumber(phrase.phrase + 1) }) : t('Phrase {phrase}', { phrase: formatNumber(phrase.phrase + 1) })}</h3><p>{t(PROMPT_LABELS[phrase.prompt])}</p>
+      <h3>{phrase.activePlayer ? t('{name} · phrase {phrase}', { name: result.settings.mode === 'ensemble' ? result.settings.ensemblePlayers[phrase.activePlayer - 1]?.name ?? t('Player {number}', { number: phrase.activePlayer }) : phrase.activePlayer === 1 ? result.settings.playerOneName : result.settings.playerTwoName, phrase: formatNumber(phrase.phrase + 1) }) : t('Phrase {phrase}', { phrase: formatNumber(phrase.phrase + 1)})}</h3><p>{t(PROMPT_LABELS[phrase.prompt])} · {(() => { const section = improvisationPhraseSettings(result.settings, phrase.phrase); return `${section.meter} · ${section.bars} ${t('bars')} · ${section.bpm} BPM`; })()}</p>
       <p className={styles.advice}>{t(phraseAdvice(result.settings, phrase, result.input))}</p>
       {result.input === 'unscored' ? <p>{t('Completed · unscored practice')}</p> : <details><summary>{t('Timing and constraint details')}</summary>
         <p>{phrase.timingDistanceMs === null ? t('No timing evidence — try playing a short phrase next time.') : t(isSwing(result.settings) ? 'Mean distance from triplet grid: {distance} ms' : 'Mean distance from sixteenth-note grid: {distance} ms', { distance: formatNumber(phrase.timingDistanceMs) })}</p>

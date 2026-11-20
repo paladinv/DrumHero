@@ -12,6 +12,8 @@ export type BuilderBacking = {
   duration: number;
   downbeat: number;
   volume: number;
+  muted?: boolean;
+  solo?: boolean;
   bpm?: number;
   preservePitch?: boolean;
   source?: string;

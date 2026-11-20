@@ -92,7 +92,7 @@ Each DHM case maps to a stable scenario below. `Implemented` names a checked-in 
 | DHM-126 | Export formats reopen with no silent data loss | `PARITY-EXPORT-01` Later parity |
 | DHM-130 | Recording start/review/play/export/delete lifecycle | `PARITY-RECORDING-01` Later parity |
 | DHM-131 | Recording denial/interruption/storage failure recovery | `PARITY-RECORDING-02` Later parity |
-| DHM-140 | Portable web/iOS progress transfer with merge preview | `XFER-01` Acceptance |
+| DHM-140 | Portable web/iOS learning archive with merge preview | `XFER-01` Acceptance |
 | DHM-141 | Encrypted backup, wrong password, and rollback | `PARITY-BACKUP-02` Later parity |
 | DHM-142 | Versioned web/iOS/Android file round trips | `PARITY-FORMAT-01` Later parity |
 | DHM-150 | 3D hit mapping and accessible fallback | `PARITY-KIT3D-01` Later parity |
@@ -114,7 +114,7 @@ Each DHM case maps to a stable scenario below. `Implemented` names a checked-in 
 
 - Automate launch → Learn → lesson → checkpoint/completion → Progress; all-complete Home review; direct Practice; Start → count-in → mute → Reset; Trainer start/reset and self-rated/scored completion.
 - Import a v2 progress backup with personal songs, review its record counts, cancel and confirm replacement in separate runs, then verify lesson notes, practice history, best scores, Trainer recaps, and songs. Import a v1 backup and confirm existing personal songs are preserved. Confirm unsupported versions, unknown IDs, duplicate records, and oversized files leave local progress unchanged.
-- Export the portable progress transfer from web and iOS in both directions. Review lesson/session/best-score counts, merge without removing current records, verify preferred tempo, repeat the same file to confirm idempotent IDs, and confirm unsupported iOS lesson/pattern IDs are reported. Transfer a single-song JSON file and a multi-song library pack both directions; review duplicate actions, imported arrangements, and iOS unsupported-voice warnings.
+- Export the portable learning archive from web and iOS in both directions. Review lesson/session/best-score/song/groove counts, merge without removing current records, verify preferred tempo and guided-session/weekly-goal choices, repeat the same file to confirm idempotent IDs, and confirm unsupported iOS lesson/pattern/song data is reported. Transfer a single-song JSON file and a multi-song library pack both directions; review duplicate actions, imported arrangements, and iOS unsupported-voice warnings.
 - Run iOS unit/UI tests on iOS 17 and current iOS, compact/large iPhones, and iPad portrait/landscape/resizing. Later Android runs on API 35 and current target.
 - Manually inspect VoiceOver/TalkBack traversal of the semantic pattern grid and feedback, largest system text, reduced motion, light/dark contrast, hardware-keyboard focus, and pad touch targets. Confirm the core flow never requests mic/camera/MIDI/sign-in/network access.
 - On iPhone and iPad verify compact/regular layouts, rotation and iPad window resizing; on physical devices verify sample playback, touch latency, count spacing, headphones/speaker routes, calls, lock/background handling from both Practice and Trainer, engine failure feedback, and 30-minute stability. Verify MIDI source refresh and note remapping, microphone permission and noise sensitivity, and saved input corrections. Simulator tests do not establish audio latency.

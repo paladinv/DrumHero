@@ -6,7 +6,7 @@ Open **Practice → Improvisation**, or follow the link from Trainer or Play-alo
 
 ## Listen, respond, and develop an idea
 
-The four-step learning path moves through pulse, space, motifs, and resolution. Select a lesson, open its example, and choose **Play demonstration** before playing. After completing the configured lesson session, explicitly complete the step to save its participation checkpoint and continue. Checkpoints do not certify musical quality.
+The six-step learning path moves through pulse, space, motifs, resolution, cross-rhythm, and free trading. Select a lesson, open its example, and choose **Play demonstration** before playing. After completing the configured lesson session, explicitly complete the step to save its participation checkpoint and continue. Checkpoints do not certify musical quality.
 
 **Drummer and handoff options** selects beginner/intermediate/advanced vocabulary, sparse/balanced/busy note density, and a response exercise: copy the idea, answer with a variation, or contrast the phrase. Original reference phrases are deterministic, with changing fills, dynamics, ghost notes, and style-specific rhythms. Copy keeps the reference idea stable across exchanges. The virtual drummer does not strike during player turns.
 
@@ -104,3 +104,51 @@ Learners explicitly load a step and start when ready. A fully completed session 
 Playlists and results are local to the learner profile and included in full backup/restore. Export/import moves one playlist file between devices without including learner progress. These files are separate from the existing cloud roster and shared progress-report formats; improvisation results are not sent through those services.
 
 Additional manual checks: listen through metronome dropout cycles and re-entry after pause; confirm each progression and the separate bass level; use a real MIDI kit in sound check at soft and loud velocities; verify a multi-step teacher sequence and performance view on a tablet beside the kit.
+
+## Personal practice tools
+
+Use **Build a custom challenge** to place required notes directly on the score, mark beats that must stay silent, and choose which drums are allowed. Rules repeat for every player phrase. The builder keeps required target drums in the allowed set and redraws the score when meter or phrase length changes. Target notes still use one-to-one timing matches; other hits remain welcome unless they fall on a requested rest or use a restricted drum.
+
+**Adapt next session tempo** uses at least three phrases with scored timing evidence. At the end of a session it selects a next-session tempo 3 BPM faster or slower based only on mean timing distance; it never rates creative choices or changes the tempo mid-session. Unscored practice provides no tempo evidence. **Drummer pocket** moves only the virtual drummer a small amount ahead of or behind the pulse. The notation, preview, and replay move with it. **Swing ratio** changes the drummer's swung offbeat and its timing reference; straight grooves keep the control inactive.
+
+Choose a local audio file under **Play with a backing track**. Set the track BPM and optional A/B loop points; playback follows the session clock and pauses with it. Use **Preview backing track** before a session to unlock playback in browsers that require an explicit play gesture. The file stays in browser memory on that device and is not uploaded, backed up, or included in history.
+
+For a **Remote duet**, both players sign in and have access to the same reviewed cloud library. One player creates an invite code; the other joins it, prepares audio, and waits for the host to start. The two browsers estimate clock offset and align the count-in. Each browser uses its own keyboard, touch pads, or one selected MIDI device. Live drum events are broadcast for playback and are not stored in the cloud; stopping or pausing either side affects both. Apply `supabase/migrations/202611160001_improvisation_duet_broadcast.sql` before enabling this feature in a deployed Supabase project. Each learner's session summary remains in that learner's local profile.
+
+Open **Visual timing review** in replay to inspect mean signed timing by beat subdivision and by phrase. Early, on-grid, and late counts remain descriptive; phrases without hits show no timing evidence. These diagnostics report timing only and do not assign a creativity score.
+
+## Focused practice controls
+
+The score toolbar can zoom from 75% to 175% and focus on one bar or the full phrase. Use the bar selector when a long phrase is difficult to read on a phone; the playhead and event positions stay aligned with the session clock. Drummer style, sparse/steady/busy feel, difficulty, optional ending fills, and a variation seed let players shape or reproduce a reference phrase. The seed is included in saved setups and exported preset files.
+
+Replay can play a full phrase or one selected bar, loop that bar, slow playback to 50% or 75%, and compare the partner and player versions of the same range. Imported/exported practice presets are versioned JSON files containing setup settings only; they do not include learner history or raw hit streams.
+
+For supported MIDI devices, choose **Calibrate MIDI pad dynamics** while a MIDI input is connected. Strike each mapped pad softly and firmly when prompted. The resulting per-note velocity ranges are stored with that device's Trainer profile for the active learner and normalize improvisation dynamics; stopping or losing the device discards an incomplete calibration.
+
+## Exchange plans, phrase shape, and backing stems
+
+Open **Plan each exchange** to set a prompt, meter, bar count, groove, or BPM for each trading exchange, guided phrase, duet turn, or workshop phrase. Blank fields follow the main setup. A planned tempo applies to both sides of a trading exchange, and the session clock, count-in, score, audio events, feedback, replay, and exported MIDI follow the per-section timing. Open-ended practice uses one setup and clears a fixed section plan.
+
+Replay's **Phrase shape** section describes hit counts and quiet beats by bar, drum-voice use, and MIDI velocity when available. These are observations about the played phrase, not a quality or creativity score. Phrases without hits report no timing evidence.
+
+The local backing mixer supports up to four audio files, each with its own role, volume, mute, and remove control. BPM and A/B-loop settings apply to the whole mix. To keep the stems aligned, loop points are limited by the shortest loaded file. Local audio remains on the device, is not backed up, and is never included in improvisation history.
+
+## Form, kit, ensemble, and vocabulary tools
+
+Under **Plan each exchange**, each fixed section can override its meter and length as well as prompt, groove, and tempo. The score, count-in, audio scheduler, feedback, replay, and MIDI export follow each section's own timing. **Loop a section** repeats that complete planned section in place, up to eight total phrases; open-ended practice clears the loop.
+
+**Customize drum sounds** provides Natural, Punchy, Dry, and Bright starting kits plus per-voice sample, level, pitch, decay, pan, and mute settings. The mix is saved with the setup, local history, exported preset, and take, so replay uses the same kit. It uses existing local drum samples and does not record or upload audio.
+
+Choose **Ensemble workshop** to rotate phrase turns across two to four named players. Assign each person an open kit, one drum voice, or a listening role. The live stage and score announce whose turn it is; restricted input is ignored for other drum voices. This is a shared-device workshop mode and keeps each player's phrase metrics in the same local session summary.
+
+**Groove vocabulary** offers short score-and-audio examples for a rock backbeat, half-time pocket, funk syncopation, shuffle triplets, and motif variation. Choose **Use this groove** to load the selected idea into the session setup, then adjust it freely.
+
+## Shared assignments and learner summaries
+
+Shared assignments use the reviewed Song Builder cloud library. Owners and editors can publish a local practice playlist; library members can load and import a copy into their own local playlists. A learner can select a completed session, review the exact sanitized summary, and check consent before submitting it. The summary contains session setup and phrase metrics only. Reflection text and self-rating are included only when selected. Raw hits, microphone audio, input mappings, device details, private notes, and calibration data are excluded.
+
+To enable this feature, apply `supabase/migrations/202611170003_improvisation_assignments.sql` after the shared Song Builder library migration. Owners and editors can review submissions for assignments in their library; each learner can read and delete their own submissions. Supabase stores the shared assignment and submitted summary, but each learner's ordinary practice history remains local to that profile.
+
+Teachers can add a plain-language comment to a submitted phrase and optional bar. The learner who submitted the summary can load the comments for that assignment. Apply `supabase/migrations/202611190003_improvisation_teacher_feedback.sql` after the improvisation assignments migration. Row-level security limits comment creation to library owners and editors and comment reading to those teachers and the submitting learner.
+
+Remote duet diagnostics show smoothed round-trip latency, jitter, clock offset, and accepted hits that arrived late enough to require immediate playback. These readings help explain network timing; they do not alter the local timing score or claim to measure a player's musical quality.

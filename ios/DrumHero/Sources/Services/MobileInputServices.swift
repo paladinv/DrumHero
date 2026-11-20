@@ -80,13 +80,14 @@ final class MobileMIDIInput: ObservableObject {
     @Published private(set) var availableSources: [MobileMIDISource] = []
     @Published private(set) var status = "MIDI is disconnected."
     @Published private(set) var noteNumbers: [DrumVoice: Int]
+    @Published private(set) var articulationNotes: [String: Int]
 
     private var client = MIDIClientRef()
     private var inputPort = MIDIPortRef()
     private var endpoints: [MIDIEndpointRef] = []
     private var onVelocityHit: (@MainActor (DrumVoice, TimeInterval, Int) -> Void)?
     private var onHit: (@MainActor (DrumVoice, TimeInterval) -> Void)?
-    private var onSourceVelocityHit: (@MainActor (DrumVoice, TimeInterval, Int, String) -> Void)?
+    private var onSourceVelocityHit: (@MainActor (DrumVoice, TimeInterval, Int, String, String?) -> Void)?
     private var onLearnNote: (@MainActor (Int) -> Void)?
     private var activeSourceID: String?
     private var sourceEndpoints: [String: MIDIEndpointRef] = [:]
@@ -96,20 +97,43 @@ final class MobileMIDIInput: ObservableObject {
         noteNumbers = Dictionary(uniqueKeysWithValues: DrumVoice.allCases.map { voice in
             (voice, defaults.object(forKey: "drumHero.midiNote.\(voice.rawValue)") as? Int ?? Self.defaultNotes[voice]!)
         })
+        let savedArticulations = defaults.dictionary(forKey: "drumHero.midiArticulationNotes") as? [String: Int] ?? [:]
+        articulationNotes = Self.defaultArticulationNotes.merging(savedArticulations.filter { Self.articulationVoices[$0.key] != nil && (-1...127).contains($0.value) }) { _, saved in saved }
     }
 
     private static let defaultNotes: [DrumVoice: Int] = [
         .kick: 36, .snare: 38, .hihat: 42, .tom: 45, .crash: 49
     ]
+    private static let defaultArticulationNotes = ["closed-hat": 42, "open-hat": 46, "pedal-hat": 44, "foot-splash": -1, "ride": 51, "crash": 49, "rimshot": 40, "side-stick": 37]
+    private static let articulationVoices: [String: DrumVoice] = ["closed-hat": .hihat, "open-hat": .hihat, "pedal-hat": .hihat, "foot-splash": .hihat, "ride": .hihat, "crash": .crash, "rimshot": .snare, "side-stick": .snare]
 
     func setNote(_ note: Int, for voice: DrumVoice) -> Bool {
         guard (0...127).contains(note), !noteNumbers.contains(where: { $0.key != voice && $0.value == note }) else {
             status = "Each drum voice needs a different MIDI note."
             return false
         }
+        if let articulation = articulationNotes.first(where: { $0.value == note })?.key,
+           Self.articulationVoices[articulation] != voice {
+            status = "That MIDI note is reserved for a different articulation voice."
+            return false
+        }
         noteNumbers[voice] = note
         UserDefaults.standard.set(note, forKey: "drumHero.midiNote.\(voice.rawValue)")
         status = "MIDI note mapping saved on this device."
+        return true
+    }
+
+    func setArticulationNote(_ note: Int, for articulation: String) -> Bool {
+        guard (-1...127).contains(note), let voice = Self.articulationVoices[articulation] else { status = "Choose a supported articulation and MIDI note."; return false }
+        if note >= 0, let mappedVoice = noteNumbers.first(where: { $0.value == note })?.key, mappedVoice != voice {
+            status = "That MIDI note is mapped to another drum voice."; return false
+        }
+        if note >= 0, articulationNotes.contains(where: { $0.key != articulation && $0.value == note }) {
+            status = "Each articulation needs a distinct MIDI note."; return false
+        }
+        articulationNotes[articulation] = note
+        UserDefaults.standard.set(articulationNotes, forKey: "drumHero.midiArticulationNotes")
+        status = note < 0 ? "Articulation note unmapped." : "Articulation MIDI note saved on this device."
         return true
     }
 
@@ -155,7 +179,7 @@ final class MobileMIDIInput: ObservableObject {
         return sources
     }
 
-    func connectSelectedSource(_ sourceID: String, onHit: @escaping @MainActor (DrumVoice, TimeInterval, Int, String) -> Void) {
+    func connectSelectedSource(_ sourceID: String, onHit: @escaping @MainActor (DrumVoice, TimeInterval, Int, String, String?) -> Void) {
         self.onHit = nil; self.onVelocityHit = nil; self.onSourceVelocityHit = onHit; activeSourceID = sourceID
         guard ensureInputPort() else { return }
         disconnectSources()
@@ -204,10 +228,12 @@ final class MobileMIDIInput: ObservableObject {
                     guard let self else { return }
                     for event in events {
                         if let learn = self.onLearnNote { self.onLearnNote = nil; learn(event.note); continue }
-                        guard let voice = self.noteNumbers.first(where: { $0.value == event.note })?.key else { continue }
+                        let articulation = self.articulationNotes.first(where: { $0.value == event.note })?.key
+                        let voice = articulation.flatMap { Self.articulationVoices[$0] } ?? self.noteNumbers.first(where: { $0.value == event.note })?.key
+                        guard let voice else { continue }
                         self.onHit?(voice, event.at)
                         self.onVelocityHit?(voice, event.at, event.velocity)
-                        if let sourceID = self.activeSourceID { self.onSourceVelocityHit?(voice, event.at, event.velocity, sourceID) }
+                        if let sourceID = self.activeSourceID { self.onSourceVelocityHit?(voice, event.at, event.velocity, sourceID, articulation) }
                     }
                 }
             }
@@ -251,9 +277,9 @@ private final class MicrophoneLevelAnalyzer: @unchecked Sendable {
     private var lastHitAt: TimeInterval = -.infinity
     private var isMeasuringNoise = false
     private var noiseReadings: [Float] = []
-    private var hitCallback: (@Sendable (TimeInterval) -> Void)?
+    private var hitCallback: (@Sendable (TimeInterval, [Float]) -> Void)?
 
-    func setHitCallback(_ callback: (@Sendable (TimeInterval) -> Void)?) {
+    func setHitCallback(_ callback: (@Sendable (TimeInterval, [Float]) -> Void)?) {
         lock.lock(); hitCallback = callback; lock.unlock()
     }
 
@@ -303,19 +329,47 @@ private final class MicrophoneLevelAnalyzer: @unchecked Sendable {
         if shouldEmit { lastHitAt = time }
         let callback = shouldEmit ? hitCallback : nil
         lock.unlock()
-        callback?(time)
+        if let callback { callback(time, Self.spectralSignature(buffer)) }
+    }
+
+    private static func spectralSignature(_ buffer: AVAudioPCMBuffer) -> [Float] {
+        guard let channel = buffer.floatChannelData?.pointee else { return [] }
+        let count = min(Int(buffer.frameLength), 1024)
+        guard count > 32, buffer.format.sampleRate > 0 else { return [] }
+        let sampleRate = buffer.format.sampleRate
+        let frequencies: [Double] = [65, 95, 140, 210, 310, 460, 680, 1000, 1450, 2100, 3000, 4300, 6200, 8800]
+        let logs = frequencies.map { frequency -> Float in
+            let coefficient = 2 * cos(2 * Double.pi * frequency / sampleRate)
+            var previous: Double = 0
+            var beforePrevious: Double = 0
+            for index in 0..<count {
+                let window = 0.5 - 0.5 * cos(2 * Double.pi * Double(index) / Double(count - 1))
+                let sample = Double(channel[index]) * window + coefficient * previous - beforePrevious
+                beforePrevious = previous
+                previous = sample
+            }
+            let power = max(1e-12, previous * previous + beforePrevious * beforePrevious - coefficient * previous * beforePrevious)
+            return Float(log10(power / Double(count) + 1e-12))
+        }
+        let mean = logs.reduce(0, +) / Float(logs.count)
+        let centered = logs.map { $0 - mean }
+        let magnitude = sqrt(centered.reduce(0) { $0 + $1 * $1 })
+        guard magnitude > 1e-6 else { return [] }
+        return centered.map { $0 / magnitude }
     }
 }
 
 enum MicrophoneInputError: LocalizedError {
     case permissionDenied
     case noInput
+    case calibrationRequired
     case engine(String)
 
     var errorDescription: String? {
         switch self {
         case .permissionDenied: "Microphone access is off. Allow it in Settings to score audio input."
         case .noInput: "No microphone input is available on this audio route."
+        case .calibrationRequired: "Calibrate all five drum voices before using experimental kit classification."
         case .engine(let message): "Could not start microphone input: \(message)"
         }
     }
@@ -326,23 +380,44 @@ final class MobileMicrophoneInput: ObservableObject {
     @Published private(set) var isListening = false
     @Published private(set) var threshold: Float = 0.035
     @Published private(set) var status = "Microphone is off."
+    @Published private(set) var calibratedVoices: Set<DrumVoice> = []
+    @Published private(set) var calibratingVoice: DrumVoice?
+    @Published private(set) var calibrationHitCount = 0
+    @Published private(set) var uncertainStrikes = 0
+    @Published private(set) var lastVoiceMatch = ""
 
     private let engine = AVAudioEngine()
     private let analyzer = MicrophoneLevelAnalyzer()
+    private let calibrationKey = "drumHero.nativeMicrophoneVoiceTemplates.v1"
     private var selectedVoice: DrumVoice = .snare
+    private var classifyVoices = false
+    private var voiceProfiles: [DrumVoice: [Float]] = [:]
+    private var calibrationSamples: [[Float]] = []
     private var onHit: (@MainActor (DrumVoice, TimeInterval) -> Void)?
+    private let calibrationStrikeCount = 6
+
+    var canClassifyKit: Bool { DrumVoice.allCases.allSatisfy { voiceProfiles[$0] != nil } }
 
     init() {
-        analyzer.setHitCallback { [weak self] time in
+        let stored = UserDefaults.standard.dictionary(forKey: calibrationKey) as? [String: [Double]] ?? [:]
+        for voice in DrumVoice.allCases {
+            if let values = stored[voice.rawValue], values.count == 14 { voiceProfiles[voice] = Self.normalized(values.map(Float.init)) }
+        }
+        calibratedVoices = Set(voiceProfiles.keys)
+        analyzer.setHitCallback { [weak self] time, features in
             Task { @MainActor [weak self] in
                 guard let self, self.isListening else { return }
-                self.onHit?(self.selectedVoice, time)
+                self.processStrike(time: time, features: features)
             }
         }
     }
 
-    func start(voice: DrumVoice, onHit: @escaping @MainActor (DrumVoice, TimeInterval) -> Void) async throws {
+    func start(voice: DrumVoice, classifyVoices: Bool = false, onHit: @escaping @MainActor (DrumVoice, TimeInterval) -> Void) async throws {
         guard !isListening else { return }
+        guard !classifyVoices || canClassifyKit else {
+            status = "Calibrate all five drums before enabling experimental kit classification."
+            throw MicrophoneInputError.calibrationRequired
+        }
         guard await AVAudioApplication.requestRecordPermission() else {
             status = "Microphone access is off. Allow it in Settings to score audio input."
             throw MicrophoneInputError.permissionDenied
@@ -355,6 +430,7 @@ final class MobileMicrophoneInput: ObservableObject {
             let format = input.inputFormat(forBus: 0)
             guard format.channelCount > 0, format.sampleRate > 0 else { throw MicrophoneInputError.noInput }
             selectedVoice = voice
+            self.classifyVoices = classifyVoices
             self.onHit = onHit
             input.removeTap(onBus: 0)
             input.installTap(onBus: 0, bufferSize: 512, format: format) { [analyzer] buffer, audioTime in
@@ -366,7 +442,11 @@ final class MobileMicrophoneInput: ObservableObject {
             engine.prepare()
             try engine.start()
             isListening = true
-            status = "Listening for \(voice.title). Audio is analyzed on this device and is not recorded."
+            uncertainStrikes = 0
+            lastVoiceMatch = ""
+            status = classifyVoices
+                ? "Experimental kit classification is active. Uncertain strikes are ignored; audio is analyzed on this device and is not recorded."
+                : "Listening for \(voice.title). Audio is analyzed on this device and is not recorded."
         } catch {
             stop()
             if let inputError = error as? MicrophoneInputError { throw inputError }
@@ -377,7 +457,61 @@ final class MobileMicrophoneInput: ObservableObject {
 
     func setVoice(_ voice: DrumVoice) {
         selectedVoice = voice
-        if isListening { status = "Listening for \(voice.title). Audio is analyzed on this device and is not recorded." }
+        if isListening && !classifyVoices { status = "Listening for \(voice.title). Audio is analyzed on this device and is not recorded." }
+    }
+
+    func calibrateVoice(_ voice: DrumVoice) {
+        guard isListening else { status = "Enable microphone input before calibrating drum voices."; return }
+        calibratingVoice = voice
+        calibrationSamples.removeAll(keepingCapacity: true)
+        calibrationHitCount = 0
+        status = "Strike only the \(voice.title) six times, with a clear pause between hits."
+    }
+
+    private func processStrike(time: TimeInterval, features: [Float]) {
+        guard !features.isEmpty else { return }
+        if let voice = calibratingVoice {
+            calibrationSamples.append(features)
+            calibrationHitCount = calibrationSamples.count
+            guard calibrationSamples.count >= calibrationStrikeCount else {
+                status = "Calibrating \(voice.title) · \(calibrationHitCount)/\(calibrationStrikeCount) clean strikes."
+                return
+            }
+            let average = (0..<features.count).map { index in calibrationSamples.reduce(Float(0)) { $0 + $1[index] } / Float(calibrationSamples.count) }
+            let template = Self.normalized(average)
+            guard template.count == 14 else { status = "This calibration had an unusable signal. Repeat the six strikes."; calibrationSamples.removeAll(); calibrationHitCount = 0; return }
+            voiceProfiles[voice] = template
+            calibratedVoices = Set(voiceProfiles.keys)
+            let stored = Dictionary(uniqueKeysWithValues: voiceProfiles.map { ($0.key.rawValue, $0.value.map(Double.init)) })
+            UserDefaults.standard.set(stored, forKey: calibrationKey)
+            calibratingVoice = nil
+            calibrationSamples.removeAll()
+            status = "\(voice.title) profile saved on this device. Calibrate the next drum or review the voice before using kit classification."
+            return
+        }
+        guard classifyVoices else { onHit?(selectedVoice, time); return }
+        let ranked = voiceProfiles.compactMap { voice, template -> (DrumVoice, Float)? in
+            guard template.count == features.count else { return nil }
+            return (voice, zip(template, features).reduce(Float(0)) { $0 + $1.0 * $1.1 })
+        }.sorted { $0.1 > $1.1 }
+        guard let best = ranked.first, best.1 >= 0.82, ranked.count > 1, best.1 - ranked[1].1 >= 0.08 else {
+            uncertainStrikes += 1
+            let rankedText = ranked.prefix(2).map { "\($0.0.title) \(Int($0.1 * 100))%" }.joined(separator: " · ")
+            lastVoiceMatch = rankedText.isEmpty ? "Uncertain strike" : "Uncertain · \(rankedText)"
+            status = "\(lastVoiceMatch). This strike was left unscored; similarity is not a probability."
+            return
+        }
+        lastVoiceMatch = "\(best.0.title) · \(Int(best.1 * 100))% signal similarity"
+        status = "\(lastVoiceMatch). Experimental classification; review results before relying on them."
+        onHit?(best.0, time)
+    }
+
+    private static func normalized(_ values: [Float]) -> [Float] {
+        guard !values.isEmpty else { return [] }
+        let mean = values.reduce(0, +) / Float(values.count)
+        let centered = values.map { $0 - mean }
+        let magnitude = sqrt(centered.reduce(0) { $0 + $1 * $1 })
+        return magnitude > 1e-6 ? centered.map { $0 / magnitude } : []
     }
 
     func calibrateRoomNoise() async {
@@ -401,6 +535,10 @@ final class MobileMicrophoneInput: ObservableObject {
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
         isListening = false
+        classifyVoices = false
+        calibratingVoice = nil
+        calibrationSamples.removeAll()
+        calibrationHitCount = 0
         onHit = nil
         status = "Microphone is off."
     }

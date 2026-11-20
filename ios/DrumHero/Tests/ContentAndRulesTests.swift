@@ -37,11 +37,41 @@ final class ContentAndRulesTests: XCTestCase {
         for fixture in fixtures {
             let exercise = SightExercise.generate(fixture.settings, seed: fixture.seed)
             XCTAssertEqual(exercise.fingerprint, fixture.fingerprint)
-            XCTAssertTrue(exercise.hits.allSatisfy { $0.step >= 0 && $0.step < exercise.stepsPerBar * exercise.settings.bars })
+            XCTAssertEqual(exercise.version, fixture.settings.articulationFocus != nil ? 3 : fixture.settings.mixedMeters ? 2 : 1)
+            XCTAssertTrue(exercise.hits.allSatisfy { $0.step >= 0 && $0.step < exercise.totalSteps })
             XCTAssertEqual(Set(exercise.hits.map { "\($0.step)-\($0.instrument.rawValue)" }).count, exercise.hits.count)
         }
-        var odd = SightSettings(); odd.level = .advanced; odd.meter = "7/8"; odd.bpm = 60
+        var odd = SightSettings(); odd.level = .advanced; odd.meter = "7/8"; odd.bpm = 60; odd.bars = 2
         XCTAssertEqual(SightExercise.generate(odd, seed: 1).duration, 14)
+    }
+
+    func testSightMixedMetersAndArticulationTargetsStayPlayable() {
+        for level in [LearnerLevel.intermediate, .advanced] {
+            for seed in 0..<24 {
+                var settings = SightSettings(); settings.level = level; settings.bars = 8; settings.meter = level == .advanced ? "7/8" : "3/4"
+                settings.mixedMeters = true; settings.focusRhythm = "eighths"
+                let exercise = SightExercise.generate(settings, seed: UInt32(seed))
+                XCTAssertEqual(exercise.version, 2)
+                XCTAssertEqual(exercise.meters.count, settings.bars)
+                XCTAssertTrue(zip(exercise.meters, exercise.meters.dropFirst()).allSatisfy { pair in pair.0 != pair.1 })
+                XCTAssertTrue(exercise.hits.allSatisfy { $0.step >= 0 && $0.step < exercise.totalSteps })
+            }
+        }
+
+        var settings = SightSettings(); settings.level = .advanced; settings.bars = 4; settings.focusRhythm = "sixteenths"; settings.articulationFocus = "ride"
+        let exercise = SightExercise.generate(settings, seed: 31_415)
+        let targets = exercise.hits.filter { $0.midiArticulationTarget == "ride" }
+        XCTAssertEqual(exercise.version, 3)
+        XCTAssertEqual(targets.count, settings.bars)
+        XCTAssertTrue(targets.allSatisfy { $0.instrument == .hihat })
+        for bar in 0..<settings.bars {
+            XCTAssertEqual(targets.filter { exercise.barIndex(forBeat: Double($0.step) * 4 / Double(exercise.subdivision)) == bar }.count, 1)
+        }
+        let target = ExpectedHit(at: 0, instrument: .hihat, step: 0, repetition: 0, midiArticulationTarget: "ride")
+        let following = ExpectedHit(at: 0.075, instrument: .hihat, step: 1, repetition: 0)
+        let expected = [target, following]
+        XCTAssertEqual(PracticeRules.closestUnmatchedIndex(at: 0, in: expected, instrument: .hihat, midiArticulation: "closed-hat", respectArticulationTarget: false), 0)
+        XCTAssertNotEqual(expected[0].midiArticulationTarget, "closed-hat")
     }
 
     @MainActor

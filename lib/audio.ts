@@ -4,10 +4,12 @@ import type { CustomSampleLayers } from "./song-builder-samples";
 export type DrumAudio = {
   click: (accent?: boolean) => void;
   scheduleHit: (instrument: SongInstrument, atMs: number, accent?: boolean, velocity?: number, choke?: boolean, pan?: number) => void;
+  scheduleTargetHit: (instrument: SongInstrument, atMs: number, accent?: boolean, velocity?: number) => void;
   scheduleClick: (atMs: number, accent?: boolean) => void;
   hit: (instrument: SongInstrument, accent?: boolean, velocity?: number, choke?: boolean) => void;
   setMix: (settings: DrumMixSettings) => void;
   setMasterLevel: (level: number) => void;
+  setTargetLevel: (level: number) => void;
   setClickLevel: (level: number) => void;
   setClickSound: (sound: TrainerClickSound) => void;
   setCustomSample: (instrument: SongInstrument, blob: Blob | null, layer?: "soft" | "primary" | "accent") => Promise<boolean>;
@@ -54,6 +56,11 @@ const samplePaths = {
   ...Object.fromEntries(Array.from({length:8},(_,index)=>[`custom${index+1}`, [`/audio/drums/${["kick","snare","tom","crash"][index%4]}-1.wav`]]))
 } as Record<SongInstrument, string[]>;
 
+export function drumSampleUrl(instrument: SongInstrument, sampleIndex: number) {
+  const paths = samplePaths[instrument] ?? [];
+  return paths[Math.max(0, Math.min(paths.length - 1, Math.round(sampleIndex)))] ?? paths[0] ?? "";
+}
+
 export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, initialCustomSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, onInterrupted?: () => void): DrumAudio | null {
   if (typeof window === "undefined" || !(window.AudioContext || window.webkitAudioContext)) return null;
   const Context = window.AudioContext || window.webkitAudioContext;
@@ -65,6 +72,7 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
   const nextTake: Record<SongInstrument, number> = voiceValues(0);
   let mix = initialMix;
   let masterLevel = 1;
+  let targetLevel = 0.55;
   let clickLevel = 1;
   let clickSound: TrainerClickSound = "hat";
   let closed = false;
@@ -78,7 +86,7 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
   const silence=()=>{for(const source of activeSources){try{source.stop();}catch{/* Already ended. */}}activeSources.clear();activeOpenHat=null;};
   let activeOpenHat: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
 
-  const playSample = (instrument: SongInstrument, gainValue: number, duration?: number, metronomeClick = false, atMs?: number, panOverride?: number, velocityValue = 86) => {
+  const playSample = (instrument: SongInstrument, gainValue: number, duration?: number, metronomeClick = false, atMs?: number, panOverride?: number, velocityValue = 86, targetPlayback = false) => {
     const eventAt = context.currentTime + Math.max(0, ((atMs ?? performance.now()) - performance.now()) / 1000);
     if (!metronomeClick && (mix.muted[instrument] || (mix.solo && mix.solo !== instrument))) return;
     const takes = samples[instrument];
@@ -104,7 +112,7 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
     const pitch = mix.pitch?.[instrument] ?? 0;
     const playbackRate = Math.pow(2, pitch / 12);
     source.playbackRate.setValueAtTime(playbackRate, now);
-    gain.gain.setValueAtTime(Math.max(0.0001, gainValue * (metronomeClick ? clickLevel : masterLevel * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)))), now);
+    gain.gain.setValueAtTime(Math.max(0.0001, gainValue * (metronomeClick ? clickLevel : (targetPlayback ? targetLevel : masterLevel) * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82)))), now);
     if (duration !== undefined) gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
     const panner = context.createStereoPanner?.();
     if (panner) {
@@ -116,7 +124,7 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
       const decay = Math.max(0.05, Math.min(1, mix.decay?.[instrument] ?? 1));
       if (decay < 0.999) {
         const audibleDuration = Math.max(0.04, take.duration / playbackRate * decay);
-        gain.gain.setValueAtTime(Math.max(0.0001, gainValue * masterLevel * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82))), now + audibleDuration * 0.82);
+        gain.gain.setValueAtTime(Math.max(0.0001, gainValue * (targetPlayback ? targetLevel : masterLevel) * Math.max(0, Math.min(1, mix.levels[instrument] ?? 0.82))), now + audibleDuration * 0.82);
         gain.gain.linearRampToValueAtTime(0.0001, now + audibleDuration);
         source.start(now); source.stop(now + audibleDuration + 0.005);
       } else source.start(now);
@@ -179,9 +187,11 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
     click: (accent = false) => playClick(accent),
     hit: (instrument, accent = false, velocity, choke = false) => playSample(instrument, velocity ? Math.max(0.025, Math.min(0.95, velocity / 127)) : accent ? 0.82 : 0.55, choke ? 0.12 : undefined, false, undefined, undefined, velocity ?? (accent ? 118 : 86)),
     scheduleHit: (instrument,atMs,accent=false,velocity,choke=false,pan) => playSample(instrument,velocity?Math.max(.025,Math.min(.95,velocity/127)):accent?.82:.55,choke?.12:undefined,false,atMs,pan,velocity??(accent?118:86)),
+    scheduleTargetHit: (instrument,atMs,accent=false,velocity) => playSample(instrument,velocity?Math.max(.025,Math.min(.95,velocity/127)):accent?.82:.55,undefined,false,atMs,undefined,velocity??(accent?118:86),true),
     scheduleClick: (atMs,accent=false) => playClick(accent, atMs),
     setMix: (settings) => { mix = settings; },
     setMasterLevel: (level) => { masterLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 1)); },
+    setTargetLevel: (level) => { targetLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 0.55)); },
     setClickLevel: (level) => { clickLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 1)); },
     setClickSound: (sound) => { clickSound = sound; },
     setCustomSample: async (instrument, blob, layer = "primary") => {

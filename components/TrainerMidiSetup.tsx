@@ -5,7 +5,7 @@ import type { Instrument, MidiArticulation } from "@/lib/types";
 
 type KitPreset = { id: string; name: string; midiMap: Record<number, Instrument | null>; midiArticulations: Record<number, MidiArticulation | null> };
 const VOICES: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
-const ARTICULATIONS: Array<[MidiArticulation | "", string]> = [["", "No articulation"], ["closed-hat", "Closed hi-hat"], ["open-hat", "Open hi-hat"], ["pedal-hat", "Hi-hat pedal"], ["foot-splash", "Foot splash"], ["ride", "Ride"], ["crash", "Crash cymbal"], ["rimshot", "Rimshot"]];
+const ARTICULATIONS: Array<[MidiArticulation | "", string]> = [["", "No articulation"], ["closed-hat", "Closed hi-hat"], ["open-hat", "Open hi-hat"], ["pedal-hat", "Hi-hat pedal"], ["foot-splash", "Foot splash"], ["ride", "Ride"], ["crash", "Crash cymbal"], ["rimshot", "Rimshot"], ["side-stick", "Side-stick"]];
 const PRESET_LIMIT = 20;
 
 function parsePresets(raw: string | null): KitPreset[] {

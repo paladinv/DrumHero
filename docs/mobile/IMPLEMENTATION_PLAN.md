@@ -2,9 +2,9 @@
 
 ## Repository and parity contract
 
-Keep web, iOS, and later Android in this repository. Follow Chord Hero's native layout, versioned shared content, stable use-case IDs, and platform-specific storage. Generate shared/mobile/v1/drum-content.json from the existing TypeScript curriculum and lesson guides. Do not make an initial commit or change Git identity; preserve unrelated uncommitted web changes.
+Keep web, iOS, and Android in this repository. Follow Chord Hero's native layout, versioned shared content, stable use-case IDs, and platform-specific storage. Generate shared/mobile/v1/drum-content.json from the existing TypeScript curriculum and lesson guides. Do not make an initial commit or change Git identity; preserve unrelated uncommitted web changes.
 
-Check in ios/DrumHero/DrumHero.xcodeproj so it opens directly, plus project.yml as its reproducible definition. Use SwiftUI and SwiftData on iOS; later use Compose, Room, and DataStore on Android. Keep domain rules native and define equivalent behavior with shared JSON and fixtures.
+Check in ios/DrumHero/DrumHero.xcodeproj so it opens directly, plus project.yml as its reproducible definition. Use SwiftUI and SwiftData on iOS; the Android starter currently uses Compose and SharedPreferences while Room, DataStore, and broader parity remain planned. Keep domain rules native and define equivalent behavior with shared JSON and fixtures.
 
 ## Milestone 1: foundation and iOS project
 
@@ -37,9 +37,9 @@ The native Song Library now includes the eight bundled original song examples, w
 
 Exit when shipped future cases pass, file conversions do not silently lose fields, and recording/export lifecycle is inspected.
 
-## Milestone 5: Android parity
+## Milestone 5: Android starter and parity
 
-Create android/ as Kotlin/Compose, targeting API 35+ to align with Chord Hero. Use Room for structured records, DataStore for preferences, native lifecycle/MIDI, and scheduled AudioTrack playback. Reuse all DHM identifiers, content, scoring/timing/file fixtures, and exception records. Follow Android layout, TalkBack, touch-target, and file/share conventions.
+The `android/` Compose app reuses shared content and WAV assets for offline lesson browsing and four-bar score-led Practice. It stores progress in SQLite, with migration from the original SharedPreferences keys, and supports reviewed archive import/export while retaining Android-unsupported fields. USB/Bluetooth MIDI input maps General MIDI percussion notes to the five core voices and offers an eight-click, per-port timing correction. Continue with Room/DataStore migration, microphone scoring, reminders, account sync, Song Library workflows, and accessibility/device validation. MIDI timing is experimental until physical validation. Reuse DHM identifiers, shared content, scoring/timing/file fixtures, and exception records. Follow Android layout, TalkBack, touch-target, and file/share conventions.
 
 Exit when applicable core and advanced cases pass at the API floor and current target, with differences documented under a DHM identifier.
 

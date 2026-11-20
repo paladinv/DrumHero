@@ -72,6 +72,8 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Drum Hero
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Drum Hero analyzes microphone levels locally to score one selected drum voice. It does not record or save audio.
+        INFOPLIST_KEY_DrumHeroSupabaseURL: $(DRUM_HERO_SUPABASE_URL)
+        INFOPLIST_KEY_DrumHeroSupabasePublishableKey: $(DRUM_HERO_SUPABASE_PUBLISHABLE_KEY)
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
     info:

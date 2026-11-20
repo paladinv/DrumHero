@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { DEFAULT_SIGHT_SETTINGS, SIGHT_LEARNING_PATH, createSightBarDrill, generateSightExercise, matchingSightGoalAttempts, nextSightLearningPathStep, normalizeSightSettings, parseSightGoal, parseSightHistory, recommendSightSettings, scoreSightAttempt, sightClassification, sightDuration, sightFingerprint, sightMeters, sightNotationBars, weakestSightBar, type SightAttempt, type SightGoal, type SightSettings } from '../../lib/sight-reading';
+import { DEFAULT_SIGHT_SETTINGS, SIGHT_LEARNING_PATH, createSightBarDrill, generateSightExercise, matchingSightGoalAttempts, nextSightLearningPathStep, normalizeSightSettings, parseSightGoal, parseSightHistory, recommendSightSettings, scoreSightAttempt, sightClassification, sightDuration, sightExerciseMeters, sightFingerprint, sightMeters, sightNotationBars, sightTotalSteps, sightArticulationVoice, weakestSightBar, type SightAttempt, type SightGoal, type SightSettings } from '../../lib/sight-reading';
 import { parseLocalBackup } from '../../lib/local-backup';
 import { learnerStorageKey } from '../../lib/learner-profiles';
 const settings = DEFAULT_SIGHT_SETTINGS;
@@ -27,6 +27,39 @@ describe('sight reading', () => {
   it('uses quarter-note BPM for odd meters', () => {
     const exercise=generateSightExercise({...settings,level:'Advanced',meter:'7/8',bpm:60,bars:2},4);
     expect(exercise.stepsPerBar).toBe(14); expect(sightDuration(exercise)).toBe(7000); expect(exercise.settings.triplets).toBe(false);
+  });
+  it('generates mixed meters with a shared subdivision and keeps bar durations aligned', () => {
+    for (const level of ['Intermediate', 'Advanced'] as const) {
+      for (let seed = 0; seed < 24; seed++) {
+        const exercise = generateSightExercise({ ...settings, level, bars: 8, mixedMeters: true, meter: level === 'Advanced' ? '7/8' : '3/4', focusRhythm: 'eighths' }, seed);
+        const meters = sightExerciseMeters(exercise);
+        expect(exercise.version).toBe(2);
+        expect(meters).toHaveLength(exercise.settings.bars);
+        expect(meters.every((meter, index) => index === 0 || meter !== meters[index - 1])).toBe(true);
+        expect(sightDuration(exercise)).toBe(meters.reduce((sum, meter) => sum + (meter === '7/8' ? 3.5 : Number(meter[0])), 0) * 60000 / exercise.settings.bpm);
+        expect(exercise.hits.every(hit => Number.isInteger(hit.step) && hit.step >= 0 && hit.step < sightTotalSteps(exercise))).toBe(true);
+      }
+    }
+  });
+  it('adds and scores one articulation cue per bar without allowing the wrong articulation to satisfy it', () => {
+    const articulations = ['closed-hat', 'open-hat', 'pedal-hat', 'foot-splash', 'ride', 'crash', 'rimshot', 'side-stick'] as const;
+    for (const articulationFocus of articulations) {
+      const exercise = generateSightExercise({ ...settings, level: 'Advanced', bars: 4, meter: '4/4', focusRhythm: 'sixteenths', articulationFocus }, 31415);
+      const targets = exercise.hits.filter(hit => hit.midiArticulationTarget === articulationFocus);
+      expect(exercise.version).toBe(3);
+      expect(targets).toHaveLength(4);
+      expect(targets.every(hit => hit.instrument === sightArticulationVoice(articulationFocus))).toBe(true);
+      const seen = new Set<string>();
+      for (const hit of exercise.hits) { const key = `${hit.step}/${hit.instrument}`; expect(seen.has(key)).toBe(false); seen.add(key); }
+      for (const step of new Set(exercise.hits.map(hit => hit.step))) expect(exercise.hits.filter(hit => hit.step === step).length).toBeLessThanOrEqual(3);
+      const attempts = exercise.hits.map(hit => ({ instrument: hit.instrument, atMs: hit.step * 60000 / exercise.settings.bpm * 4 / exercise.subdivision, ...(hit.midiArticulationTarget ? { midiArticulation: articulationFocus } : {}) }));
+      expect(scoreSightAttempt(exercise, attempts).summary.accuracy).toBe(100);
+      const incorrectAttempts = attempts.map((hit, index) => targets.some(target => target.step === exercise.hits[index].step && target.instrument === exercise.hits[index].instrument) ? { ...hit, midiArticulation: articulations.find(value => value !== articulationFocus)! } : hit);
+      const incorrect = scoreSightAttempt(exercise, incorrectAttempts);
+      expect(incorrect.summary.miss).toBe(targets.length);
+      expect(incorrect.summary.extra).toBe(targets.length);
+      expect(incorrect.summary.accuracy).toBeLessThan(100);
+    }
   });
   it('scores boundaries, misses, wrong voices, and extras without dynamics', () => {
     const e=generateSightExercise({...settings,bars:1,snareOnly:true},9);
@@ -119,5 +152,13 @@ describe('sight reading', () => {
     const enriched = { ...base, previewSeconds:0 as const, countInBars:2 as const, fluency:{quarters:96,rests:100}, assignmentTitle:'Odd meter reading', assignmentDueDate:'2026-10-31', assignmentMinimumAccuracy:85 };
     expect(parseSightHistory(JSON.stringify({version:1,attempts:[enriched]}))[0]).toMatchObject({previewSeconds:0,countInBars:2,fluency:{quarters:96,rests:100},assignmentTitle:'Odd meter reading',assignmentDueDate:'2026-10-31',assignmentMinimumAccuracy:85});
     expect(parseSightHistory(JSON.stringify({version:1,attempts:[{...enriched,assignmentMinimumAccuracy:101}]}))).toEqual([]);
+  });
+  it('accepts versioned mixed-meter and articulation attempts while rejecting incompatible versions', () => {
+    const mixedSettings = normalizeSightSettings({ ...settings, level: 'Intermediate', bars: 4, mixedMeters: true });
+    const artSettings = normalizeSightSettings({ ...settings, level: 'Advanced', articulationFocus: 'rimshot' });
+    const base = { id: 'v2', playedAt: new Date().toISOString(), seed: 5, source: 'midi' as const, inputProfile: 'midi:kit', classification: 'reading' as const, score: 80, accuracy: 80, meanOffsetMs: 0, misses: 1, extras: 0 };
+    expect(parseSightHistory(JSON.stringify({ version: 1, attempts: [{ ...base, version: 2, settings: mixedSettings }] }))).toHaveLength(1);
+    expect(parseSightHistory(JSON.stringify({ version: 1, attempts: [{ ...base, id: 'v3', version: 3, settings: artSettings }] }))).toHaveLength(1);
+    expect(parseSightHistory(JSON.stringify({ version: 1, attempts: [{ ...base, version: 1, settings: mixedSettings }, { ...base, id: 'wrong-art-version', version: 2, settings: artSettings }] }))).toEqual([]);
   });
 });

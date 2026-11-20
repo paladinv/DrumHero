@@ -29,7 +29,7 @@ export function SongLinkedPractice({ patternId, engine, targetBpm }: { patternId
         partId: result.partId,
         bpm: result.bpm,
         inputMode: result.inputMode,
-        engine: result.engine ?? "song",
+        engine,
         completePart: result.completePart,
         tempoScale: result.tempoScale,
         timing: result.timing,
@@ -37,7 +37,7 @@ export function SongLinkedPractice({ patternId, engine, targetBpm }: { patternId
         stickingChecked: result.stickingChecked
       }), latest);
       writeSongLibrary(next);
-      setMessage("Full kit practice was added to this song’s progress.");
+      setMessage(`${engine === "trainer" ? "Trainer" : "Practice Pad"} results were linked to this score in Song Library.`);
     } catch { setMessage("Practice finished, but its progress could not be saved on this device."); }
   };
   if (!loaded) return <p role="status">Loading the selected song arrangement…</p>;

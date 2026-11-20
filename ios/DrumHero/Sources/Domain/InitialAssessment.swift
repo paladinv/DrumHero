@@ -36,8 +36,8 @@ struct AssessmentProbe: Decodable, Identifiable {
         } }
         return PracticePattern(id: "assessment-\(id)-\(adaptation)", name: name, level: .beginner, description: "Assessment probe", subdivision: subdivision, beats: Double(bars * 4), defaultBpm: bpm, tempoRange: [60, 90], hits: notes)
     }
-    func notation(_ adaptation: String) -> SightExercise {
-        SightExercise(seed: 0, settings: SightSettings(bpm: bpm, bars: 1, triplets: subdivision == 12), subdivision: subdivision, beatsPerBar: 4, stepsPerBar: subdivision, hits: pattern(adaptation, bars: 1).hits)
+    func notation(_ adaptation: String, bars: Int = 1) -> SightExercise {
+        SightExercise(seed: 0, settings: SightSettings(bpm: bpm, bars: bars, triplets: subdivision == 12), subdivision: subdivision, beatsPerBar: 4, stepsPerBar: subdivision, hits: pattern(adaptation, bars: bars).hits)
     }
 }
 struct AssessmentQuestion: Decodable, Identifiable {
@@ -127,13 +127,24 @@ struct AssessmentResult: Codable, Identifiable {
     var adaptation: String
     var goal: String?
     var quizFormat: String?
+    var rhythmFirst: Bool?
     var timingCorrectionMs: Double?
     var timingCalibrated: Bool?
+    var largeNotation: Bool?
+    var slowDemonstration: Bool?
+    var extendedCountIn: Bool?
+    var largePads: Bool?
+    var spokenCountIn: Bool?
+    var hapticCountIn: Bool?
     var questionIds: [String]?
     var attempts: [AssessmentAttempt] = []
     var confirmations: [AssessmentConfirmation]?
     var reflections: [AssessmentReflection]?
     var transferAttempt: AssessmentAttempt?
+    var transferAttemptedAt: String?
+    var transferFollowUpAttempt: AssessmentAttempt?
+    var transferFollowUpAttemptedAt: String?
+    var reportedPracticeMinutes: Int?
     var internalPulseAttempt: AssessmentAttempt?
     var tempoAttempts: [AssessmentTempoAttempt]?
     var educatorComparison: AssessmentEducatorComparison?
@@ -159,10 +170,10 @@ struct AssessmentResult: Codable, Identifiable {
         func preservePrevious(_ selected: [AssessmentQuestion]) -> [AssessmentQuestion] {
             let previousIDs = Set(answers.map(\.questionId) + skipped.filter { id in content.questions.contains { $0.id == id } })
             let previous = content.questions.filter { previousIDs.contains($0.id) }
-            return Array((previous + selected.filter { !previousIDs.contains($0.id) }).prefix(4))
+            return Array((previous + selected.filter { !previousIDs.contains($0.id) }).prefix(8))
         }
         let allListening = shuffled(content.questions.filter { $0.kind == "listening" }, seed: stableSeed &+ 17)
-        if quizFormat == "audio" {
+        if quizFormat == "audio" || rhythmFirst == true {
             return preservePrevious(Array(allListening.prefix(4)))
         }
         let listening = allListening.prefix(2)
@@ -171,14 +182,31 @@ struct AssessmentResult: Codable, Identifiable {
         for pair in zip(listening, reading) { selected.append(pair.0); selected.append(pair.1) }
         return preservePrevious(selected)
     }
-    func readingSummary(_ content: AssessmentContent) -> (tier: Int?, correct: Int, answered: Int, total: Int) {
+    func readingSummary(_ content: AssessmentContent) -> (tier: Int?, correct: Int, answered: Int, total: Int, provisional: Bool, byDomain: [String: (correct: Int, answered: Int, total: Int)]) {
         let readingQuestions = questions(content).filter { $0.kind == "reading" }
         let readingAnswers = answers.filter { answer in readingQuestions.contains { $0.id == answer.questionId } }
         let correct = readingAnswers.filter { answer in readingQuestions.contains { $0.id == answer.questionId && $0.answer == answer.choice } }.count
         let tier = !readingQuestions.isEmpty && readingAnswers.count == readingQuestions.count
             ? min(3, Int((2.0 * Double(correct) / Double(readingQuestions.count)).rounded()) + 1)
             : nil
-        return (tier, correct, readingAnswers.count, readingQuestions.count)
+        var byDomain: [String: (correct: Int, answered: Int, total: Int)] = [:]
+        for domain in ["pulse", "subdivisions", "coordination"] {
+            let items = readingQuestions.filter { $0.probeId.hasPrefix(domain + "-") }
+            let itemAnswers = readingAnswers.filter { answer in items.contains { $0.id == answer.questionId } }
+            byDomain[domain] = (itemAnswers.filter { answer in items.contains { $0.id == answer.questionId && $0.answer == answer.choice } }.count, itemAnswers.count, items.count)
+        }
+        return (tier, correct, readingAnswers.count, readingQuestions.count, byDomain.values.contains(where: { $0.total == 1 }), byDomain)
+    }
+    func readingConcern(_ content: AssessmentContent) -> AssessmentQuestion? {
+        for domain in ["pulse", "subdivisions", "coordination"] {
+            let rows = questions(content).filter { $0.kind == "reading" && $0.probeId.hasPrefix(domain + "-") }
+            let answersForDomain = answers.filter { answer in rows.contains { $0.id == answer.questionId } }
+            let correct = answersForDomain.filter { answer in rows.contains { $0.id == answer.questionId && $0.answer == answer.choice } }.count
+            guard answersForDomain.count > correct, answersForDomain.count - correct > correct,
+                  let incorrect = answersForDomain.first(where: { answer in rows.contains { $0.id == answer.questionId && $0.answer != answer.choice } }) else { continue }
+            return rows.first { $0.id == incorrect.questionId }
+        }
+        return nil
     }
     mutating func selectQuestionIDs(_ content: AssessmentContent, history: [AssessmentResult]) {
         func shuffled(_ values: [AssessmentQuestion], seed: UInt32) -> [AssessmentQuestion] {
@@ -190,8 +218,39 @@ struct AssessmentResult: Codable, Identifiable {
         let listening=shuffled(content.questions.filter{$0.kind=="listening"},seed:stableSeed &+ 17)
         let reading=shuffled(content.questions.filter{$0.kind=="reading"},seed:stableSeed &+ 31)
         func choose(_ rows:[AssessmentQuestion],_ count:Int)->[AssessmentQuestion] { Array((rows.filter{!seen.contains($0.id)}+rows.filter{seen.contains($0.id)}).prefix(count)) }
-        if quizFormat=="audio" { questionIds=choose(listening,4).map(\.id) }
-        else { let audio=choose(listening,2),notation=choose(reading,3);questionIds=[audio.first?.id,notation.first?.id,audio.dropFirst().first?.id,notation.dropFirst().first?.id,notation.dropFirst(2).first?.id].compactMap{$0} }
+        if quizFormat=="audio" || rhythmFirst == true { questionIds=choose(listening,4).map(\.id) }
+        else {
+            let audio=choose(listening,2), readingPool=choose(reading,reading.count)
+            var notation: [AssessmentQuestion] = []
+            for domain in ["pulse", "subdivisions", "coordination"] {
+                if let item = readingPool.first(where: { question in question.probeId.hasPrefix(domain + "-") && !notation.contains(where: { selected in selected.id == question.id }) }) { notation.append(item) }
+            }
+            for item in readingPool where notation.count < 3 && !notation.contains(where: { $0.id == item.id }) { notation.append(item) }
+            questionIds=[audio.first?.id,notation.first?.id,audio.dropFirst().first?.id,notation.dropFirst().first?.id,notation.dropFirst(2).first?.id].compactMap{$0}
+        }
+    }
+    func readingFollowUpQuestionID(_ answeredQuestionID: String, content: AssessmentContent, history: [AssessmentResult]) -> String? {
+        guard quizFormat != "audio", rhythmFirst != true, let questionIds,
+              let question = content.questions.first(where: { $0.id == answeredQuestionID && $0.kind == "reading" }),
+              let answer = answers.first(where: { $0.questionId == answeredQuestionID }) else { return nil }
+        guard let domain = ["pulse", "subdivisions", "coordination"].first(where: { question.probeId.hasPrefix($0 + "-") }), attempts.contains(where: { $0.probeId.hasPrefix(domain + "-") }) else { return nil }
+        guard questions(content).filter({ $0.kind == "reading" && $0.probeId.hasPrefix(domain + "-") }).count < 2 else { return nil }
+        let playingTier = tier(domain), correct = answer.choice == question.answer
+        guard (playingTier >= 2 && !correct) || (playingTier <= 1 && correct) else { return nil }
+        let used = Set(questionIds)
+        let candidates = content.questions.filter { $0.kind == "reading" && $0.probeId.hasPrefix(domain + "-") && !used.contains($0.id) }
+        guard !candidates.isEmpty else { return nil }
+        let prior = Set(history.flatMap { $0.questionIds ?? $0.questions(content).map(\.id) })
+        let seedText = "\(id):\(question.id):reading-follow-up"
+        var state = seedText.unicodeScalars.reduce(UInt32(0x811c9dc5)) { ($0 ^ UInt32(truncatingIfNeeded: $1.value)) &* 0x01000193 }
+        var ordered = candidates
+        if ordered.count > 1 {
+            for index in stride(from: ordered.count - 1, through: 1, by: -1) {
+                state = state &* 1664525 &+ 1013904223
+                ordered.swapAt(index, Int(Double(state) / 4294967296 * Double(index + 1)))
+            }
+        }
+        return ordered.first(where: { !prior.contains($0.id) })?.id ?? ordered.first?.id
     }
     func probeVariantIndex(_ content: AssessmentContent) -> Int {
         guard let probe = nextProbe(content), let count = probe.alternates?.count, count > 0 else { return 0 }
@@ -218,7 +277,7 @@ struct AssessmentResult: Codable, Identifiable {
         guard let original=attempts.last(where:{$0.probeId==probeId}),let followUp=confirmations?.first(where:{$0.probeId==probeId})?.attempt else{return "Follow-up check complete."}
         return original.passed==followUp.passed ? "Consistent on the follow-up check" : "Results differed on the follow-up check"
     }
-    func microPractice(_ content:AssessmentContent)->(bpm:Int,voice:String?,focus:String,steps:[String])? {
+    func microPractice(_ content:AssessmentContent)->(bpm:Int,voice:String?,focus:String,steps:[String],probe:AssessmentProbe)? {
         guard let lesson=recommendation(content) else{return nil}
         let domain=lesson==content.lessons["basicCoordination"] || lesson==content.lessons["coordination"] || lesson==content.lessons["syncopation"] && tier("pulse")>=3 ? "coordination" : lesson==content.lessons["subdivisions"] ? "subdivisions" : lesson==content.lessons["dynamics"] ? "dynamics" : "pulse"
         guard let latest=attempts.last(where:{$0.probeId.hasPrefix(domain+"-")}),let probe=content.probes.first(where:{$0.id==latest.probeId}) else{return nil}
@@ -234,7 +293,8 @@ struct AssessmentResult: Codable, Identifiable {
         else if (latest.meanOffsetMs ?? 0)<(-18) { focus="Let the beat land before the stroke; your notes tended early." }
         else { focus="Play the groove evenly and build speed only when it feels comfortable." }
         let groove=adaptation == "single-voice" ? "same voice" : adaptation == "hands-only" ? "adapted groove" : "full groove"
-        return (bpm,voice,focus,["0–20 seconds: count the pulse aloud at \(bpm) BPM.","20–40 seconds: practice \(voice ?? domain) alone; \(focus)","40–60 seconds: add the \(groove) while keeping the same pulse."])
+        var notationProbe = probe.variant(latest.variant ?? 0); notationProbe.bpm = bpm
+        return (bpm,voice,focus,["0–20 seconds: count the pulse aloud at \(bpm) BPM.","20–40 seconds: read and practice the notation one bar at a time; \(focus)","40–60 seconds: play the full notated groove while keeping the same pulse."],notationProbe)
     }
     func nextTempoBpm(_ content: AssessmentContent) -> Int? {
         for bpm in content.tempoCheck.bpms {
@@ -247,7 +307,7 @@ struct AssessmentResult: Codable, Identifiable {
     func highestDemonstratedTempo(_ content: AssessmentContent) -> Int? {
         content.tempoCheck.bpms.filter { bpm in (tempoAttempts ?? []).contains { $0.bpm == bpm && $0.passed } }.max()
     }
-    func educatorReviewJSON(_ content: AssessmentContent) -> String? {
+    func educatorReviewJSON(_ content: AssessmentContent, practice: (rounds: Int, minutes: Int?)? = nil) -> String? {
         let attemptsForReview: [[String: Any]] = attempts.map { attempt in
             let probe = content.probes.first { $0.id == attempt.probeId }
             return ["probeId": attempt.probeId, "task": probe?.name ?? attempt.probeId, "domain": probe?.domain ?? "unknown", "tier": probe?.tier ?? 0,
@@ -259,14 +319,22 @@ struct AssessmentResult: Codable, Identifiable {
         }
         let questionsForReview: [[String: Any]] = questions(content).map { question in
             let selected = answers.first { $0.questionId == question.id }?.choice
-            return ["itemId": question.id, "kind": question.kind, "prompt": question.prompt, "choices": question.choices,
+            return ["itemId": question.id, "kind": question.kind, "prompt": question.prompt, "readingDomain": question.kind == "reading" ? String(question.probeId.split(separator: "-").first ?? "") as Any : NSNull(), "choices": question.choices,
                     "selectedChoice": selected as Any? ?? NSNull(), "answer": question.answer,
                     "correct": selected.map { $0 == question.answer } as Any? ?? NSNull()]
         }
         let reading = readingSummary(content)
         let readingTier: Any = reading.tier.map { $0 as Any } ?? NSNull()
+        let readingByDomain = reading.byDomain.mapValues { ["correct": $0.correct, "answered": $0.answered, "total": $0.total] }
+        let transferElapsedSeconds: Any = transferAttemptedAt.flatMap(Self.date).flatMap { start in transferFollowUpAttemptedAt.flatMap(Self.date).map { max(0, Int($0.timeIntervalSince(start).rounded())) as Any } } ?? NSNull()
         let transfer: Any = transferAttempt.map { attempt in
-            ["task": "Fresh groove transfer check", "probeId": attempt.probeId, "variant": attempt.variant ?? 0,
+            ["task": "Fresh groove pre-practice baseline", "probeId": attempt.probeId, "variant": attempt.variant ?? 0,
+             "score": attempt.score, "matchedPercent": attempt.accuracy, "misses": attempt.misses, "extras": attempt.extras,
+             "meanAbsoluteMs": attempt.meanAbsoluteMs as Any? ?? NSNull(), "meanOffsetMs": attempt.meanOffsetMs as Any? ?? NSNull(),
+             "timingSpreadMs": attempt.timingSpreadMs as Any? ?? NSNull(), "passed": attempt.passed] as [String: Any]
+        } ?? NSNull()
+        let transferFollowUp: Any = transferFollowUpAttempt.map { attempt in
+            ["task": "Fresh groove after-practice check", "probeId": attempt.probeId, "variant": attempt.variant ?? 0, "elapsedSinceBaselineSeconds": transferElapsedSeconds, "trainerPracticeRounds": practice?.rounds as Any? ?? NSNull(), "trainerPracticeMinutes": practice?.minutes as Any? ?? NSNull(), "reportedPracticeMinutes": reportedPracticeMinutes as Any? ?? NSNull(),
              "score": attempt.score, "matchedPercent": attempt.accuracy, "misses": attempt.misses, "extras": attempt.extras,
              "meanAbsoluteMs": attempt.meanAbsoluteMs as Any? ?? NSNull(), "meanOffsetMs": attempt.meanOffsetMs as Any? ?? NSNull(),
              "timingSpreadMs": attempt.timingSpreadMs as Any? ?? NSNull(), "passed": attempt.passed] as [String: Any]
@@ -290,18 +358,18 @@ struct AssessmentResult: Codable, Identifiable {
         }
         let confirmationsJSON:[[String:Any]]=(confirmations ?? []).map { ["probeId":$0.probeId,"passed":$0.attempt.passed,"score":$0.attempt.score,"matchedPercent":$0.attempt.accuracy,"meanAbsoluteMs":$0.attempt.meanAbsoluteMs as Any? ?? NSNull()] }
         let payload: [String: Any] = ["format": "drum-hero-assessment-review", "version": 1, "contentVersion": contentVersion as Any? ?? NSNull(),
-                                      "input": input, "adaptation": adaptation, "goal": goal ?? "balanced", "quizFormat": quizFormat ?? "visual", "endedEarly": endedEarly,
+                                      "input": input, "adaptation": adaptation, "goal": goal ?? "balanced", "quizFormat": quizFormat ?? "visual", "accessibilityOptions": ["rhythmFirst": rhythmFirst ?? false, "largeNotation": largeNotation ?? false, "slowDemonstration": slowDemonstration ?? false, "extendedCountIn": extendedCountIn ?? false, "largePads": largePads ?? false, "spokenCountIn": spokenCountIn ?? false, "hapticCountIn": hapticCountIn ?? false], "endedEarly": endedEarly,
                                       "timingCorrectionMs": timingCorrectionMs as Any? ?? NSNull(), "timingCalibrated": timingCalibrated as Any? ?? NSNull(),
-                                      "recommendedLesson": recommendation(content) as Any? ?? NSNull(), "appTiers": appTiers, "pilotCode": educatorComparison?.pilotCode as Any? ?? NSNull(), "learnerFeedback": (reflections ?? []).map { ["domain": $0.domain, "rating": $0.rating] },
-                                      "transfer": transfer, "internalPulse": internalPulse, "tempoCheck": tempoCheck, "confirmations": confirmationsJSON,
+                                      "recommendedLesson": recommendation(content) as Any? ?? NSNull(), "appTiers": appTiers, "readingSummary": ["tier": readingTier, "correct": reading.correct, "answered": reading.answered, "total": reading.total, "provisional": reading.provisional, "byDomain": readingByDomain], "pilotCode": educatorComparison?.pilotCode as Any? ?? NSNull(), "learnerFeedback": (reflections ?? []).map { ["domain": $0.domain, "rating": $0.rating] },
+                                      "transfer": transfer, "transferFollowUp": transferFollowUp, "internalPulse": internalPulse, "tempoCheck": tempoCheck, "confirmations": confirmationsJSON,
                                       "educatorComparisonTemplate": educatorTemplate,
                                       "attempts": attemptsForReview, "questions": questionsForReview]
         guard JSONSerialization.isValidJSONObject(payload), let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) else { return nil }
         return String(data: data, encoding: .utf8)
     }
     func comparisonSummary(from previous: AssessmentResult) -> String? {
-        guard previous.inputProfile == inputProfile, previous.adaptation == adaptation, previous.contentVersion == contentVersion,
-              previous.timingCalibrated == timingCalibrated,
+        guard previous.inputProfile == inputProfile, previous.adaptation == adaptation, previous.contentVersion == contentVersion, previous.quizFormat == quizFormat,
+              previous.timingCalibrated == timingCalibrated, previous.rhythmFirst == rhythmFirst, previous.largeNotation == largeNotation, previous.slowDemonstration == slowDemonstration, previous.extendedCountIn == extendedCountIn, previous.largePads == largePads, previous.spokenCountIn == spokenCountIn, previous.hapticCountIn == hapticCountIn,
               abs((previous.timingCorrectionMs ?? 0) - (timingCorrectionMs ?? 0)) < 10,
               let currentDate = Self.date(playedAt), let previousDate = Self.date(previous.playedAt), previousDate < currentDate else { return nil }
         var domains = ["pulse", "subdivisions", "coordination"].compactMap { domain -> String? in
@@ -313,6 +381,7 @@ struct AssessmentResult: Codable, Identifiable {
             return "\(domain): \(before) → \(after)"
         }
         if let before = previous.transferAttempt, let after = transferAttempt { domains.append("fresh-pattern transfer: \(before.accuracy)% → \(after.accuracy)% matched") }
+        if let before = previous.transferFollowUpAttempt, let after = transferFollowUpAttempt { domains.append("after-practice transfer: \(before.accuracy)% → \(after.accuracy)% matched") }
         if let before = previous.internalPulseAttempt, let after = internalPulseAttempt {
             domains.append("internal-pulse drift: \(Int(abs(before.dropoutDriftMs ?? 0).rounded())) ms → \(Int(abs(after.dropoutDriftMs ?? 0).rounded())) ms")
         }
@@ -372,7 +441,7 @@ struct AssessmentResult: Codable, Identifiable {
     func recommendation(_ content: AssessmentContent) -> String? {
         guard !attempts.isEmpty || !answers.isEmpty || internalPulseAttempt != nil else { return nil }
         func has(_ domain: String) -> Bool { attempts.contains { $0.probeId.hasPrefix(domain + "-") } }
-        let wrongReading = answers.contains { answer in content.questions.contains { $0.id == answer.questionId && $0.kind == "reading" && $0.answer != answer.choice } }
+        let wrongReading = readingConcern(content) != nil
         let dynamicsNeedsPractice = attempts.contains { $0.probeId == "dynamics-1" && $0.dynamicsContrast != nil && !$0.passed }
         if let pulse = internalPulseAttempt, !pulse.passed { return content.lessons["pulse"] }
         if goal == "read-notation", quizFormat != "audio", answers.contains(where: { answer in content.questions.contains { $0.id == answer.questionId && $0.kind == "reading" } }) { return content.lessons["reading"] }
@@ -433,6 +502,11 @@ struct AssessmentResult: Codable, Identifiable {
         guard let probe = content.probes.first(where: { $0.id == "transfer-1" }), let alternates = probe.alternates, !alternates.isEmpty else { return 0 }
         return Int(stableSeed % UInt32(alternates.count + 1))
     }
+    func transferFollowUpVariant(_ content: AssessmentContent) -> Int {
+        guard let baseline = transferAttempt, let probe = content.probes.first(where: { $0.id == "transfer-1" }) else { return transferVariant(content) }
+        let forms = (probe.alternates?.count ?? 0) + 1
+        return forms > 1 ? ((baseline.variant ?? transferVariant(content)) + 1) % forms : 0
+    }
     func recommendationDetails(_ content: AssessmentContent) -> (evidence: String, goal: String)? {
         guard let lesson = recommendation(content) else { return nil }
         let domain: String
@@ -442,12 +516,12 @@ struct AssessmentResult: Codable, Identifiable {
         else if lesson == content.lessons["coordination"] { domain = "coordination" }
         else if lesson == content.lessons["dynamics"] { domain = "dynamics" }
         else { domain = "pulse" }
-        let wrongReading = answers.first { answer in content.questions.contains { $0.id == answer.questionId && $0.kind == "reading" && $0.answer != answer.choice } }
+        let wrongReading = readingConcern(content)
         if lesson == content.lessons["pulse"], let dropout = internalPulseAttempt, !dropout.passed {
             let drift = Int(abs(dropout.dropoutDriftMs ?? 0).rounded())
             return ("Metronome dropout check: \(dropout.accuracy)% matched; timing drifted \(drift) ms after the click stopped.", "Keep matched timing error at or below \(Int(content.rules.meanAbsoluteMs)) ms and drift at or below \(Int(content.rules.pulseDropoutDriftMs)) ms through two quiet bars.")
         }
-        if let answer = wrongReading, let question = content.questions.first(where: { $0.id == answer.questionId }) {
+        if let question = wrongReading {
             return ("\(question.prompt) Correct answer: \(question.choices[question.answer]).", "Identify the rhythms in the notation questions, then demonstrate pulse tier 2.")
         }
         if let latest = attempts.last(where: { $0.probeId.hasPrefix(domain + "-") }), let probe = content.probes.first(where: { $0.id == latest.probeId }) {
@@ -463,14 +537,23 @@ struct AssessmentResult: Codable, Identifiable {
         return ("This is the earliest skill in the starting path without enough evidence yet.", "Complete the next \(domain) probe to check this skill.")
     }
     func valid(_ content: AssessmentContent) -> Bool {
+        let transferStart = transferAttemptedAt.flatMap(Self.date)
+        let transferEnd = transferFollowUpAttemptedAt.flatMap(Self.date)
         guard version == 1, contentVersion.map({ (1...1000).contains($0) }) ?? true, !id.isEmpty, id.count <= 100, Self.date(playedAt) != nil,
               ["keyboard", "touch", "midi"].contains(input), inputProfile.count <= 200,
               ["standard", "hands-only", "single-voice"].contains(adaptation), goal.map({ ["balanced", "play-with-others", "read-notation", "play-expressively"].contains($0) }) ?? true,
-              quizFormat.map({ ["visual", "audio"].contains($0) }) ?? true, timingCorrectionMs.map({ $0.isFinite && abs($0) <= 250 }) ?? true, attempts.count <= 20, answers.count <= 5, skipped.count <= 20,
+              quizFormat.map({ ["visual", "audio"].contains($0) }) ?? true, timingCorrectionMs.map({ $0.isFinite && abs($0) <= 250 }) ?? true, attempts.count <= 20, answers.count <= 8, skipped.count <= 20,
               Set(skipped).count == skipped.count, Set(answers.map(\.questionId)).count == answers.count else { return false }
+        guard transferAttemptedAt.map({ Self.date($0) != nil }) ?? true,
+              transferFollowUpAttemptedAt.map({ Self.date($0) != nil }) ?? true,
+              transferAttemptedAt == nil || transferAttempt != nil,
+              transferFollowUpAttemptedAt == nil || (transferFollowUpAttempt != nil && transferStart.map { start in transferEnd.map { $0 >= start } == true } == true),
+              transferFollowUpAttempt == nil || transferAttempt != nil,
+              reportedPracticeMinutes == nil || transferAttempt != nil,
+              reportedPracticeMinutes.map({ (0...600).contains($0) }) ?? true else { return false }
         let ids = content.probes.map(\.id) + content.questions.map(\.id)
         guard skipped.allSatisfy(ids.contains), answers.allSatisfy({ answer in content.questions.contains { $0.id == answer.questionId } && (0..<4).contains(answer.choice) }) else { return false }
-        if let questionIds { guard [4, 5].contains(questionIds.count), Set(questionIds).count == questionIds.count, questionIds.allSatisfy({ id in content.questions.contains { $0.id == id } }) else { return false } }
+        if let questionIds { guard (4...8).contains(questionIds.count), Set(questionIds).count == questionIds.count, questionIds.allSatisfy({ id in content.questions.contains { $0.id == id } }) else { return false } }
         if let reflections { guard reflections.count <= 3, Set(reflections.map(\.domain)).count == reflections.count, reflections.allSatisfy({ ["pulse", "subdivisions", "coordination"].contains($0.domain) && ["easy", "about-right", "hard", "input-issue"].contains($0.rating) }) else { return false } }
         var replay = self; replay.attempts = []; replay.skipped = []
         for row in attempts {
@@ -492,6 +575,14 @@ struct AssessmentResult: Codable, Identifiable {
         }
         if let row = transferAttempt {
             guard row.probeId == "transfer-1", let probe = content.probes.first(where: { $0.id == row.probeId }), row.variant.map({ (0...(probe.alternates?.count ?? 0)).contains($0) }) ?? true,
+                  (0...100).contains(row.score), (0...100).contains(row.accuracy), (0...10000).contains(row.misses), (0...10000).contains(row.extras),
+                  row.meanAbsoluteMs.map({ $0.isFinite && (0...100).contains($0) }) ?? true,
+                  row.meanOffsetMs.map({ $0.isFinite && abs($0) <= 100 }) ?? true,
+                  row.timingSpreadMs.map({ $0.isFinite && (0...100).contains($0) }) ?? true,
+                  row.dynamicsContrast == nil, row.passed == row.passes(content) else { return false }
+        }
+        if let row = transferFollowUpAttempt {
+            guard transferAttempt != nil, row.probeId == "transfer-1", let probe = content.probes.first(where: { $0.id == row.probeId }), row.variant.map({ (0...(probe.alternates?.count ?? 0)).contains($0) }) ?? true,
                   (0...100).contains(row.score), (0...100).contains(row.accuracy), (0...10000).contains(row.misses), (0...10000).contains(row.extras),
                   row.meanAbsoluteMs.map({ $0.isFinite && (0...100).contains($0) }) ?? true,
                   row.meanOffsetMs.map({ $0.isFinite && abs($0) <= 100 }) ?? true,

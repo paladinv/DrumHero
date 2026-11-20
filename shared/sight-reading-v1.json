@@ -622,5 +622,59 @@
     },
     "seed": 608,
     "fingerprint": "7/8:16:0/kick/1,0/hihat/1,3/hihat/0,4/snare/1,4/hihat/0,7/hihat/0,8/hihat/1,10/snare/0,11/hihat/0,12/kick/0,12/snare/1,12/hihat/0,14/kick/1,14/hihat/1,17/hihat/0,18/snare/1,18/hihat/0,21/hihat/0,22/hihat/1,24/snare/0,25/hihat/0,26/kick/0,26/snare/1,26/hihat/0"
+  },
+  {
+    "settings": {
+      "level": "Intermediate",
+      "bpm": 96,
+      "bars": 4,
+      "meter": "3/4",
+      "mixedMeters": true,
+      "articulationFocus": null,
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "eighths",
+      "style": "varied",
+      "density": "light"
+    },
+    "seed": 24681357,
+    "fingerprint": "3/4-4/4-3/4-4/4:8:2/hihat/0,4/hihat/0,10/snare/0,16/hihat/0,18/hihat/0,22/hihat/0,24/snare/0,26/kick/0,26/hihat/1"
+  },
+  {
+    "settings": {
+      "level": "Advanced",
+      "bpm": 112,
+      "bars": 4,
+      "meter": "5/4",
+      "mixedMeters": false,
+      "articulationFocus": "open-hat",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "sixteenths",
+      "style": "varied",
+      "density": "balanced"
+    },
+    "seed": 97531,
+    "fingerprint": "5/4:16:0/hihat/0/open-hat,0/tom/1,2/tom/0,6/crash/1,8/snare/1,9/tom/0,11/snare/0,14/tom/0,22/crash/1,28/kick/0,28/crash/1,29/snare/0,31/hihat/1/open-hat,33/hihat/0,34/snare/0,37/tom/0,38/hihat/0,40/snare/1,41/hihat/0/open-hat,43/snare/0,48/kick/0,48/hihat/0,51/tom/1,53/tom/0,54/crash/0,56/hihat/0,58/crash/1,60/hihat/1/open-hat,62/snare/1,66/tom/0,69/crash/0,70/crash/0,72/kick/0,72/crash/0,75/tom/0"
+  },
+  {
+    "settings": {
+      "level": "Advanced",
+      "bpm": 88,
+      "bars": 4,
+      "meter": "4/4",
+      "mixedMeters": true,
+      "articulationFocus": "ride",
+      "triplets": false,
+      "snareOnly": false,
+      "focusVoice": "mixed",
+      "focusRhythm": "mixed",
+      "style": "varied",
+      "density": "balanced"
+    },
+    "seed": 654321,
+    "fingerprint": "4/4-7/8-3/4-7/8:16:4/snare/0,7/snare/1,9/crash/0,10/hihat/1/ride,13/snare/0,14/hihat/0,26/tom/1,29/hihat/1/ride,30/hihat/0/ride,34/snare/0,35/crash/0,37/tom/0,40/crash/1,46/kick/0,46/tom/1,49/hihat/0/ride,50/kick/0,50/crash/0,53/hihat/1,54/tom/0,55/crash/1"
   }
 ]

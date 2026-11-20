@@ -2,6 +2,7 @@
 
 import type { TrainerRound } from "@/lib/trainer";
 import type { PracticePattern } from "@/lib/types";
+import { TrainerNotationView } from "@/components/TrainerNotationView";
 
 export type TrainerCompletedPlanStep = { stepIndex: number; round: TrainerRound };
 
@@ -90,6 +91,6 @@ export function TrainerSessionRecap({ title, startedAt, patternIds, completedSte
         <div><strong>{pattern?.name ?? "Unavailable pattern"}</strong><span>{round ? accuracy === null ? "Completed · score not comparable" : `Completed · ${accuracy}% at ${round.bpm} BPM` : "Not completed"}</span></div>
       </li>;
     })}</ol>
-    {weakest && weakestPattern && nextBpm !== null && <div className="trainer-session-next"><p>Suggested next: repeat {weakestPattern.name} at {nextBpm} BPM.</p><button type="button" className="button-secondary" disabled={disabled} onClick={() => onPractice(weakest.patternId, nextBpm)}>Practise this step</button></div>}
+    {weakest && weakestPattern && nextBpm !== null && <div className="trainer-session-next"><div><p>Suggested next: repeat {weakestPattern.name} at {nextBpm} BPM. Follow the score below.</p><TrainerNotationView pattern={weakestPattern} compact /></div><button type="button" className="button-secondary" disabled={disabled} onClick={() => onPractice(weakest.patternId, nextBpm)}>Practise this step</button></div>}
   </section>;
 }

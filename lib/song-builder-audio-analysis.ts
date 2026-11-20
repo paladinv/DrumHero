@@ -2,30 +2,44 @@ import type { DrumPart } from './song-library';
 import type { SongInstrument } from './types';
 import type { ArrangementBar } from './song-builder';
 
-export type BackingHitSuggestion = { timeSeconds: number; voice: 'kick' | 'snare' | 'hihat'; confidence: number };
+export type BackingHitSuggestion = { timeSeconds: number; voice: 'kick' | 'snare' | 'hihat' | 'openhat' | 'tom' | 'crash' | 'ride'; confidence: number; voiceConfidence?: number };
 export type BackingAudioAnalysis = { bpm: number; firstBeatSeconds: number; analyzedSeconds: number; hits: BackingHitSuggestion[] };
 export type MicrophoneOnset = { timeSeconds: number; confidence: number };
 export type ArrangementHitSuggestion = { barIndex: number; measure: number; sectionId: string; sectionName: string; partId: string; partName: string; hits: DrumPart['hits']; confidence: number };
+export type ReferenceTempoSuggestion = { anchors: Array<{ beat: number; seconds: number }>; firstBeatSeconds: number; medianBpm: number; windows: Array<{ fromSeconds: number; toSeconds: number; bpm: number }> };
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 
-function classifyHit(samples: Float32Array, sampleRate: number, timeSeconds: number): BackingHitSuggestion['voice'] {
+function classifyHit(samples: Float32Array, sampleRate: number, timeSeconds: number): { voice: BackingHitSuggestion['voice']; confidence: number } {
   const start = Math.max(0, Math.floor((timeSeconds - 0.004) * sampleRate));
   const end = Math.min(samples.length, start + Math.floor(sampleRate * 0.045));
   const lowAlpha = Math.exp(-2 * Math.PI * 150 / sampleRate);
   const highAlpha = Math.exp(-2 * Math.PI * 4200 / sampleRate);
-  let lowState = 0, highState = 0, lowEnergy = 0, midEnergy = 0, highEnergy = 0;
+  let lowState = 0, highState = 0, lowEnergy = 0, midEnergy = 0, highEnergy = 0, earlyEnergy = 0, lateEnergy = 0;
   for (let index = start; index < end; index += 1) {
     const value = samples[index] ?? 0;
     lowState = (1 - lowAlpha) * value + lowAlpha * lowState;
     highState = (1 - highAlpha) * value + highAlpha * highState;
     const low = lowState, high = value - highState, mid = value - low - high;
     lowEnergy += low * low; midEnergy += mid * mid; highEnergy += high * high;
+    if (index - start < (end - start) * 0.22) earlyEnergy += value * value;
+    else lateEnergy += value * value;
   }
   const total = lowEnergy + midEnergy + highEnergy + 1e-12;
-  if (lowEnergy / total > 0.43) return 'kick';
-  if (highEnergy / total > 0.46) return 'hihat';
-  return 'snare';
+  const low = lowEnergy / total, mid = midEnergy / total, high = highEnergy / total;
+  const tail = lateEnergy / Math.max(1e-12, earlyEnergy);
+  let voice: BackingHitSuggestion['voice'];
+  let confidence: number;
+  if (low > 0.43) { voice = 'kick'; confidence = 0.55 + Math.min(0.4, (low - 0.43) * 0.9); }
+  else if (low > 0.24 && mid > 0.27) { voice = 'tom'; confidence = 0.5 + Math.min(0.42, (low + mid - 0.51) * 0.8); }
+  else if (high > 0.48 && tail > 1.05) {
+    if (tail > 2.4 && mid > 0.22) { voice = 'crash'; confidence = 0.48 + Math.min(0.42, (tail - 2.4) * 0.08 + mid * 0.25); }
+    else if (tail > 1.45 && mid > 0.18) { voice = 'ride'; confidence = 0.48 + Math.min(0.4, (tail - 1.45) * 0.12 + mid * 0.22); }
+    else { voice = 'openhat'; confidence = 0.48 + Math.min(0.4, (tail - 1.05) * 0.2 + high * 0.2); }
+  }
+  else if (high > 0.43) { voice = 'hihat'; confidence = 0.5 + Math.min(0.42, (high - 0.43) * 0.7); }
+  else { voice = 'snare'; confidence = 0.5 + Math.min(0.38, Math.abs(mid - low) * 0.7); }
+  return { voice, confidence: clamp(confidence, 0.35, 0.94) };
 }
 
 /** Estimate pulse and transient candidates locally in the browser. These suggestions are intentionally reviewable heuristics, not a drum transcription. */
@@ -85,12 +99,71 @@ export async function analyzeBackingAudio(blob: Blob): Promise<BackingAudioAnaly
     const maxStrength = Math.max(1e-9, ...strongest.map(candidate => candidate.strength));
     const hits = strongest.map(candidate => {
       const timeSeconds = candidate.frame / 100;
-      return { timeSeconds, voice: classifyHit(mono, sampleRate, timeSeconds), confidence: clamp(candidate.strength / maxStrength, 0.25, 0.98) };
+      const classification = classifyHit(mono, sampleRate, timeSeconds);
+      return { timeSeconds, voice: classification.voice, voiceConfidence: classification.confidence, confidence: clamp(candidate.strength / maxStrength, 0.25, 0.98) };
     });
     return { bpm, firstBeatSeconds: hits[0]?.timeSeconds ?? 0, analyzedSeconds, hits };
   } finally {
     await context.close();
   }
+}
+
+/** Suggests a piecewise tempo map from local audio. The result is an editable proposal, not an automatic score alignment. */
+export async function suggestReferenceTempoMap(blob: Blob): Promise<ReferenceTempoSuggestion> {
+  const Context = window.AudioContext;
+  if (!Context) throw new Error('Audio analysis is unavailable in this browser.');
+  const context = new Context();
+  try {
+    const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+    if (buffer.duration < 8) throw new Error('Choose a reference track at least eight seconds long.');
+    if (buffer.duration > 10 * 60) throw new Error('This browser can analyze reference tracks up to ten minutes long.');
+    const samples = buffer.getChannelData(0), frameSize = Math.max(1, Math.round(buffer.sampleRate * 0.01));
+    const frames = Math.floor(samples.length / frameSize), energy = new Float32Array(frames), flux = new Float32Array(frames);
+    for (let frame = 0; frame < frames; frame += 1) {
+      const start = frame * frameSize, end = Math.min(samples.length, start + frameSize);
+      let sum = 0; for (let index = start; index < end; index += 1) sum += (samples[index] ?? 0) ** 2;
+      energy[frame] = Math.sqrt(sum / Math.max(1, end - start));
+      if (frame) flux[frame] = Math.max(0, energy[frame]! - energy[frame - 1]!);
+    }
+    const ordered = Array.from(flux).sort((a, b) => a - b);
+    const threshold = Math.max(ordered[Math.floor(ordered.length * 0.68)]! * 1.6, ordered[Math.floor(ordered.length * 0.92)]! * 0.18, 0.0004);
+    let firstFrame = -1;
+    for (let frame = 2; frame < Math.min(frames - 1, 400); frame += 1) {
+      if (flux[frame]! >= threshold && flux[frame]! >= flux[frame - 1]! && flux[frame]! >= flux[frame + 1]!) { firstFrame = frame; break; }
+    }
+    if (firstFrame < 0) throw new Error('No clear beat transient was found. Try a louder or less compressed reference track.');
+    const firstBeatSeconds = firstFrame * frameSize / buffer.sampleRate;
+    const windowSeconds = 8, usableSeconds = buffer.duration - firstBeatSeconds;
+    const windows: ReferenceTempoSuggestion['windows'] = [];
+    for (let fromSeconds = 0; fromSeconds < usableSeconds; fromSeconds += windowSeconds) {
+      const toSeconds = Math.min(usableSeconds, fromSeconds + windowSeconds);
+      if (toSeconds - fromSeconds < 4 && windows.length) break;
+      const first = Math.max(0, Math.floor((firstBeatSeconds + fromSeconds) * buffer.sampleRate / frameSize));
+      const last = Math.min(frames, Math.floor((firstBeatSeconds + toSeconds) * buffer.sampleRate / frameSize));
+      let bestBpm = 100, bestScore = -1;
+      for (let bpm = 45; bpm <= 200; bpm += 0.5) {
+        const lag = Math.max(1, Math.round(6000 / bpm));
+        let correlation = 0, currentPower = 0, priorPower = 0;
+        for (let frame = Math.max(first + lag, 1); frame < last; frame += 1) {
+          const current = flux[frame]!, prior = flux[frame - lag]!;
+          correlation += current * prior; currentPower += current * current; priorPower += prior * prior;
+        }
+        const score = correlation / Math.sqrt(currentPower * priorPower + 1e-12);
+        if (score > bestScore) { bestScore = score; bestBpm = bpm; }
+      }
+      windows.push({ fromSeconds, toSeconds, bpm: Math.round(bestBpm) });
+    }
+    if (windows.length < 1) throw new Error('Not enough steady audio was found to estimate a tempo map.');
+    const anchors: ReferenceTempoSuggestion['anchors'] = [{ beat: 0, seconds: firstBeatSeconds }];
+    let beat = 0;
+    for (const window of windows) {
+      const duration = window.toSeconds - window.fromSeconds;
+      beat += duration * window.bpm / 60;
+      anchors.push({ beat: Math.round(beat * 1000) / 1000, seconds: firstBeatSeconds + window.toSeconds });
+    }
+    const median = [...windows].map(item => item.bpm).sort((a, b) => a - b)[Math.floor(windows.length / 2)] ?? 100;
+    return { anchors, firstBeatSeconds: Math.round(firstBeatSeconds * 1000) / 1000, medianBpm: median, windows };
+  } finally { await context.close(); }
 }
 
 /** Detects likely acoustic drum strikes in a short microphone take. Results are deliberately unclassified. */

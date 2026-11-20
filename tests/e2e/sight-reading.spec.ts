@@ -7,6 +7,7 @@ test.describe('sight reading', () => {
     await page.getByRole('combobox',{name:'Bars',exact:true}).selectOption('1');
     await page.getByRole('combobox',{name:'Silent preview'}).selectOption('0');
     await page.getByRole('combobox',{name:'Count-in bars'}).selectOption('0');
+    await page.getByLabel('Play target drums during the attempt (assisted)').check();
     await expect(page.getByLabel('Play target drums during the attempt (assisted)')).toBeChecked();
     await page.getByRole('button',{name:'Start sight reading',exact:true}).click();
     await expect(page.locator('svg[aria-hidden="true"] line')).toBeVisible();

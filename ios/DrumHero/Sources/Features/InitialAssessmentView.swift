@@ -12,15 +12,12 @@ struct InitialAssessmentView: View {
     @FocusState private var keyboardFocused: Bool
     @State private var deleteID: String?
     @State private var selectedMidiSourceID = ""
-    @State private var largerNotation = false
     @State private var educatorMode = false
     @State private var teacherPulse: Int?
     @State private var teacherSubdivisions: Int?
     @State private var teacherCoordination: Int?
     @State private var teacherReading: Int?
     @State private var pilotCode = ""
-    @State private var spokenCountIn = false
-    @State private var hapticCountIn = false
     @State private var cueSpeaker = AVSpeechSynthesizer()
     @AppStorage("drumHero.nativeInputOffset.touch") private var touchCorrection = 0.0
     private var midiCorrection: Double { NativeMIDICalibration.correction(for: selectedMidiSourceID) }
@@ -61,8 +58,8 @@ struct InitialAssessmentView: View {
         .onChange(of: selectedMidiSourceID) { _, _ in midi.stop(); controller.checked = false; controller.mappingReviewed = false; controller.checkedVoices = []; controller.checkHits = 0; controller.checkVelocityMinimum = nil; controller.checkVelocityMaximum = nil }
         .onChange(of: controller.beat) { _, value in
             guard controller.phase == .countIn, value > 0 else { return }
-            if spokenCountIn && value == 1 { cueSpeaker.stopSpeaking(at: .immediate); let utterance = AVSpeechUtterance(string: "One, two, three, four"); utterance.rate = 0.48; cueSpeaker.speak(utterance) }
-            if hapticCountIn { UIImpactFeedbackGenerator(style: value == 1 ? .medium : .light).impactOccurred(intensity: value == 1 ? 0.7 : 0.35) }
+            if controller.spokenCountIn && value == 1 { cueSpeaker.stopSpeaking(at: .immediate); let phrase = "One, two, three, four"; let utterance = AVSpeechUtterance(string: controller.extendedCountIn ? "\(phrase). \(phrase)." : phrase); utterance.rate = 0.48; cueSpeaker.speak(utterance) }
+            if controller.hapticCountIn { UIImpactFeedbackGenerator(style: value == 1 ? .medium : .light).impactOccurred(intensity: value == 1 ? 0.7 : 0.35) }
         }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notice in
             if let type = notice.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt, type == AVAudioSession.InterruptionType.began.rawValue { controller.interrupt() }
@@ -103,7 +100,7 @@ struct InitialAssessmentView: View {
     }
     private func connect() {
         guard !selectedMidiSourceID.isEmpty else { controller.message = "Refresh MIDI devices and select a source first."; return }
-        midi.connectSelectedSource(selectedMidiSourceID) { voice, at, velocity, sourceID in
+        midi.connectSelectedSource(selectedMidiSourceID) { voice, at, velocity, sourceID, _ in
             controller.hit(voice, source: "midi", at: at, correctionMs: NativeMIDICalibration.correction(for: sourceID), velocity: velocity)
         }
     }
@@ -111,16 +108,31 @@ struct InitialAssessmentView: View {
         guard let since = AssessmentResult.date(row.playedAt) else { return 0 }
         let inputProfile = row.inputProfile
         let matches = trainerRounds.filter {
-            $0.patternID == patternID && $0.mode.hasPrefix("scored") && $0.playedAt > since &&
+            $0.patternID == patternID && ($0.mode == "scored" || $0.mode == "scored-adapted") && $0.playedAt > since &&
             $0.inputProfile == inputProfile && $0.assessmentAdaptation == row.adaptation &&
-            $0.timingCalibrated == row.timingCalibrated && abs(($0.timingCorrectionMs ?? 0) - (row.timingCorrectionMs ?? 0)) < 10
+            (row.timingCalibrated == nil || $0.timingCalibrated == row.timingCalibrated) && abs(($0.timingCorrectionMs ?? 0) - (row.timingCorrectionMs ?? 0)) < 10
         }.sorted { $0.playedAt > $1.playedAt }
         var streak = 0
         for round in matches {
-            guard (round.score ?? 0) >= 85, (round.accuracy ?? 0) >= 85 else { break }
+            guard (round.score ?? 0) >= 85, (round.accuracy ?? 0) >= 85, let timing = round.meanAbsoluteTimingMs, timing <= 60 else { break }
             streak += 1
         }
         return streak
+    }
+    private func transferPracticeSummary(for row: AssessmentResult) -> (rounds: Int, minutes: Int?) {
+        guard let start = row.transferAttemptedAt.flatMap(AssessmentResult.date), let end = row.transferFollowUpAttemptedAt.flatMap(AssessmentResult.date), end > start else { return (0, nil) }
+        let matches = trainerRounds.filter {
+            ($0.mode == "scored" || $0.mode == "scored-adapted") && $0.playedAt > start && $0.playedAt <= end &&
+            $0.inputProfile == row.inputProfile && $0.assessmentAdaptation == row.adaptation && (row.timingCalibrated == nil || $0.timingCalibrated == row.timingCalibrated) &&
+            abs(($0.timingCorrectionMs ?? 0) - (row.timingCorrectionMs ?? 0)) < 10
+        }
+        var seconds = 0.0
+        var allKnown = !matches.isEmpty
+        for round in matches {
+            guard let pattern = content.practicePatterns.first(where: { $0.id == round.patternID }), round.bpm > 0 else { allKnown = false; continue }
+            seconds += Double(round.repetitions) * pattern.beats * 60 / Double(round.bpm)
+        }
+        return (matches.count, allKnown ? Int((seconds / 60).rounded()) : nil)
     }
     private var setup: some View {
         GroupBox("Assessment setup") {
@@ -128,13 +140,22 @@ struct InitialAssessmentView: View {
                 Picker("Input", selection: $controller.input) { Text("Touch pads").tag("touch"); Text("Keyboard").tag("keyboard"); Text("MIDI").tag("midi") }
                 Picker("Access needs", selection: $controller.adaptation) { Text("Full kit").tag("standard"); Text("Hands only · kick mapped to tom").tag("hands-only"); Text("Single voice · one-hand friendly").tag("single-voice") }
                 Picker("Learning goal", selection: $controller.goal) { Text("Build a balanced foundation").tag("balanced"); Text("Play with others").tag("play-with-others"); Text("Read drum notation").tag("read-notation"); Text("Play expressively").tag("play-expressively") }
-                Picker("Question format", selection: $controller.quizFormat) { Text("Notation and listening").tag("visual"); Text("Audio questions only").tag("audio") }
-                if controller.quizFormat == "audio" { Text("Audio-only questions replace notation questions. Notation skill will be reported as untested.").font(.caption) }
+                Toggle("Use screen-reader-first rhythm cues", isOn: $controller.rhythmFirst)
+                if controller.rhythmFirst { Text("Playing tasks use a speech-friendly text rhythm guide instead of staff notation. Listening questions replace notation questions, and reading is reported as untested.").font(.caption) }
+                else {
+                    Picker("Question format", selection: $controller.quizFormat) { Text("Notation and listening").tag("visual"); Text("Audio questions only").tag("audio") }
+                    if controller.quizFormat == "visual" { Text("Visual mode includes listening and notation questions. A brief extra notation check may appear when a reading answer conflicts with playing evidence.").font(.caption) }
+                    if controller.quizFormat == "audio" { Text("Audio-only questions replace notation questions. Notation skill will be reported as untested.").font(.caption) }
+                }
                 Text("Hands-only maps kick to tom. Single voice keeps pulse and subdivisions on snare and skips coordination; it does not assess physical independence. Dynamics is measured only with varied MIDI velocities.").font(.caption)
                 Text("Play each requested voice in order and listen to its preview. If a MIDI drum sounds wrong, review its mapping before continuing.").font(.caption).foregroundStyle(.secondary)
-                Toggle("Use larger notation", isOn: $largerNotation)
-                Toggle("Speak the four-beat count-in", isOn: $spokenCountIn)
-                Toggle("Use haptic count-in", isOn: $hapticCountIn)
+                Toggle("Use larger notation", isOn: $controller.largeNotation)
+                Toggle("Play demonstrations more slowly", isOn: $controller.slowDemonstration)
+                Toggle("Use an eight-beat count-in", isOn: $controller.extendedCountIn)
+                Toggle("Use larger touch targets", isOn: $controller.largePads)
+                Text("These access choices change demonstrations or controls only; scored passages keep the task tempo.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Speak the four-beat count-in", isOn: $controller.spokenCountIn)
+                Toggle("Use haptic count-in", isOn: $controller.hapticCountIn)
                 DisclosureGroup("Educator review · estimate before starting") {
                     Text("Record your independent estimate before the learner sees the assessment recommendation.").font(.caption)
                     teacherLevelPicker("Pulse", selection: $teacherPulse)
@@ -184,25 +205,41 @@ struct InitialAssessmentView: View {
     }
     private var pads: some View {
         let voices = DrumVoice.allCases.filter { controller.adaptation != "single-voice" || $0 == .snare }.filter { controller.adaptation != "hands-only" || $0 != .kick }
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))]) {
-            ForEach(voices) { voice in Button(voice.title) { controller.hit(voice, source: controller.input, correctionMs: correction) }.frame(minHeight: 60).disabled(controller.input == "midi" || ((controller.stage == .tasks || controller.stage == .results && controller.active) && controller.phase != .playing)) }
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: controller.largePads ? 140 : 100))]) {
+            ForEach(voices) { voice in Button(voice.title) { controller.hit(voice, source: controller.input, correctionMs: correction) }.frame(minWidth: controller.largePads ? 130 : 90, minHeight: controller.largePads ? 100 : 60).disabled(controller.input == "midi" || ((controller.stage == .tasks || controller.stage == .results && controller.active) && controller.phase != .playing)) }
         }
     }
-    private func notation(_ probe: AssessmentProbe, adaptation: String) -> some View {
-        VStack(alignment: .leading) {
-            ScrollView(.horizontal) { SightStaff(exercise: probe.notation(adaptation), beat: nil).frame(minWidth: largerNotation ? 440 : 320, minHeight: largerNotation ? 240 : 170).scaleEffect(largerNotation ? 1.15 : 1, anchor: .leading) }
+    private func notation(_ probe: AssessmentProbe, adaptation: String, bars: Int = 1) -> some View {
+        let exercise = probe.notation(adaptation, bars: bars)
+        let description = probe.pattern(adaptation, bars: bars).hits.map { "Bar \($0.step / probe.subdivision + 1), beat \(String(format: "%.2f", Double($0.step % probe.subdivision) * 4 / Double(probe.subdivision) + 1)): \($0.instrument.title)\($0.accent ? ", accent" : "")" }.joined(separator: ". ")
+        return VStack(alignment: .leading) {
+            ScrollView(.horizontal) { SightStaff(exercise: exercise, beat: nil).accessibilityLabel("\(bars)-bar percussion notation. \(description)").frame(minWidth: controller.largeNotation ? 440 : 320, minHeight: controller.largeNotation ? 240 : 170).scaleEffect(controller.largeNotation ? 1.15 : 1, anchor: .leading) }
             DisclosureGroup("Counted note descriptions") {
-                Text(probe.pattern(adaptation, bars: 1).hits.map { "Beat \(String(format: "%.2f", Double($0.step) * 4 / Double(probe.subdivision) + 1)): \($0.instrument.title)\($0.accent ? ", accent" : "")" }.joined(separator: ". "))
+                Text(description)
             }
         }
+    }
+    private func rhythmGuide(_ probe: AssessmentProbe, adaptation: String, bars: Int = 4) -> some View {
+        let pattern = probe.pattern(adaptation, bars: bars)
+        return GroupBox("Rhythm guide · reading untested") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Follow the demonstration, then use these speech-friendly bar cues with the metronome.").font(.caption)
+                ForEach(0..<bars, id: \.self) { bar in
+                    let hits = pattern.hits.filter { Int($0.step / probe.subdivision) == bar }
+                    let phrase = hits.isEmpty ? "rest for the full bar" : hits.map { "beat \(String(format: "%.2f", Double($0.step % probe.subdivision) * 4 / Double(probe.subdivision) + 1)) \($0.instrument.title)\($0.accent ? ", accent" : "")" }.joined(separator: "; ")
+                    Text("Bar \(bar + 1): \(phrase)").accessibilityElement(children: .combine)
+                }
+            }
+        }.accessibilityElement(children: .contain)
     }
     private func probeCard(_ probe: AssessmentProbe) -> some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 Text(probe.name).font(.title2).accessibilityAddTraits(.isHeader)
                 Text("\(probe.domain) · Tier \(probe.tier) · \(probe.bpm) BPM")
-                Text("Four bars. Listen to the demonstration, follow four count-in beats, then play with the metronome.")
-                notation(probe, adaptation: controller.adaptation)
+                if controller.draft?.rhythmFirst == true { rhythmGuide(probe, adaptation: controller.adaptation) }
+                else { notation(probe, adaptation: controller.adaptation, bars: 4) }
+                Text("\(controller.draft?.rhythmFirst == true ? "Four-bar rhythm guide" : "Four-bar score") · Listen to the demonstration, follow the \(controller.extendedCountIn ? "eight-beat" : "four-beat") count-in, then play with the metronome.")
                 if controller.input == "midi" { Button("Reconnect MIDI", action: connect).disabled(controller.active) }
                 Button(controller.phase == .paused ? "Restart interrupted probe" : "Demonstrate and play") {
                     if controller.input == "midi" && !midi.hasLiveSources { controller.message = "Reconnect MIDI first."; return }
@@ -217,10 +254,16 @@ struct InitialAssessmentView: View {
         return GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 Text(question.kind == "listening" ? "Listening question" : "Notation question").font(.title2)
-                Text(question.prompt)
                 if let probe = controller.content?.probes.first(where: { $0.id == question.probeId }) {
-                    if question.kind == "reading" { notation(probe, adaptation: "single-voice") }
-                    else { Button("Play rhythm") { controller.play(correctionMs: 0, reference: probe) }.disabled(controller.active) }
+                    if question.kind == "reading" {
+                        notation(probe, adaptation: "single-voice")
+                        Text(question.prompt)
+                    } else {
+                        Text(question.prompt)
+                        Button("Play rhythm") { controller.play(correctionMs: 0, reference: probe) }.disabled(controller.active)
+                    }
+                } else {
+                    Text(question.prompt)
                 }
                 ForEach(question.shuffled(seed: seed), id: \.self) { index in Button(question.choices[index]) { controller.answer(index) }.disabled(controller.active) }
                 Button("Skip question") { controller.skip() }
@@ -252,7 +295,11 @@ struct InitialAssessmentView: View {
                 GroupBox("How did the assessed skills feel?") {
                     Text("Optional learner feedback. It is saved as context and does not change your score or tier.").font(.caption)
                     ForEach(measuredDomains, id: \.self) { domain in
-                        Picker("\(domain.capitalized) · optional", selection: Binding(get: { row.reflections?.first(where: { $0.domain == domain })?.rating ?? "" }, set: { controller.updateReflection(row, domain: domain, rating: $0) })) {
+                        let reflectionBinding = Binding<String>(
+                            get: { row.reflections?.first(where: { $0.domain == domain })?.rating ?? "" },
+                            set: { rating in controller.updateReflection(row, domain: domain, rating: rating) }
+                        )
+                        Picker("\(domain.capitalized) · optional", selection: reflectionBinding) {
                             Text("No response").tag("")
                             Text("Easy").tag("easy")
                             Text("About right").tag("about-right")
@@ -265,7 +312,7 @@ struct InitialAssessmentView: View {
             Text("Confidence reflects the number of probes, retries, and distance from the scoring cutoff. It is a guide, not a statistical guarantee.").font(.caption).foregroundStyle(.secondary)
             if let assessment = controller.content { Text("Practice tip: \(row.practiceTip(assessment))") }
             Text("Timing spread shows how much hit offsets vary; lower is steadier.").font(.caption).foregroundStyle(.secondary)
-            let previousRows = controller.store.results.filter { $0.id != row.id && $0.inputProfile == row.inputProfile && $0.adaptation == row.adaptation && $0.contentVersion == row.contentVersion && $0.timingCalibrated == row.timingCalibrated && abs(($0.timingCorrectionMs ?? 0) - (row.timingCorrectionMs ?? 0)) < 10 && (AssessmentResult.date($0.playedAt) ?? .distantPast) < (AssessmentResult.date(row.playedAt) ?? .distantFuture) }
+            let previousRows = controller.store.results.filter { $0.id != row.id && $0.inputProfile == row.inputProfile && $0.adaptation == row.adaptation && $0.contentVersion == row.contentVersion && $0.quizFormat == row.quizFormat && $0.timingCalibrated == row.timingCalibrated && $0.rhythmFirst == row.rhythmFirst && $0.largeNotation == row.largeNotation && $0.slowDemonstration == row.slowDemonstration && $0.extendedCountIn == row.extendedCountIn && $0.largePads == row.largePads && $0.spokenCountIn == row.spokenCountIn && $0.hapticCountIn == row.hapticCountIn && abs(($0.timingCorrectionMs ?? 0) - (row.timingCorrectionMs ?? 0)) < 10 && (AssessmentResult.date($0.playedAt) ?? .distantPast) < (AssessmentResult.date(row.playedAt) ?? .distantFuture) }
             if let previous = previousRows.max(by: { (AssessmentResult.date($0.playedAt) ?? .distantPast) < (AssessmentResult.date($1.playedAt) ?? .distantPast) }), let summary = row.comparisonSummary(from: previous) {
                 Text("Progress since your last comparable assessment · \(AssessmentResult.date(previous.playedAt)?.formatted(date: .abbreviated, time: .shortened) ?? previous.playedAt): \(summary)").font(.subheadline)
             }
@@ -276,9 +323,9 @@ struct InitialAssessmentView: View {
                 NavigationLink("Review input mapping and calibration") { TrainerView(content: content) }
             }
             if let assessment = controller.content {
-                let comparableRows = (controller.store.results.filter { $0.id != row.id && $0.inputProfile == row.inputProfile && $0.adaptation == row.adaptation && $0.contentVersion == row.contentVersion && $0.timingCalibrated == row.timingCalibrated && abs(($0.timingCorrectionMs ?? 0) - (row.timingCorrectionMs ?? 0)) < 10 } + [row]).sorted { (AssessmentResult.date($0.playedAt) ?? .distantPast) < (AssessmentResult.date($1.playedAt) ?? .distantPast) }
+                let comparableRows = (controller.store.results.filter { $0.id != row.id && $0.inputProfile == row.inputProfile && $0.adaptation == row.adaptation && $0.contentVersion == row.contentVersion && $0.quizFormat == row.quizFormat && $0.timingCalibrated == row.timingCalibrated && $0.rhythmFirst == row.rhythmFirst && $0.largeNotation == row.largeNotation && $0.slowDemonstration == row.slowDemonstration && $0.extendedCountIn == row.extendedCountIn && $0.largePads == row.largePads && $0.spokenCountIn == row.spokenCountIn && $0.hapticCountIn == row.hapticCountIn && abs(($0.timingCorrectionMs ?? 0) - (row.timingCorrectionMs ?? 0)) < 10 } + [row]).sorted { (AssessmentResult.date($0.playedAt) ?? .distantPast) < (AssessmentResult.date($1.playedAt) ?? .distantPast) }
                 if comparableRows.count > 1 {
-                    GroupBox("Recent comparable progress · same input, adaptation, content and timing setup") {
+                    GroupBox("Recent comparable progress · same input, adaptation, content, timing and access setup") {
                         ForEach(Array(comparableRows.suffix(6)), id: \.id) { item in
                             Text("\(AssessmentResult.date(item.playedAt)?.formatted(date: .abbreviated, time: .shortened) ?? item.playedAt) · pulse \(progressLabel(item, domain: "pulse")) · subdivisions \(progressLabel(item, domain: "subdivisions")) · coordination \(progressLabel(item, domain: "coordination"))")
                         }
@@ -305,8 +352,8 @@ struct InitialAssessmentView: View {
                     Text("Confirmation · \(confirmation.probeId): \(row.confirmationLabel(confirmation.probeId)) · \(confirmation.attempt.accuracy)% matched · \(confirmation.attempt.meanAbsoluteMs.map { "\(Int($0.rounded())) ms" } ?? "—")")
                 }
                 let reading = row.readingSummary(assessment)
-                if row.quizFormat == "audio" {
-                    Text("Reading: Not assessed in audio-only question mode.")
+                if row.quizFormat == "audio" || row.rhythmFirst == true {
+                    Text("Reading: Not assessed in audio-only or rhythm-first mode.")
                 } else if let tier = reading.tier {
                     Text("Reading: Tier \(tier)/3 · \(reading.correct)/\(reading.total) correct")
                 } else if reading.total > 0 {
@@ -314,19 +361,38 @@ struct InitialAssessmentView: View {
                 } else {
                     Text("Reading: Not tested")
                 }
+                if row.quizFormat != "audio" && row.rhythmFirst != true {
+                    Text("Reading by area: " + ["pulse", "subdivisions", "coordination"].compactMap { domain -> String? in
+                        guard let area = reading.byDomain[domain], area.total > 0 else { return nil }
+                        return "\(domain.capitalized) \(area.correct)/\(area.answered) correct (\(area.answered)/\(area.total) answered)"
+                    }.joined(separator: " · ")).font(.caption)
+                    if reading.provisional { Text("Reading evidence is provisional where only one notation question was available for an area.").font(.caption).foregroundStyle(.secondary) }
+                }
                 ForEach(row.questions(assessment)) { q in
                     let answer = row.answers.first { $0.questionId == q.id }
                     Text("\(q.kind): \(answer.map { $0.choice == q.answer ? "Correct" : "Needs practice" } ?? "Untested") · Answer: \(q.choices[q.answer])")
                 }
                 Text("Untested tasks: " + (assessment.probes.filter { p in p.domain != "transfer" && p.domain != "internal-pulse" && !row.attempts.contains { $0.probeId == p.id } }.map(\.name) + row.questions(assessment).filter { q in !row.answers.contains { $0.questionId == q.id } && !row.skipped.contains(q.id) }.map(\.prompt)).joined(separator: ", "))
-                if let transfer = row.transferAttempt {
-                    Text("Fresh-pattern check: \(transfer.accuracy)% matched · score \(transfer.score) · \(transfer.misses) misses · \(transfer.extras) extras. This checks transfer to a new groove and does not change your demonstrated tiers.")
-                } else if let fresh = assessment.probes.first(where: { $0.id == "transfer-1" }) {
-                    Button(controller.phase == .paused ? "Restart interrupted probe" : "Try a fresh-pattern check") {
-                        if controller.input == "midi" && !midi.hasLiveSources { controller.message = "Reconnect MIDI first."; return }
-                        controller.play(correctionMs: row.timingCorrectionMs ?? correction, reference: fresh, transfer: true); keyboardFocused = true
-                    }.disabled(controller.active)
-                    Text("Optional · checks how a rhythm skill transfers to a new groove.").font(.caption).foregroundStyle(.secondary)
+                if let fresh = assessment.probes.first(where: { $0.id == "transfer-1" }) {
+                    if let baseline = row.transferAttempt {
+                        Text("Pre-practice baseline: \(baseline.accuracy)% matched · score \(baseline.score) · \(baseline.meanAbsoluteMs.map { "\(Int($0.rounded())) ms" } ?? "—") timing error.")
+                    }
+                    if let baseline = row.transferAttempt, let after = row.transferFollowUpAttempt {
+                        Text("After-practice: \(after.accuracy)% matched (\(after.accuracy - baseline.accuracy >= 0 ? "+" : "")\(after.accuracy - baseline.accuracy) percentage points) · score \(after.score) · \(after.meanAbsoluteMs.map { "\(Int($0.rounded())) ms" } ?? "—") timing error.")
+                        let practice = transferPracticeSummary(for: row)
+                        Text("Checks recorded: \(row.transferAttemptedAt.flatMap(AssessmentResult.date)?.formatted(date: .abbreviated, time: .shortened) ?? "—") → \(row.transferFollowUpAttemptedAt.flatMap(AssessmentResult.date)?.formatted(date: .abbreviated, time: .shortened) ?? "—").")
+                        Text("Between these checks: \(practice.rounds) comparable scored Trainer rounds\(practice.minutes.map { " · \($0) estimated app minutes" } ?? "")\(row.reportedPracticeMinutes.map { " · \($0) minutes reported outside Drum Hero" } ?? "").").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if row.transferAttempt != nil {
+                        Stepper("Practice outside Drum Hero (optional): \(row.reportedPracticeMinutes ?? 0) minutes", value: Binding(get: { row.reportedPracticeMinutes ?? 0 }, set: { controller.updateReportedPracticeMinutes(row, minutes: $0) }), in: 0...600, step: 5)
+                    }
+                    if row.transferFollowUpAttempt == nil {
+                        Button(controller.phase == .paused ? "Restart interrupted probe" : row.transferAttempt == nil ? "Record pre-practice baseline" : "Check progress after practice") {
+                            if controller.input == "midi" && !midi.hasLiveSources { controller.message = "Reconnect MIDI first."; return }
+                            controller.play(correctionMs: row.timingCorrectionMs ?? correction, reference: fresh, transfer: row.transferAttempt == nil, transferFollowUp: row.transferAttempt != nil); keyboardFocused = true
+                        }.disabled(controller.active)
+                        Text(row.transferAttempt == nil ? "Optional · record this before starting the suggested practice plan." : "Optional · repeat after practicing; the follow-up uses a different version of the pattern.").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if let pulse = row.internalPulseAttempt {
                     Text("Internal pulse: \(pulse.passed ? "Demonstrated" : "Needs practice") · click-off timing \(pulse.clickOffMeanAbsoluteMs.map { "\(Int($0.rounded())) ms" } ?? "—") · drift \(pulse.dropoutDriftMs.map { "\(Int($0.rounded())) ms" } ?? "—"). This separate check does not change your demonstrated tiers.")
@@ -344,11 +410,11 @@ struct InitialAssessmentView: View {
                         let tries = (row.tempoAttempts ?? []).filter { $0.bpm == bpm }
                         if let latest = tries.last { Text("\(bpm) BPM · \(latest.passed ? "Demonstrated" : "Needs practice") · \(latest.accuracy)% matched · \(tries.count) attempt(s)") }
                     }
-                    if let bpm = row.nextTempoBpm(assessment), var pulse = assessment.probes.first(where: { $0.id == assessment.tempoCheck.probeId }) {
-                        pulse.bpm = bpm
+                    if let bpm = row.nextTempoBpm(assessment), let pulse = assessment.probes.first(where: { $0.id == assessment.tempoCheck.probeId }) {
                         Button("Play pulse at \(bpm) BPM\((row.tempoAttempts ?? []).contains(where: { $0.bpm == bpm }) ? " · retry" : "")") {
                             if controller.input == "midi" && !midi.hasLiveSources { controller.message = "Reconnect MIDI first."; return }
-                            controller.play(correctionMs: row.timingCorrectionMs ?? 0, reference: pulse, tempo: true); keyboardFocused = true
+                            var tempoPulse = pulse; tempoPulse.bpm = bpm
+                            controller.play(correctionMs: row.timingCorrectionMs ?? 0, reference: tempoPulse, tempo: true); keyboardFocused = true
                         }.disabled(controller.active)
                     } else if !(row.tempoAttempts ?? []).isEmpty {
                         Text("Tempo range check complete. Higher untested speeds remain unknown.")
@@ -375,6 +441,7 @@ struct InitialAssessmentView: View {
                 }
                 if let id = row.recommendation(assessment), let lesson = content.lessons.first(where: { $0.id == id }) {
                     let targetPatternID = assessment.focusPatterns[id] ?? lesson.practicePatternId ?? "first-beat"
+                    let targetPatternName = content.practicePatterns.first(where: { $0.id == targetPatternID })?.name ?? targetPatternID
                     let recheckStreak = practiceRecheckStreak(for: row, patternID: targetPatternID)
                     Text("Suggested lesson: \(lesson.title)").font(.headline)
                     if let details = row.recommendationDetails(assessment) {
@@ -382,14 +449,19 @@ struct InitialAssessmentView: View {
                         Text("Next goal: \(details.goal)")
                     }
                     if let practice = row.microPractice(assessment) {
-                        GroupBox("60-second practice plan · \(practice.bpm) BPM\(practice.voice.map { " · \($0)" } ?? "")") { ForEach(practice.steps, id: \.self) { Text($0) } }
+                        GroupBox("60-second practice example · \(practice.bpm) BPM\(practice.voice.map { " · \($0)" } ?? "")") {
+                            if row.rhythmFirst == true { rhythmGuide(practice.probe, adaptation: row.adaptation) }
+                            else { notation(practice.probe, adaptation: row.adaptation, bars: 4) }
+                            Text("This example uses an assessment phrase. Practice this skill opens the lesson pattern: \(targetPatternName).")
+                            ForEach(practice.steps, id: \.self) { Text($0) }
+                        }
                     }
                     Button("Use this starting plan") { controller.apply() }
                     NavigationLink("Practice this skill") { TrainerView(content: content, initialPatternId: targetPatternID, initialBpm: row.microPractice(assessment)?.bpm, initialAdaptation: row.adaptation, assessmentSince: AssessmentResult.date(row.playedAt), assessmentInputProfile: row.inputProfile, assessmentAdaptation: row.adaptation, assessmentCorrectionMs: row.timingCorrectionMs, assessmentTimingCalibrated: row.timingCalibrated) }
-                    Text(recheckStreak >= 3 ? "Ready for an assessment recheck · 3/3 scored rounds met the practice targets." : "\(min(recheckStreak, 3))/3 consecutive scored rounds met the 85% score and matched-hit targets.").font(.caption).foregroundStyle(.secondary)
+                    Text(recheckStreak >= 3 ? "Ready for an assessment recheck · 3/3 scored rounds met the practice targets." : "\(min(recheckStreak, 3))/3 consecutive scored rounds met the 85% score, 85% matched-hit, and 60 ms timing targets.").font(.caption).foregroundStyle(.secondary)
                     Text("Practice for a few minutes, then return here to try the fresh-pattern check. It shows transfer without changing your starting tier.").font(.caption).foregroundStyle(.secondary)
                 }
-                if let review = row.educatorReviewJSON(assessment) {
+                if let review = row.educatorReviewJSON(assessment, practice: transferPracticeSummary(for: row)) {
                     ShareLink(item: review) { Label("Share anonymous educator review", systemImage: "square.and.arrow.up") }
                     Text("The review copy omits learner name, result date, and MIDI device ID. A non-identifying pilot code is included if you supplied one.").font(.caption).foregroundStyle(.secondary)
                 }

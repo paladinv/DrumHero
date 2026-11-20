@@ -14,6 +14,7 @@
     "locales:export": "node scripts/export-localizations.mjs",
     "locales:audit": "node scripts/audit-ui-localization.mjs",
     "device-validation:summary": "node scripts/summarize-device-validation.mjs",
+    "trainer-pilot:summary": "node scripts/summarize-trainer-pilot.mjs",
     "mobile:content:validate": "node scripts/validate-mobile-content.mjs",
     "test:watch": "vitest",
     "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test --grep-invert @visual --project=chromium --project=webkit --project=mobile-chromium",

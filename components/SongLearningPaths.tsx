@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { songPartEvidenceFingerprint, type DrumSong, type SongLearningPath, type SongLearningPathStep, type SongLibraryState } from "@/lib/song-library";
+import { songCatalogReviewStatus, songPartEvidenceFingerprint, type DrumSong, type SongLearningPath, type SongLearningPathStep, type SongLibraryState } from "@/lib/song-library";
 
 type PathStep = Omit<SongLearningPathStep, "id"> & { id?: string };
 type PathMetadata = { style: string; meter: string; skill: string; difficulty: "Beginner" | "Intermediate" | "Advanced"; prerequisitePathId?: string };
@@ -48,6 +48,12 @@ const paths: BuiltInPath[] = [
   { id: "sixteenth-note-fills", title: "Syncopation into a fill", summary: "Coordinate sixteenth-note kick placements with the backbeat, then move the final beat around the toms.", style: "Rock", meter: "4/4", skill: "Sixteenth-note coordination and fills", difficulty: "Advanced", prerequisitePathId: "funk-ghost-notes", steps: [
     { songId: "example-northbound-switch", sectionId: "verse", partId: "switch-groove", label: "Keep ride time steady under syncopated kicks", targetBpm: 112, minimumScore: 72, passes: 3 },
     { songId: "example-northbound-switch", sectionId: "fill", partId: "switch-fill", label: "Finish the tom fill and land on the downbeat", targetBpm: 112, minimumScore: 70, passes: 3 }
+  ] },
+  { id: "four-bar-song-forms", title: "Hold the groove across a song form", summary: "Build stamina and clear transitions through four-bar verses, choruses, and a five-beat theme.", style: "Funk / pop / fusion", meter: "4/4 · 5/4", skill: "Long-form consistency and arrangement transitions", difficulty: "Intermediate", prerequisitePathId: "arrangement-transitions", steps: [
+    { songId: "example-velvet-echoes", sectionId: "verse", partId: "verse-pocket", label: "Keep the pocket steady through four bars", targetBpm: 94, minimumScore: 78, passes: 3 },
+    { songId: "example-velvet-echoes", sectionId: "chorus", partId: "chorus-lift", label: "Raise the dynamics at the chorus entrance", targetBpm: 94, minimumScore: 78, passes: 3 },
+    { songId: "example-lantern-arcade", sectionId: "chorus", partId: "arcade-chorus", label: "Coordinate the open-hat pickups", targetBpm: 124, minimumScore: 75, passes: 3 },
+    { songId: "example-copperline-run", sectionId: "head", partId: "five-beat-theme", label: "Keep time through four five-beat bars", targetBpm: 106, minimumScore: 70, passes: 3 }
   ] }
 ];
 function passed(state: SongLibraryState, song: DrumSong | undefined, step: PathStep) {
@@ -98,6 +104,8 @@ export function SongLearningPaths({ state, songs, save, onPractice }: { state: S
     return { step, song, count: passed(state, song, step), section: song?.sections.find(item => item.id === step.sectionId), part: song?.sections.find(item => item.id === step.sectionId)?.parts.find(item => item.id === step.partId) };
   });
   const completed = stepStates.filter(item => item.count >= item.step.passes).length;
+  const pathOriginalSongs = [...new Map(stepStates.filter(item => item.song?.bundled).map(item => [item.song!.id, item.song!] as const)).values()];
+  const reviewedPathSongs = pathOriginalSongs.filter(song => songCatalogReviewStatus(song) === "current").length;
   const pathIsComplete = (path: BuiltInPath | SongLearningPath) => path.steps.length > 0 && path.steps.every(step => passed(state, songs.find(song => song.id === step.songId), step) >= step.passes);
   const completedPathIds = new Set(available.filter(pathIsComplete).map(path => path.id));
   const prerequisite = active.prerequisitePathId ? available.find(path => path.id === active.prerequisitePathId) : undefined;
@@ -128,9 +136,11 @@ export function SongLearningPaths({ state, songs, save, onPractice }: { state: S
   return <section className="song-tool-panel song-learning-paths">
     <h3>Guided song paths</h3>
     <p>Start with curated progressions built from Drum Hero original songs, then filter by style, meter, drumming skill, and difficulty. Custom paths can use your own songs. Later steps unlock after the earlier scored passes are complete.</p>
+    <p>{paths.length} built-in paths · {customPaths.length} custom paths · {songs.filter(song => song.bundled).length} original example songs</p>
     <div className="song-form-row song-path-filters"><label>Style<select value={filterStyle} onChange={event => setFilterStyle(event.target.value)}><option>All</option>{taxonomyValues("style").map(value => <option key={value}>{value}</option>)}</select></label><label>Meter<select value={filterMeter} onChange={event => setFilterMeter(event.target.value)}><option>All</option>{[...new Set(available.flatMap(path => (path.meter ?? "").split(" · ").filter(Boolean)))].sort().map(value => <option key={value}>{value}</option>)}</select></label><label>Skill<select value={filterSkill} onChange={event => setFilterSkill(event.target.value)}><option>All</option>{taxonomyValues("skill").map(value => <option key={value}>{value}</option>)}</select></label><label>Difficulty<select value={filterDifficulty} onChange={event => setFilterDifficulty(event.target.value)}><option>All</option>{taxonomyValues("difficulty").map(value => <option key={value}>{value}</option>)}</select></label></div>
     <label>Learning path<select value={active.id} onChange={event => setActiveId(event.target.value)}>{pathOptions.map(path => <option key={path.id} value={path.id}>{path.title}{customPaths.some(item => item.id === path.id) ? " · custom" : ""}</option>)}</select></label>
     <p>{active.summary} · {completed}/{steps.length} steps complete</p>
+    {!custom && pathOriginalSongs.length > 0 && <p role="status">Catalog review for this path: {reviewedPathSongs}/{pathOriginalSongs.length} referenced original songs have a current human review. Review entries become stale after score edits; reviewer qualifications are not verified.</p>}
     <p className="song-path-taxonomy"><strong>{active.style ?? "Mixed style"}</strong> · {active.meter ?? "Mixed meter"} · {active.skill ?? "Custom skills"} · {active.difficulty ?? "Mixed difficulty"}{active.prerequisitePathId ? ` · Prerequisite: ${prerequisite?.title ?? "another path"}` : " · No prerequisite"}</p>
     {prerequisite && !prerequisiteMet && <p role="status">Complete “{prerequisite.title}” first to unlock this path. {prerequisite.steps.filter(step => passed(state, songs.find(song => song.id === step.songId), step) >= step.passes).length}/{prerequisite.steps.length} prerequisite steps complete.</p>}
     {active.prerequisitePathId && !prerequisite && <p role="status">This path references a prerequisite that was deleted. Edit the path to remove or replace it.</p>}

@@ -35,6 +35,7 @@ struct PatternHit: Codable, Hashable, Identifiable {
     var instrument: DrumVoice
     var accent = false
     var articulation: String?
+    var midiArticulationTarget: String? = nil
     var velocity: Int?
     var ghost: Bool?
     var sticking: String?
@@ -43,7 +44,7 @@ struct PatternHit: Codable, Hashable, Identifiable {
 }
 
 extension PatternHit {
-    private enum CodingKeys: String, CodingKey { case step, instrument, accent, articulation, velocity, ghost, sticking, timingOffsetMs }
+    private enum CodingKeys: String, CodingKey { case step, instrument, accent, articulation, midiArticulationTarget, velocity, ghost, sticking, timingOffsetMs }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -51,6 +52,7 @@ extension PatternHit {
         instrument = try values.decode(DrumVoice.self, forKey: .instrument)
         accent = try values.decodeIfPresent(Bool.self, forKey: .accent) ?? false
         articulation = try values.decodeIfPresent(String.self, forKey: .articulation)
+        midiArticulationTarget = try values.decodeIfPresent(String.self, forKey: .midiArticulationTarget)
         velocity = try values.decodeIfPresent(Int.self, forKey: .velocity)
         ghost = try values.decodeIfPresent(Bool.self, forKey: .ghost)
         sticking = try values.decodeIfPresent(String.self, forKey: .sticking)

@@ -1,4 +1,4 @@
-import type { DrumPart, DrumSong, SongClip, SongSection } from './song-library';
+import type { DrumLimb, DrumPart, DrumSong, SongClip, SongSection } from './song-library';
 import type { ArrangementBar } from './song-builder';
 import type { SongPartHit } from './types';
 
@@ -52,13 +52,26 @@ export function pasteSections(song:DrumSong, sections:SongSection[]):DrumSong {
 }
 export function playabilityHints(part:DrumPart) {
   const groups=new Map<number,SongPartHit[]>();for(const hit of part.hits)groups.set(hit.step,[...(groups.get(hit.step)??[]),hit]);
+  const automatic=suggestLimbAssignments(part);
+  const limbFor=(hit:SongPartHit):DrumLimb=>part.limbAssignments?.[key(hit)]??automatic[key(hit)]??'right-hand';
   return [...groups].flatMap(([step,hits])=>{
-    const hands=hits.filter(h=>h.instrument!=='kick'&&!(h.instrument==='openhat'&&h.articulation==='foot-splash'));
     const messages:string[]=[];
-    if(hands.length>2)messages.push(`${hands.length} hand strikes at once; consider a foot hi-hat or staggered hits.`);
+    const occupied=new Map<DrumLimb,SongPartHit[]>();
+    for(const hit of hits){const limb=limbFor(hit);occupied.set(limb,[...(occupied.get(limb)??[]),hit]);}
+    for(const [limb,assigned] of occupied)if(assigned.length>1)messages.push(`${assigned.length} simultaneous hits are assigned to the ${limb.replace('-', ' ')}; move one to another limb or stagger the notes.`);
     if(hits.some(h=>h.instrument==='hihat')&&hits.some(h=>h.instrument==='openhat'))messages.push('Open and closed hi-hat coincide; closing the hat will choke it.');
     return messages.map((message,index)=>({id:`${step}:${index}:${hits.map(key).join(',')}`,step,message}));
   });
+}
+export function suggestLimbAssignments(part:DrumPart):Partial<Record<string,DrumLimb>> {
+  const handOrder=[...part.hits].filter(hit=>hit.instrument!=='kick'&&!(hit.instrument==='openhat'&&hit.articulation==='foot-splash')).sort((a,b)=>a.step-b.step||a.instrument.localeCompare(b.instrument));
+  const inferred=new Map(handOrder.map((hit,index)=>[key(hit),hit.sticking?(hit.sticking==='R'?'right-hand':'left-hand') as DrumLimb:index%2?'left-hand' as const:'right-hand' as const]));
+  const assignments:Partial<Record<string,DrumLimb>>={};
+  for(const hit of part.hits){
+    const limb:DrumLimb=hit.instrument==='kick'?'right-foot':hit.instrument==='openhat'&&hit.articulation==='foot-splash'?'left-foot':inferred.get(key(hit))??'right-hand';
+    assignments[key(hit)]=limb;
+  }
+  return assignments;
 }
 export function suggestSticking(part:DrumPart):DrumPart {
   const hands=part.hits.filter(h=>h.instrument!=='kick'&&h.articulation!=='foot-splash').sort((a,b)=>a.step-b.step);

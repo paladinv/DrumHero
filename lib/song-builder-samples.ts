@@ -38,6 +38,21 @@ export async function readCustomSampleRecords() {
   return await transact<CustomSampleRecord[]>("readonly", (store) => store.getAll());
 }
 
+export async function replaceCustomSampleRecords(records: CustomSampleRecord[]) {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, "readwrite");
+      const store = transaction.objectStore(STORE);
+      store.clear();
+      records.forEach(record => store.put(record));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("Could not restore the custom kit samples."));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Custom kit sample restore was interrupted."));
+    });
+  } finally { database.close(); }
+}
+
 export async function readCustomSamples() {
   const records = await readCustomSampleRecords();
   return Object.fromEntries(records.map((record) => [record.instrument, { primary: record.blob, ...(record.softBlob ? { soft: record.softBlob } : {}), ...(record.accentBlob ? { accent: record.accentBlob } : {}) }])) as Partial<Record<SongInstrument, CustomSampleLayers>>;

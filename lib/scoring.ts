@@ -34,11 +34,11 @@ export function summarizeHits(hits: RatedHit[], patternId: string, patternName: 
   return { id: `${patternId}-${playedAt}`, patternId, patternName, bpm, playedAt, score, accuracy, ...counts, maxCombo };
 }
 
-export function findClosestExpected(now: number, expected: Array<{ at: number; instrument: Instrument; matched: boolean }>, instrument: Instrument) {
+export function findClosestExpected<T extends { at: number; instrument: Instrument; matched: boolean }>(now: number, expected: T[], instrument: Instrument, accepts?: (hit: T) => boolean) {
   let bestIndex = -1;
   let bestOffset = Number.POSITIVE_INFINITY;
   expected.forEach((hit, index) => {
-    if (hit.matched || hit.instrument !== instrument) return;
+    if (hit.matched || hit.instrument !== instrument || (accepts && !accepts(hit))) return;
     const offset = now - hit.at;
     if (Math.abs(offset) < Math.abs(bestOffset)) { bestOffset = offset; bestIndex = index; }
   });

@@ -10,6 +10,13 @@ final class AssessmentController: ObservableObject {
     @Published var adaptation = "standard"
     @Published var goal = "balanced"
     @Published var quizFormat = "visual"
+    @Published var rhythmFirst = false
+    @Published var largeNotation = false
+    @Published var slowDemonstration = false
+    @Published var extendedCountIn = false
+    @Published var largePads = false
+    @Published var spokenCountIn = false
+    @Published var hapticCountIn = false
     @Published var phase = Phase.idle
     @Published var stage = Stage.setup
     @Published var beat = 0
@@ -65,11 +72,11 @@ final class AssessmentController: ObservableObject {
     }
     func begin(inputProfile: String? = nil, timingCorrectionMs: Double? = nil, timingCalibrated: Bool = false, educatorComparison: AssessmentEducatorComparison? = nil) {
         guard checked, mappingReviewed, content != nil else { return }
-        stop(); var result = AssessmentResult(input: input, inputProfile: inputProfile ?? input, adaptation: adaptation, goal: goal, quizFormat: quizFormat); result.contentVersion = content?.version; result.timingCorrectionMs = timingCorrectionMs; result.timingCalibrated = timingCalibrated; result.educatorComparison = educatorComparison; if let content { result.selectQuestionIDs(content, history: store.results) }; draft = result; saveDraft(result); stage = .tasks; message = ""
+        stop(); var result = AssessmentResult(input: input, inputProfile: inputProfile ?? input, adaptation: adaptation, goal: goal, quizFormat: quizFormat); result.contentVersion = content?.version; result.rhythmFirst = rhythmFirst; result.timingCorrectionMs = timingCorrectionMs; result.timingCalibrated = timingCalibrated; result.largeNotation = largeNotation; result.slowDemonstration = slowDemonstration; result.extendedCountIn = extendedCountIn; result.largePads = largePads; result.spokenCountIn = spokenCountIn; result.hapticCountIn = hapticCountIn; result.educatorComparison = educatorComparison; if let content { result.selectQuestionIDs(content, history: store.results) }; draft = result; saveDraft(result); stage = .tasks; message = ""
     }
     func resume() {
         guard let result = resumeDraft, let content, result.valid(content), !result.endedEarly else { return }
-        stop(); draft = result; input = result.input; adaptation = result.adaptation; goal = result.goal ?? "balanced"; quizFormat = result.quizFormat ?? "visual"; stage = .tasks; checked = true; soundEnabled = false; message = "Resumed saved assessment. Restart the current task with a fresh count-in."
+        stop(); draft = result; input = result.input; adaptation = result.adaptation; goal = result.goal ?? "balanced"; quizFormat = result.quizFormat ?? "visual"; rhythmFirst = result.rhythmFirst ?? false; largeNotation = result.largeNotation ?? false; slowDemonstration = result.slowDemonstration ?? false; extendedCountIn = result.extendedCountIn ?? false; largePads = result.largePads ?? false; spokenCountIn = result.spokenCountIn ?? false; hapticCountIn = result.hapticCountIn ?? false; stage = .tasks; checked = true; soundEnabled = false; message = "Resumed saved assessment. Restart the current task with a fresh count-in."
     }
     func retake() { stop(); clearDraft(); stage = .setup; draft = nil; checked = false; mappingReviewed = false; checkedVoices = []; checkHits = 0; checkVelocityMinimum = nil; checkVelocityMaximum = nil; soundEnabled = false; message = "" }
     func skip() {
@@ -78,8 +85,10 @@ final class AssessmentController: ObservableObject {
         draft = result; saveDraft(result); advance()
     }
     func answer(_ choice: Int) {
-        guard var result = draft, let question else { return }; stop()
-        result.answers.append(AssessmentAnswer(questionId: question.id, choice: choice)); draft = result; saveDraft(result); advance()
+        guard var result = draft, let question, let content else { return }; stop()
+        result.answers.append(AssessmentAnswer(questionId: question.id, choice: choice))
+        if let followUp = result.readingFollowUpQuestionID(question.id, content: content, history: store.results) { result.questionIds = (result.questionIds ?? []) + [followUp] }
+        draft = result; saveDraft(result); advance()
     }
     private func advance() { if probe == nil && question == nil { finish() } }
     func finish(early: Bool = false) {
@@ -123,37 +132,41 @@ final class AssessmentController: ObservableObject {
         if let notes { comparison.disagreementNotes = String(notes.prefix(1000)) }
         updated.educatorComparison = comparison; update(updated)
     }
+    func updateReportedPracticeMinutes(_ row: AssessmentResult, minutes: Int?) {
+        guard minutes.map({ (0...600).contains($0) }) ?? true else { return }
+        var updated = row; updated.reportedPracticeMinutes = minutes; update(updated)
+    }
     func delete(_ id: String) {
         var next = store; next.results.removeAll { $0.id == id }; if next.appliedId == id { next.appliedId = nil }; persist(next)
         if draft?.id == id { retake() }
     }
-    func show(_ row: AssessmentResult) { stop(); input = row.input; adaptation = row.adaptation; goal = row.goal ?? "balanced"; quizFormat = row.quizFormat ?? "visual"; draft = row; stage = .results }
+    func show(_ row: AssessmentResult) { stop(); input = row.input; adaptation = row.adaptation; goal = row.goal ?? "balanced"; quizFormat = row.quizFormat ?? "visual"; rhythmFirst = row.rhythmFirst ?? false; largeNotation = row.largeNotation ?? false; slowDemonstration = row.slowDemonstration ?? false; extendedCountIn = row.extendedCountIn ?? false; largePads = row.largePads ?? false; spokenCountIn = row.spokenCountIn ?? false; hapticCountIn = row.hapticCountIn ?? false; draft = row; stage = .results }
     private func wait(until deadline: Double) async -> Bool {
         do { try await Task.sleep(for: .seconds(max(0, deadline - ProcessInfo.processInfo.systemUptime))) }
         catch { return false }
         return !Task.isCancelled
     }
-    func play(correctionMs: Double, reference: AssessmentProbe? = nil, transfer: Bool = false, internalPulse: Bool = false, tempo: Bool = false, confirmation: Bool = false, variantOverride: Int? = nil) {
+    func play(correctionMs: Double, reference: AssessmentProbe? = nil, transfer: Bool = false, transferFollowUp: Bool = false, internalPulse: Bool = false, tempo: Bool = false, confirmation: Bool = false, variantOverride: Int? = nil) {
         guard let selected = reference ?? probe, let content else { return }
-        let variantIndex = variantOverride ?? (transfer ? (draft?.transferVariant(content) ?? 0) : reference == nil ? probeVariantIndex : 0)
+        let variantIndex = variantOverride ?? (transferFollowUp ? (draft?.transferFollowUpVariant(content) ?? 0) : transfer ? (draft?.transferVariant(content) ?? 0) : reference == nil ? probeVariantIndex : 0)
         let selectedVariant = selected.variant(variantIndex)
         stop(); do { try audio.prepare() } catch { message = "Drum sounds are unavailable. Check audio output."; return }
-        let token = generation, base = ProcessInfo.processInfo.systemUptime + 0.2, beatDuration = 60 / Double(selected.bpm)
+        let token = generation, base = ProcessInfo.processInfo.systemUptime + 0.2, beatDuration = 60 / Double(selected.bpm), demonstrationBeatDuration = beatDuration * (slowDemonstration ? 4.0 / 3.0 : 1), countInBeats = extendedCountIn ? 8 : 4
         let demo = selectedVariant.pattern(reference == nil ? adaptation : "standard", bars: 1)
         phase = .demonstration
-        if reference == nil || transfer || internalPulse || tempo || confirmation { startAt = base + 8 * beatDuration; endAt = startAt + 16 * beatDuration }
+        if reference == nil || transfer || transferFollowUp || internalPulse || tempo || confirmation { startAt = base + 4 * demonstrationBeatDuration + Double(countInBeats) * beatDuration; endAt = startAt + 16 * beatDuration }
         task = Task { [weak self] in
             guard let self else { return }
             for note in demo.hits {
-                guard await wait(until: base + Double(note.step) * beatDuration * 4 / Double(selected.subdivision)), generation == token else { return }
+                guard await wait(until: base + Double(note.step) * demonstrationBeatDuration * 4 / Double(selected.subdivision)), generation == token else { return }
                 audio.play(note.instrument, velocity: note.accent ? 110 : 55)
             }
-            guard await wait(until: base + 4 * beatDuration), generation == token else { return }
-            if reference != nil && !transfer && !internalPulse && !tempo && !confirmation { stop(); return }
-            for index in 0..<20 {
-                guard await wait(until: base + Double(4 + index) * beatDuration), generation == token else { return }
-                phase = index < 4 ? .countIn : .playing; beat = index < 4 ? index + 1 : index - 3
-                if !internalPulse || index < 12 { audio.play(.hihat, velocity: index % 4 == 0 ? 110 : 65) }
+            guard await wait(until: base + 4 * demonstrationBeatDuration), generation == token else { return }
+            if reference != nil && !transfer && !transferFollowUp && !internalPulse && !tempo && !confirmation { stop(); return }
+            for index in 0..<(countInBeats + 16) {
+                guard await wait(until: base + 4 * demonstrationBeatDuration + Double(index) * beatDuration), generation == token else { return }
+                phase = index < countInBeats ? .countIn : .playing; beat = index < countInBeats ? index + 1 : index - countInBeats + 1
+                if !internalPulse || index < countInBeats + 8 { audio.play(.hihat, velocity: index % 4 == 0 ? 110 : 65) }
             }
             guard await wait(until: endAt + 0.11), generation == token, var result = draft else { return }
             let row = AssessmentRules.score(selectedVariant, adaptation: adaptation, hits: capture, content: content, variant: variantIndex)
@@ -165,9 +178,12 @@ final class AssessmentController: ObservableObject {
                 result.tempoAttempts = (result.tempoAttempts ?? []) + [AssessmentTempoAttempt(bpm: selected.bpm, attempt: row, content: content)]; draft = result; persistUpdated(result)
                 let stored = result.tempoAttempts?.last
                 message = stored?.passed == true ? "Pulse held at \(selected.bpm) BPM." : "Tempo check at \(selected.bpm) BPM needs another try or can stop here."
+            } else if transferFollowUp {
+                result.transferFollowUpAttempt = row; result.transferFollowUpAttemptedAt = ISO8601DateFormatter().string(from: .now); draft = result; persistUpdated(result)
+                message = "After-practice fresh-pattern check complete. It does not change your starting tier."
             } else if transfer {
-                result.transferAttempt = row; draft = result; persistUpdated(result)
-                message = "Fresh-pattern check complete. This does not change your starting tier."
+                result.transferAttempt = row; result.transferAttemptedAt = ISO8601DateFormatter().string(from: .now); draft = result; persistUpdated(result)
+                message = "Pre-practice fresh-pattern baseline saved. It does not change your starting tier."
             } else if internalPulse {
                 result.internalPulseAttempt = row; draft = result; persistUpdated(result)
                 message = row.passed ? "You held the pulse through the quiet bars." : "The quiet bars changed your timing. Try the pulse lesson, then repeat this check on a later assessment."

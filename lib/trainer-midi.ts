@@ -126,3 +126,61 @@ export function trainerPatternMidi(pattern: PracticePattern, bpm: number) {
   const file = [...header, 0x4d, 0x54, 0x72, 0x6b, ...uint32(track.length), ...track];
   return new Blob([new Uint8Array(file)], { type: "audio/midi" });
 }
+
+function xmlEscape(value: string) {
+  return value.replace(/[&<>\"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&apos;" })[character]!);
+}
+
+/** Export the Trainer's active score as a percussion MusicXML part. */
+export function trainerPatternMusicXml(pattern: PracticePattern, bpm: number) {
+  const meter = meterInfo("meter" in pattern && typeof pattern.meter === "string" ? pattern.meter : "4/4");
+  const [numeratorText, denominatorText] = meter.meter.split("/");
+  const numerator = Number(numeratorText), denominator = Number(denominatorText);
+  const beatsPerBar = meter.quarterNotesPerBar;
+  const stepsPerBar = Math.max(1, Math.round(beatsPerBar * pattern.subdivision / 4));
+  const bars = Math.max(1, Math.ceil(pattern.beats / beatsPerBar));
+  const divisions = 60;
+  const stepDuration = Math.round(divisions * 4 / pattern.subdivision);
+  const safeBpm = Math.max(40, Math.min(220, Math.round(bpm)));
+  const notes: Record<Instrument, { gm: number; step: string; octave: number; label: string }> = {
+    kick: { gm: 36, step: "C", octave: 3, label: "Bass Drum" },
+    snare: { gm: 38, step: "E", octave: 4, label: "Acoustic Snare" },
+    hihat: { gm: 42, step: "G", octave: 5, label: "Closed Hi-Hat" },
+    tom: { gm: 50, step: "A", octave: 4, label: "High Tom" },
+    crash: { gm: 49, step: "F", octave: 5, label: "Crash Cymbal 1" },
+  };
+  const usedVoices = [...new Set(pattern.hits.map(hit => hit.instrument))];
+  const instrumentId = (voice: Instrument) => `P1-I${usedVoices.indexOf(voice) + 1}`;
+  const scoreInstruments = usedVoices.map(voice => `<score-instrument id="${instrumentId(voice)}"><instrument-name>${notes[voice].label}</instrument-name></score-instrument><midi-instrument id="${instrumentId(voice)}"><midi-channel>10</midi-channel><midi-program>1</midi-program><midi-unpitched>${notes[voice].gm + 1}</midi-unpitched></midi-instrument>`).join("");
+  const noteType = pattern.subdivision === 4 ? "quarter" : pattern.subdivision === 8 || pattern.subdivision === 12 ? "eighth" : "16th";
+  const timeModification = pattern.subdivision === 12
+    ? "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>"
+    : pattern.subdivision === 20
+      ? "<time-modification><actual-notes>5</actual-notes><normal-notes>4</normal-notes></time-modification>"
+      : "";
+  const hitByStep = new Map<number, typeof pattern.hits>();
+  for (const hit of pattern.hits) hitByStep.set(hit.step, [...(hitByStep.get(hit.step) ?? []), hit]);
+  const measureXml = Array.from({ length: bars }, (_, bar) => {
+    const body = Array.from({ length: stepsPerBar }, (_, localStep) => {
+      const step = bar * stepsPerBar + localStep;
+      const group = (hitByStep.get(step) ?? []).filter(hit => usedVoices.includes(hit.instrument));
+      if (!group.length) return `<note><rest/><duration>${stepDuration}</duration><voice>1</voice><type>${noteType}</type>${timeModification}</note>`;
+      return group.map((hit, index) => {
+        const note = notes[hit.instrument];
+        const accents = hit.accent ? "<articulations><accent/></articulations>" : "";
+        const sticking = hit.sticking ? `<technical><other-technical>${hit.sticking}</other-technical></technical>` : "";
+        const articulation = hit.articulation ? `<other-notation type="single">${xmlEscape(hit.articulation)}</other-notation>` : "";
+        const articulationText = hit.midiArticulationTarget ? `<other-notation type="single">${xmlEscape(hit.midiArticulationTarget.replaceAll("-", " "))}</other-notation>` : "";
+        const notations = accents || sticking || articulation || articulationText
+          ? `<notations>${accents}${sticking}${articulation}${articulationText}</notations>` : "";
+        return `<note>${index ? "<chord/>" : ""}<unpitched><display-step>${note.step}</display-step><display-octave>${note.octave}</display-octave></unpitched><instrument id="${instrumentId(hit.instrument)}"/><duration>${stepDuration}</duration><voice>1</voice><type>${noteType}</type>${timeModification}<stem>${hit.instrument === "kick" || hit.instrument === "snare" || hit.instrument === "tom" ? "down" : "up"}</stem>${notations}</note>`;
+      }).join("");
+    }).join("");
+    const attributes = `<attributes><divisions>${divisions}</divisions><time><beats>${numerator}</beats><beat-type>${denominator}</beat-type></time><clef><sign>percussion</sign><line>2</line></clef></attributes>`;
+    const direction = `<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${safeBpm}</per-minute></metronome></direction-type><sound tempo="${safeBpm}"/></direction>`;
+    return `<measure number="${bar + 1}">${bar === 0 ? attributes + direction : ""}${body}</measure>`;
+  }).join("");
+  const partList = `<part-list><score-part id="P1"><part-name>Drum Set</part-name>${scoreInstruments}</score-part></part-list>`;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"><work><work-title>${xmlEscape(pattern.name)}</work-title></work><identification><creator type="composer">Drum Hero Trainer</creator></identification>${partList}<part id="P1">${measureXml}</part></score-partwise>`;
+  return new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
+}

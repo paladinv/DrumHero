@@ -37,14 +37,35 @@ export const TRAINER_STYLE_PROGRESSIONS: TrainerStyleProgression[] = [
 export type RecommendedTrainerStyleStep = {
   pattern: PracticePattern;
   bpm: number;
+  difficulty: { rank: number; label: string };
   note: string;
 };
+
+/** A visible, notation-based complexity cue for ordering style-path steps. */
+export function trainerPatternDifficulty(pattern: PracticePattern) {
+  const level = pattern.level === "Beginner" ? 1 : pattern.level === "Intermediate" ? 2 : 3;
+  const stepsPerBeat = pattern.subdivision / 4;
+  const offbeatHits = pattern.hits.filter(hit => hit.step % stepsPerBeat !== 0).length;
+  const offbeatShare = pattern.hits.length ? offbeatHits / pattern.hits.length : 0;
+  const density = pattern.beats > 0 ? pattern.hits.length / pattern.beats : 0;
+  const complexity = Math.min(5,
+    level +
+    Number(pattern.subdivision >= 16) +
+    Number(offbeatShare >= 0.3) +
+    Number(density >= 3.25) +
+    Number(Boolean(pattern.trainerFillStepRanges?.length)) +
+    Number(!Number.isInteger(pattern.beats))
+  );
+  const labels = ["Foundation", "Developing", "Steady", "Challenging", "Advanced"];
+  return { rank: complexity, label: labels[complexity - 1] };
+}
 
 /** Personalize path tempos only after two reliable rounds from the same setup. */
 export function recommendTrainerStyleSteps(path: TrainerStyleProgression, patterns: PracticePattern[], rounds: TrainerRound[]): RecommendedTrainerStyleStep[] {
   return path.steps.flatMap((step) => {
     const pattern = patterns.find((item) => item.id === step.patternId);
     if (!pattern) return [];
+    const difficulty = trainerPatternDifficulty(pattern);
 
     const history = rounds
       .filter((round) => round.patternId === pattern.id && round.mode === "scored" && round.result && !round.inputClipped && !round.uncertainDetections && round.feel === path.feel)
@@ -55,7 +76,7 @@ export function recommendTrainerStyleSteps(path: TrainerStyleProgression, patter
       : [];
 
     if (comparable.length < 2) {
-      return [{ pattern, bpm: clampStyleTempo(step.bpm, pattern), note: "Starting tempo · two reliable rounds on the same setup are needed to adapt." }];
+      return [{ pattern, bpm: clampStyleTempo(step.bpm, pattern), difficulty, note: "Starting tempo · two reliable rounds on the same setup are needed to adapt." }];
     }
 
     const averageAccuracy = comparable.reduce((sum, round) => sum + (round.result?.accuracy ?? 0), 0) / comparable.length;
@@ -67,7 +88,7 @@ export function recommendTrainerStyleSteps(path: TrainerStyleProgression, patter
       : adjustment < 0
         ? `${comparable.length} reliable rounds · ${Math.round(averageAccuracy)}% average · start ${Math.abs(adjustment)} BPM slower.`
         : `${comparable.length} reliable rounds · ${Math.round(averageAccuracy)}% average · hold the recent tempo.`;
-    return [{ pattern, bpm, note }];
+    return [{ pattern, bpm, difficulty, note }];
   });
 }
 

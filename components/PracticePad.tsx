@@ -13,6 +13,7 @@ import { DrumKitCanvas, type DrumKitCanvasHandle } from "./DrumKitCanvas";
 import { SongLinkedPractice } from "./SongLinkedPractice";
 import { useLocalization } from "./LocalizationProvider";
 import { localizedPattern } from "@/lib/teaching-pattern-display";
+import { TrainerNotationView } from "./TrainerNotationView";
 
 type Mode="idle"|"loading"|"count-in"|"playing"|"paused"|"results";
 type ExpectedHit={at:number;instrument:Instrument;matched:boolean};
@@ -59,6 +60,7 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
   const kitRef=useRef<DrumKitCanvasHandle>(null);
   const {t,formatNumber,locale}=useLocalization();
   const displayedPattern=localizedPattern(pattern,locale);
+  const notationPattern=useMemo(()=>({...pattern,name:displayedPattern.name}),[displayedPattern.name,pattern]);
   const totalSteps=pattern.beats*(pattern.subdivision/4);
 
   const clearClock=useCallback(()=>{if(intervalRef.current){clearInterval(intervalRef.current);intervalRef.current=null}},[]);
@@ -142,7 +144,8 @@ export function PracticePad({initialPatternId}:{initialPatternId?:string}){
       <div className="practice-stage">
         <div className="stage-top"><div><span className="label">{t(pattern.level)} · {formatNumber(pattern.subdivision)}th notes</span><h2>{displayedPattern.name}</h2></div><div className={`mode-pill mode-${mode}`}>{t(mode)}</div></div>
         <p>{displayedPattern.description}</p>
-        <div className="timeline" style={{gridTemplateColumns:`repeat(${totalSteps},minmax(30px,1fr))`}} aria-label="Pattern timeline">{Array.from({length:totalSteps},(_,step)=>{const stepHits=pattern.hits.filter((item)=>item.step===step);return <div className={step===playhead?"timeline-step active":"timeline-step"} key={step}><span>{step+1}</span>{stepHits.map((target,index)=><i className={`voice-${target.instrument}`} title={target.instrument} key={`${target.instrument}-${index}`}>{target.instrument.slice(0,1).toUpperCase()}</i>)}</div>})}</div>
+        <TrainerNotationView pattern={notationPattern} currentStep={(mode === "playing" || mode === "paused") && playhead >= 0 ? playhead : undefined} showRhythmStems />
+        <details className="practice-grid-fallback"><summary>{t("Show numbered step grid")}</summary><div className="timeline" role="group" style={{gridTemplateColumns:`repeat(${totalSteps},minmax(30px,1fr))`}} aria-label={t("Pattern timeline")}>{Array.from({length:totalSteps},(_,step)=>{const stepHits=pattern.hits.filter((item)=>item.step===step);const voices=stepHits.map((target)=>t(target.instrument==="hihat"?"Hi-hat":target.instrument[0]!.toUpperCase()+target.instrument.slice(1))).join(", ");return <div role="group" aria-label={`${t("Step")} ${formatNumber(step+1)}: ${voices||t("Rest")}`} className={step===playhead?"timeline-step active":"timeline-step"} key={step}><span>{formatNumber(step+1)}</span>{stepHits.map((target,index)=><i className={`voice-${target.instrument}`} aria-hidden="true" key={`${target.instrument}-${index}`}>{target.instrument.slice(0,1).toUpperCase()}</i>)}</div>})}</div></details>
         <DrumKitCanvas ref={kitRef} compact interactive={false} label="Practice pad 3D drum kit" />
         <div className="transport">{mode==="idle"||mode==="results"?<button id="start-btn" className="button" onClick={(event)=>{event.currentTarget.blur();start()}}>{mode==="results"?t("Try again"):t("Start 4-count")}</button>:null}{mode==="playing"?<button className="button" onClick={pause}>{t("Pause")}</button>:null}{mode==="paused"?<button className="button" onClick={resume}>{t("Resume")}</button>:null}<button className="button-secondary" onClick={reset} disabled={mode==="idle"}>{t("Reset")}</button><span className="audio-status" role="status">{audioMessage}</span></div>
         {mode==="count-in"?<div className="count-in" role="status" aria-live="assertive"><span>{t("Get ready")}</span><strong>{countIn}</strong></div>:null}

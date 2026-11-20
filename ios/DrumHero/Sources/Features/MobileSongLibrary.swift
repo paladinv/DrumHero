@@ -258,6 +258,7 @@ struct MobileSongLibraryScreen: View {
     @State private var importWarnings: [String] = []
     @State private var importChoices: [String: MobileSongImportChoice] = [:]
     @State private var isReviewingImport = false
+    @State private var isSyncing = false
     @State private var message = ""
     @Query(sort: \PersonalSongRecord.updatedAt, order: .reverse) private var personalSongs: [PersonalSongRecord]
 
@@ -275,11 +276,11 @@ struct MobileSongLibraryScreen: View {
     var body: some View {
         List {
             Section("Your projects") {
-                Text("Single-song Drum Hero JSON files can move arrangements between web and iOS Song Libraries. Import and export each song from its detail screen; full backups remain platform-specific.")
+                Text("Song JSON files and the opt-in account exchange can move compatible arrangements between web and iOS. Sync adds missing songs only; complete backups remain platform-specific.")
                     .font(.footnote).foregroundStyle(.secondary)
                 if personalSongs.isEmpty {
                     ContentUnavailableView("No personal songs yet", systemImage: "music.note.list",
-                                           description: Text("Create a song here or import a Drum Hero song JSON file. Projects stay on this device until you export them."))
+                                           description: Text("Create a song here or import a Drum Hero song JSON file. Projects stay on this device unless you export them or explicitly sync them with an editable web library."))
                 } else if matchingPersonalSongs.isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else {
@@ -321,6 +322,7 @@ struct MobileSongLibraryScreen: View {
                 Menu {
                     Button("New song project", systemImage: "plus") { isCreating = true }
                     Button("Import song JSON", systemImage: "square.and.arrow.down") { isImporting = true }
+                    Button("Sync with web library", systemImage: "arrow.triangle.2.circlepath") { isSyncing = true }
                     if !personalSongs.isEmpty {
                         Button("Export all personal songs", systemImage: "square.and.arrow.up") { beginExportLibraryPack() }
                     }
@@ -344,6 +346,11 @@ struct MobileSongLibraryScreen: View {
             exportDocument = nil
         }
         .sheet(isPresented: $isReviewingImport) { importReviewSheet }
+        .sheet(isPresented: $isSyncing) {
+            NavigationStack {
+                NativeSongLibrarySyncView(localSongs: personalSongs.compactMap(\.song), onSave: saveSong)
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !message.isEmpty {
                 Text(message)
@@ -546,6 +553,303 @@ struct MobileSongLibraryScreen: View {
         } catch {
             modelContext.rollback()
             message = "Could not delete this song. Try again."
+        }
+    }
+}
+
+@MainActor
+private struct NativeSongLibrarySyncView: View {
+    let localSongs: [MobileSong]
+    let onSave: (MobileSong) -> Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var email = ""
+    @State private var password = ""
+    @State private var session: PracticeCloudSession? = PracticeCloudSyncService.storedSession()
+    @State private var libraries: [NativeSongCloudLibrary] = []
+    @State private var selectedLibraryID = ""
+    @State private var reviewedSongs: [MobileSong] = []
+    @State private var reviewedRevision: Int?
+    @State private var warnings: [String] = []
+    @State private var busy = false
+    @State private var message = ""
+
+    private var selectedLibrary: NativeSongCloudLibrary? {
+        libraries.first { $0.id == selectedLibraryID }
+    }
+
+    private var versionConflicts: [(local: MobileSong, cloud: MobileSong)] {
+        reviewedSongs.compactMap { cloud in
+            guard let local = localSongs.first(where: { $0.id == cloud.id || duplicateKey($0) == duplicateKey(cloud) }),
+                  contentDiffers(local, cloud) else { return nil }
+            return (local, cloud)
+        }
+    }
+
+    var body: some View {
+        List {
+            if !PracticeCloudSyncService.configurationAvailable {
+                Section("Account sync unavailable") {
+                    Text("Set the Drum Hero Supabase URL and publishable key in the iOS build settings to enable web and iOS library sync.")
+                }
+            } else if session == nil {
+                Section("Sign in to Drum Hero") {
+                    Text("This uses the same account as web Song Library sync. Nothing is transferred until you review a library and choose an import or upload action.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    TextField("Email", text: $email).textContentType(.emailAddress).textInputAutocapitalization(.never).keyboardType(.emailAddress)
+                    SecureField("Password", text: $password).textContentType(.password)
+                    Button("Sign in") { Task { await signIn() } }.disabled(busy || email.isEmpty || password.isEmpty)
+                }
+            } else {
+                Section("Signed in") {
+                    Text(session?.email ?? "Drum Hero account")
+                    Text("Account credentials are shared with practice sync. Song transfer remains opt-in for each action.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Button("Refresh web libraries", systemImage: "arrow.clockwise") { Task { await refreshLibraries() } }.disabled(busy)
+                }
+                Section("Choose a web library") {
+                    if libraries.isEmpty {
+                        Text("No editable web libraries found. Create a library or request editor access on the web, then refresh here.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        Picker("Library", selection: $selectedLibraryID) {
+                            ForEach(libraries) { library in
+                                Text("\(library.name) · revision \(library.revision)").tag(library.id)
+                            }
+                        }
+                        .onChange(of: selectedLibraryID) { _, _ in reviewedSongs = []; reviewedRevision = nil; warnings = [] }
+                        if let library = selectedLibrary {
+                            Text("Last updated \(library.updatedAt.isEmpty ? "date unavailable" : library.updatedAt). Cloud songs stay intact when adding iOS projects.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if selectedLibrary != nil {
+                    Section("Review before importing") {
+                        Button("Read compatible songs from web") { reviewCloudSongs() }.disabled(busy)
+                        if reviewedRevision == selectedLibrary?.revision {
+                            Text("Review loaded at revision \(reviewedRevision ?? 0). Import adds only songs with no local ID or title/artist match; it never replaces a local project.")
+                                .font(.footnote)
+                            ForEach(reviewedSongs, id: \.id) { song in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("\(song.title) · \(song.artist) · \(song.sections.count) sections")
+                                    if let local = localSongs.first(where: { $0.id == song.id || duplicateKey($0) == duplicateKey(song) }) {
+                                        Text("Possible local match: \(local.title) · \(local.artist)").font(.caption).foregroundStyle(.orange)
+                                        if contentDiffers(local, song) {
+                                            Button("Import web version as separate copy") { importCloudSongAsCopy(song) }.disabled(busy)
+                                        }
+                                    }
+                                }
+                            }
+                            if reviewedSongs.isEmpty { Text("No compatible cloud songs are available to import.").font(.footnote).foregroundStyle(.secondary) }
+                            Button("Import missing songs to this device") { importReviewedSongs() }.disabled(busy || reviewedSongs.isEmpty)
+                        }
+                        ForEach(warnings.indices, id: \.self) { index in
+                            Text(warnings[index]).font(.footnote).foregroundStyle(.orange)
+                        }
+                    }
+                    Section("Add local songs to web") {
+                        Text("Uploads add compatible songs that are missing by ID and title/artist. Existing web records and web-only arrangement fields are preserved. A concurrent web edit refreshes the revision and requires you to review and retry.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Text("\(localSongs.count) personal song(s) on this device")
+                        if !versionConflicts.isEmpty {
+                            Text("Changed matches are never overwritten. Review each pair and add a separate copy if you want to keep both versions.")
+                                .font(.footnote).foregroundStyle(.orange)
+                            ForEach(versionConflicts.indices, id: \.self) { index in
+                                let pair = versionConflicts[index]
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("\(pair.local.title) · local and web versions differ")
+                                    Text("Web: \(pair.cloud.title) · \(pair.cloud.artist) · \(pair.cloud.sections.count) sections")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Button("Add local version as separate copy") { Task { await uploadConflictAsCopy(pair.local) } }
+                                        .disabled(busy || reviewedRevision != selectedLibrary?.revision)
+                                }
+                            }
+                        }
+                        Button("Review and add missing local songs") { Task { await uploadMissingSongs() } }
+                            .disabled(busy || localSongs.isEmpty || reviewedRevision != selectedLibrary?.revision)
+                    }
+                }
+            }
+            if !message.isEmpty {
+                Section("Sync status") { Text(message).accessibilityAddTraits(.updatesFrequently) }
+            }
+        }
+        .navigationTitle("Web library sync")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+        }
+        .task { if session != nil && PracticeCloudSyncService.configurationAvailable { await refreshLibraries() } }
+    }
+
+    private func signIn() async {
+        busy = true; message = ""
+        defer { busy = false }
+        do {
+            session = try await PracticeCloudSyncService.signIn(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
+            password = ""
+            await refreshLibraries()
+        } catch { message = "Could not sign in: \(error.localizedDescription)" }
+    }
+
+    private func refreshLibraries() async {
+        busy = true; message = ""
+        defer { busy = false }
+        do {
+            let next = try await PracticeCloudSyncService.songLibraries()
+            libraries = next
+            if !next.contains(where: { $0.id == selectedLibraryID }) { selectedLibraryID = next.first?.id ?? "" }
+            reviewedSongs = []; reviewedRevision = nil; warnings = []
+            if next.isEmpty { message = "No editable account libraries were found. Create one on the web or ask an owner for editor access." }
+            else { message = "Found \(next.count) editable web library/libraries. Select one and review before transferring." }
+        } catch { message = "Could not load web libraries: \(error.localizedDescription)" }
+    }
+
+    private func reviewCloudSongs() {
+        guard let library = selectedLibrary, let rawSongs = library.state["songs"] as? [[String: Any]] else {
+            message = "The selected cloud library has an unsupported song list."; return
+        }
+        do {
+            let pack: [String: Any] = ["format": MobileSongLibraryPackCodec.format, "version": 1,
+                                       "exportedAt": ISO8601DateFormatter().string(from: .now), "songs": rawSongs]
+            let data = try JSONSerialization.data(withJSONObject: pack, options: [.sortedKeys])
+            let decoded = try MobileSongLibraryPackCodec.decode(data)
+            reviewedSongs = decoded.songs
+            reviewedRevision = library.revision
+            warnings = decoded.warnings
+            message = "Review complete. Unsupported voices are skipped; web data is unchanged."
+        } catch {
+            reviewedSongs = []; reviewedRevision = library.revision
+            warnings = [error.localizedDescription]
+            message = "Cloud revision reviewed. No compatible songs were decoded; review warnings before adding local songs."
+        }
+    }
+
+    private func duplicateKey(_ song: MobileSong) -> String {
+        duplicateKey(title: song.title, artist: song.artist)
+    }
+
+    private func duplicateKey(title rawTitle: String, artist rawArtist: String) -> String {
+        let title = rawTitle.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).trimmingCharacters(in: .whitespacesAndNewlines)
+        let artist = rawArtist.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(title)|\(artist)"
+    }
+
+    private func contentDiffers(_ first: MobileSong, _ second: MobileSong) -> Bool {
+        var local = first, cloud = second
+        local.id = ""; cloud.id = ""
+        local.createdAt = nil; cloud.createdAt = nil
+        local.updatedAt = nil; cloud.updatedAt = nil
+        return local != cloud
+    }
+
+    private func importCloudSongAsCopy(_ input: MobileSong) {
+        var copy = input
+        copy.id = UUID().uuidString
+        copy.title = String(copy.title.prefix(103)) + " (web copy)"
+        guard onSave(copy) else { message = "Could not save the separate cloud copy on this device."; return }
+        message = "Added \(copy.title) as a separate local copy. The existing project was kept."
+    }
+
+    private func importReviewedSongs() {
+        var ids = Set(localSongs.map(\.id))
+        var names = Set(localSongs.map(duplicateKey))
+        var imported = 0
+        var skipped = 0
+        for song in reviewedSongs {
+            guard !ids.contains(song.id), !names.contains(duplicateKey(song)) else { skipped += 1; continue }
+            guard onSave(song) else { message = "Imported \(imported) song(s), then stopped after a local save error. Retry after checking device storage."; return }
+            ids.insert(song.id); names.insert(duplicateKey(song)); imported += 1
+        }
+        message = "Added \(imported) compatible song(s) to this device. Skipped \(skipped) duplicate(s); web library unchanged."
+    }
+
+    private func uploadMissingSongs() async {
+        guard var library = selectedLibrary, var remoteSongs = library.state["songs"] as? [[String: Any]] else { return }
+        guard reviewedRevision == library.revision else { message = "Review the latest web revision before uploading."; return }
+        busy = true; message = ""
+        defer { busy = false }
+        var remoteIDs = Set(remoteSongs.compactMap { $0["id"] as? String })
+        var remoteNames = Set(remoteSongs.compactMap { raw -> String? in
+            guard let title = raw["title"] as? String, let artist = raw["artist"] as? String else { return nil }
+            return duplicateKey(title: title, artist: artist)
+        })
+        var added = 0
+        var skipped = 0
+        do {
+            for song in localSongs {
+                guard !remoteIDs.contains(song.id), !remoteNames.contains(duplicateKey(song)) else { skipped += 1; continue }
+                let data = try MobileSongProjectCodec.encode(song)
+                guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let rawSong = envelope["song"] as? [String: Any] else {
+                    throw MobileSongProjectError.invalidSong("Could not prepare \(song.title) for cloud transfer.")
+                }
+                remoteSongs.append(rawSong)
+                remoteIDs.insert(song.id); remoteNames.insert(duplicateKey(song)); added += 1
+            }
+            guard added > 0 else { message = "No missing compatible songs to add. Skipped \(skipped) duplicate(s)."; return }
+            library.state["songs"] = remoteSongs
+            let encodedState = try JSONSerialization.data(withJSONObject: library.state, options: [.sortedKeys])
+            guard encodedState.count <= 4 * 1024 * 1024 else {
+                throw MobileSongProjectError.invalidSong("The updated library exceeds the 4 MB account library limit. Export a smaller transfer pack or choose a smaller web library.")
+            }
+            let saved = try await PracticeCloudSyncService.saveSongLibrary(id: library.id, revision: library.revision,
+                                                                             state: library.state, deviceName: "Drum Hero iOS")
+            library.revision = saved.revision
+            library.state = saved.state
+            if let index = libraries.firstIndex(where: { $0.id == library.id }) { libraries[index] = library }
+            reviewedSongs = []; reviewedRevision = nil; warnings = []
+            message = "Added \(added) song(s) to the web library. Skipped \(skipped) duplicate(s)."
+        } catch {
+            let conflict = error.localizedDescription.localizedCaseInsensitiveContains("revision conflict")
+                || error.localizedDescription.localizedCaseInsensitiveContains("40001")
+            if conflict {
+                do {
+                    libraries = try await PracticeCloudSyncService.songLibraries()
+                    reviewedSongs = []; reviewedRevision = nil; warnings = []
+                    message = "The web library changed during transfer. Its latest revision is loaded; review it again before retrying. No automatic merge was saved."
+                } catch { message = "A revision conflict occurred and the latest library could not be loaded: \(error.localizedDescription)" }
+            } else { message = "Could not add local songs to the web library: \(error.localizedDescription)" }
+        }
+    }
+
+    private func uploadConflictAsCopy(_ input: MobileSong) async {
+        guard var library = selectedLibrary, var remoteSongs = library.state["songs"] as? [[String: Any]],
+              reviewedRevision == library.revision else {
+            message = "Review the latest web revision before adding a separate copy."; return
+        }
+        busy = true; message = ""
+        defer { busy = false }
+        var copy = input
+        copy.id = UUID().uuidString
+        copy.title = String(copy.title.prefix(103)) + " (iOS copy)"
+        do {
+            let data = try MobileSongProjectCodec.encode(copy)
+            guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let rawSong = envelope["song"] as? [String: Any] else {
+                throw MobileSongProjectError.invalidSong("Could not prepare a separate copy of \(copy.title).")
+            }
+            remoteSongs.append(rawSong)
+            library.state["songs"] = remoteSongs
+            let encodedState = try JSONSerialization.data(withJSONObject: library.state, options: [.sortedKeys])
+            guard encodedState.count <= 4 * 1024 * 1024 else {
+                throw MobileSongProjectError.invalidSong("The updated library exceeds the 4 MB account library limit.")
+            }
+            let saved = try await PracticeCloudSyncService.saveSongLibrary(id: library.id, revision: library.revision,
+                                                                             state: library.state, deviceName: "Drum Hero iOS")
+            library.revision = saved.revision; library.state = saved.state
+            if let index = libraries.firstIndex(where: { $0.id == library.id }) { libraries[index] = library }
+            reviewedSongs = []; reviewedRevision = nil; warnings = []
+            message = "Added \(copy.title) as a separate web song. The existing web version was kept. Review the new revision before the next transfer."
+        } catch {
+            let conflict = error.localizedDescription.localizedCaseInsensitiveContains("revision conflict")
+                || error.localizedDescription.localizedCaseInsensitiveContains("40001")
+            if conflict {
+                do {
+                    libraries = try await PracticeCloudSyncService.songLibraries()
+                    reviewedSongs = []; reviewedRevision = nil; warnings = []
+                    message = "The web library changed during transfer. Its latest revision is loaded; review it again before retrying."
+                } catch { message = "A revision conflict occurred and the latest library could not be loaded: \(error.localizedDescription)" }
+            } else { message = "Could not add a separate copy: \(error.localizedDescription)" }
         }
     }
 }

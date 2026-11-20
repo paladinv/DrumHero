@@ -8,27 +8,35 @@ import { grooves } from "@/lib/curriculum";
 import { assertArrangementChangesAllowed, allSongs, emptySongLibrary, newSong, normalizeSong, readSongLibrary, songPartEvidenceFingerprint, writeSongLibrary, type ArrangementSaveOptions, type DrumPart, type DrumSong, type SongClip, type SongLibraryState, type SongSection } from "@/lib/song-library";
 import { learnerProfileIdFromBrowser } from "@/lib/learner-profiles";
 import { buildArrangementBars, BUILDER_VOICES, cleanMeterLabel, gridBeatLabel, grooveToPart, humanizeArrangementBars, makeBlankPart, meterBeats, partStepCount, sectionClips, varyDrumPart, VOICE_LABEL as BASE_VOICE_LABEL, type ArrangementBar, type GrooveVariation } from "@/lib/song-builder";
-import { arrangementMidi, arrangementMusicXml, arrangementStemsZip, arrangementWav, canvasPng, canvasesPdf, drawNotationPage, paginateNotation, notationBarAtPoint, notationStaffStepAtPoint, SHEET_WIDTH, SHEET_HEIGHT, type NotationView } from "@/lib/song-builder-export";
-import { DEFAULT_SONG_BUILDER_SETTINGS, normalizeSongBuilderSettings, readSongBuilderSettings, SONG_INSTRUMENTS, writeSongBuilderSettings, type SongBuilderExportPreset, type SongBuilderKitPreset, type SongBuilderPerformancePreset, type SongBuilderSettings } from "@/lib/song-builder-settings";
+import { arrangementMidi, arrangementMusicXml, arrangementStemsZip, arrangementWav, canvasPng, canvasesPdf, drawNotationPage, paginateNotation, notationBarAtPoint, notationCellAtPoint, SHEET_WIDTH, SHEET_HEIGHT, type NotationView } from "@/lib/song-builder-export";
+import { BUILTIN_MIDI_MAP_PRESETS, DEFAULT_SONG_BUILDER_SETTINGS, normalizeSongBuilderSettings, readSongBuilderSettings, SONG_INSTRUMENTS, writeSongBuilderSettings, type SongBuilderExportPreset, type SongBuilderKitPreset, type SongBuilderMidiControlAction, type SongBuilderMidiMapPreset, type SongBuilderPerformancePreset, type SongBuilderSettings } from "@/lib/song-builder-settings";
 import { createSongFromMidiPreview, previewMidiImport, type MidiImportPreview, type MidiTrackVoiceMapping, type MidiVoiceMapping } from "@/lib/song-builder-import";
 import { SongBuilderMusicXmlImport } from "./SongBuilderMusicXmlImport";
+import { SongRightsChecklist } from "./SongRightsChecklist";
+import { makeSongRightsReview, songRightsReviewCurrent, songRightsSourceSignature } from "@/lib/song-library-rights";
 import { ARRANGEMENT_TEMPLATES, createArrangementTemplate, instantiateSavedArrangementTemplate, makeArrangementTemplateBackup, parseArrangementTemplateBackup, readSavedArrangementTemplates, writeSavedArrangementTemplates, type ArrangementTemplateId, type SavedArrangementTemplate } from "@/lib/song-builder-templates";
 import { makeSongProjectFile, MAX_PROJECT_SAMPLE_BYTES, readSongProjectFile, type SongBuilderProjectFile } from "@/lib/song-builder-project";
-import { deleteCustomSample, readCustomSampleRecords, readCustomSamples, saveCustomSample, saveCustomSampleBlob, saveCustomSampleLayerBlob, type CustomSampleLayer } from "@/lib/song-builder-samples";
+import { deleteCustomSample, readCustomSampleRecords, readCustomSamples, replaceCustomSampleRecords, saveCustomSample, saveCustomSampleBlob, saveCustomSampleLayerBlob, type CustomSampleLayer, type CustomSampleRecord } from "@/lib/song-builder-samples";
+import { deleteKitSampleSnapshot, readKitSampleSnapshot, saveKitSampleSnapshot } from "@/lib/song-builder-kit-presets";
 import { applyBuilderTake, arrangementStartTimes, builderTakeMeasureIndex, builderTakeMeasureKey, contextualFillMatch, fitGrooveToMeter, makeClipIndependent, mergeBuilderTakes, moveClipToSection, partToSavedGroove, previewGridChange, quantizeRecordedHit, splitClipAtRepeat, transformPhrase, type BuilderTake, type PhraseOperation, type RecordedBuilderHit } from "@/lib/song-builder-editing";
-import { deleteBuilderTake, readBuilderTakes, saveBuilderTake, readBuilderBacking, saveBuilderBacking } from "@/lib/song-builder-storage";
+import { deleteBuilderTake, readBuilderTakes, saveBuilderTake, readBuilderBacking, readBuilderBackings, saveBuilderBacking } from "@/lib/song-builder-storage";
 import { SongBuilderBackingTrack, type BackingTrackHandle } from "./SongBuilderBackingTrack";
+import { SongProgressHistory } from "./SongProgressHistory";
 import { SongBuilderMicRecorder } from "./SongBuilderMicRecorder";
+import { SongBuilderSampleEditor } from "./SongBuilderSampleEditor";
+import { SongBuilderReviewThreads } from "./SongBuilderReviewThreads";
+import { SongBuilderConstraintAssistant } from "./SongBuilderConstraintAssistant";
+import { SongBuilderRoundTripCheck } from "./SongBuilderRoundTripCheck";
 import { SongBuilderCollaboration } from "./SongBuilderCollaboration";
 import { SongCloudPanel } from "./SongCloudPanel";
-import { SongBuilderPatternCompare, SongBuilderTimeline, SongBuilderVersions } from "./SongBuilderWorkspace";
+import { SongBuilderNotationNavigator, SongBuilderPatternCompare, SongBuilderTimeline, SongBuilderVersions } from "./SongBuilderWorkspace";
 import { packBuilderWorkspace, unpackBuilderWorkspace } from "@/lib/song-builder-backup";
 import { createSongShareUrl } from "@/lib/song-builder-share";
 import { boundaryTransition, contextualizeFill, creativeVariation, expressionStrikes, morphDrumParts, phraseAwareEnding } from "@/lib/song-builder-creative";
 import { playbackTimeAtBeat, playbackTrack, scalePlaybackTrack, trimPlaybackTrack, type PlaybackTrack } from "@/lib/song-builder-playback";
 import { readSongBuilderPracticeSessions, saveSongBuilderPracticeSession, suggestPracticeTargets, type SongBuilderPracticeSession } from "@/lib/song-builder-practice-report";
 import { editLinkedPart, mappedSeconds, normalizeTempoAnchors, ARRANGEMENT_CLIPBOARD_KEY } from "@/lib/song-builder-tools";
-import { SongBuilderClipboard, SongBuilderTempoMap, SongBuilderNoteChanges, SongBuilderPatternMorph, SongBuilderPlayability, SongBuilderArrangementFeedback, SongBuilderArrangementSuggestions, SongBuilderAccessibleScore, SongBuilderCueList, SongBuilderStorage, SongBuilderExportPreparation, SongBuilderVoiceAutomation, SongBuilderArrangementAutomation, SongBuilderTaskGuide, SongBuilderHealthCheck } from './SongBuilderTools';
+import { SongBuilderClipboard, SongBuilderTempoMap, SongBuilderTempoAutomation, SongBuilderProjectChecklist, SongBuilderNoteChanges, SongBuilderPatternMorph, SongBuilderPlayability, SongBuilderArrangementFeedback, SongBuilderArrangementSuggestions, SongBuilderAccessibleScore, SongBuilderCueList, SongBuilderStorage, SongBuilderExportPreparation, SongBuilderVoiceAutomation, SongBuilderArrangementAutomation, SongBuilderTaskGuide, SongBuilderHealthCheck } from './SongBuilderTools';
 import type { Groove, SongHitArticulation, SongInstrument } from "@/lib/types";
 
 type PlaybackMode = "idle" | "loading" | "count-in" | "playing" | "paused" | "finished";
@@ -77,6 +85,19 @@ function decodeSample(base64: string, type: string) {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return new Blob([bytes], { type });
+}
+
+async function applyCustomSamplesToAudio(audio: DrumAudio | null, records: CustomSampleRecord[]) {
+  if (!audio) return true;
+  const byVoice = new Map(records.map(record => [record.instrument, record]));
+  for (const voice of SONG_INSTRUMENTS) {
+    const record = byVoice.get(voice);
+    const primary = await audio.setCustomSample(voice, record?.blob ?? null);
+    const soft = await audio.setCustomSample(voice, record?.softBlob ?? null, "soft");
+    const accent = await audio.setCustomSample(voice, record?.accentBlob ?? null, "accent");
+    if (!primary || !soft || !accent) return false;
+  }
+  return true;
 }
 
 export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) {
@@ -128,6 +149,8 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const [transitionBefore, setTransitionBefore] = useState(1), [transitionAfter, setTransitionAfter] = useState(1), [transitionLoop, setTransitionLoop] = useState(false);
   const [midiClockStatus, setMidiClockStatus] = useState("MIDI clock is off.");
   const [midiStatus, setMidiStatus] = useState("Connect a MIDI drum kit to record hits.");
+  const [midiLearnAction, setMidiLearnAction] = useState<SongBuilderMidiControlAction | null>(null);
+  const [midiControlStatus, setMidiControlStatus] = useState("");
   const [midiRecording, setMidiRecording] = useState(false), [midiCalibrating, setMidiCalibrating] = useState(false);
   const [midiPreview, setMidiPreview] = useState<MidiImportPreview | null>(null);
   const [projectImportReview, setProjectImportReview] = useState<ProjectImportReview | null>(null);
@@ -137,12 +160,16 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const [midiTitle, setMidiTitle] = useState("");
   const [midiArtist, setMidiArtist] = useState("MIDI import");
   const [kitPresetName, setKitPresetName] = useState("");
+  const [kitPresetChoice, setKitPresetChoice] = useState("");
   const [kitCompareA,setKitCompareA]=useState(""),[kitCompareB,setKitCompareB]=useState("");
   const [performancePresetName, setPerformancePresetName] = useState("");
   const [kitSampleVoice, setKitSampleVoice] = useState<SongInstrument>("kick");
   const [customSampleNames, setCustomSampleNames] = useState<Partial<Record<SongInstrument, string>>>({});
   const [customSoftSampleNames, setCustomSoftSampleNames] = useState<Partial<Record<SongInstrument, string>>>({});
   const [customAccentSampleNames, setCustomAccentSampleNames] = useState<Partial<Record<SongInstrument, string>>>({});
+  const [audioExportProgress, setAudioExportProgress] = useState<{ completed: number; total: number; label: string } | null>(null);
+  const cancelAudioExportRef = useRef(false);
+  const audioExportActiveRef = useRef(false);
   const [templateChoice, setTemplateChoice] = useState<ArrangementTemplateId>("pop-form");
   const [savedArrangementTemplates,setSavedArrangementTemplates]=useState<SavedArrangementTemplate[]>([]),[savedTemplateChoice,setSavedTemplateChoice]=useState(""),[templateNameDraft,setTemplateNameDraft]=useState("");
   const templateFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -158,6 +185,8 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const [gridPaintMode, setGridPaintMode] = useState<"cycle" | "hit" | "erase" | "select">("cycle");
   const [practiceRangeStart, setPracticeRangeStart] = useState(1);
   const [practiceRangeEnd, setPracticeRangeEnd] = useState(0);
+  const [microtimingPresetName,setMicrotimingPresetName]=useState(''),[microtimingPresetChoice,setMicrotimingPresetChoice]=useState(''),[microtimingStrength,setMicrotimingStrength]=useState(100);
+  const [midiMapProfileName,setMidiMapProfileName]=useState(''),[midiMapProfileChoice,setMidiMapProfileChoice]=useState('');
   const [grooveVariation, setGrooveVariation] = useState<GrooveVariation>("hat-lift");
   const [gridCellSize, setGridCellSize] = useState(34);
   const [touchGrid, setTouchGrid] = useState(false), [touchVoice, setTouchVoice] = useState<SongInstrument>("kick");
@@ -197,6 +226,9 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const [playbackMode, setPlaybackModeState] = useState<PlaybackMode>("idle");
   const playbackModeRef = useRef<PlaybackMode>("idle");
   const transportActionsRef = useRef<{ toggle: () => void; stop: () => void; externalStart: (at: number) => void; externalContinue: () => void; externalStop: () => void; syncClock: (bpm: number | null, at: number) => void }>({ toggle: () => {}, stop: () => {}, externalStart: () => {}, externalContinue: () => {}, externalStop: () => {}, syncClock: () => {} });
+  const midiControlActionsRef = useRef<Record<SongBuilderMidiControlAction, () => void>>({ "toggle-play": () => {}, stop: () => {}, "toggle-loop": () => {}, "toggle-metronome": () => {}, "toggle-count-in": () => {}, "previous-measure": () => {}, "next-measure": () => {} });
+  const midiControlActiveRef = useRef(new Set<string>());
+  const seekToBarActionRef = useRef<(index: number) => void>(() => {});
   const [countIn, setCountIn] = useState(4);
   const [practiceProgress,setPracticeProgress] = useState({bpm:80,loop:1});
   const [practiceReports,setPracticeReports] = useState<SongBuilderPracticeSession[]>([]);
@@ -215,6 +247,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const audioSetupRef = useRef<Promise<DrumAudio | null> | null>(null);
   const audioRef = useRef<DrumAudio | null>(null);
   const previewMixRestoreRef=useRef<DrumMixSettings|null>(null);
+  const previewSamplesRestoreRef=useRef<CustomSampleRecord[]|null>(null);
   const timerRef = useRef<number | null>(null);
   const trackRef = useRef<PlaybackTrack | null>(null);
   const startAtRef = useRef(0);
@@ -277,6 +310,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     previewTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     previewTimersRef.current = [];
     if(previewMixRestoreRef.current){audioRef.current?.setMix(builderSettingsRef.current.mix);previewMixRestoreRef.current=null;}
+    if(previewSamplesRestoreRef.current){const records=previewSamplesRestoreRef.current;previewSamplesRestoreRef.current=null;void applyCustomSamplesToAudio(audioRef.current,records);}
     setPreviewSourceId("");
   };
 
@@ -541,7 +575,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     void readBuilderTakes(selectedSongId).then(rows=>{if(active){setTakes(rows);setSelectedTakeId(rows[0]?.id??'');setComparedTakeId(rows[1]?.id??'');setTakeCompChoices({});}}).catch(()=>{if(active)setTakes([]);});
     const timer=window.setTimeout(()=>{setSeekBar(null);setPracticeRangeStart(1);setPracticeRangeEnd(0);setPendingGrid(null);setGridFocus({voice:0,step:0});
       const current=songRef.current;
-      try { const globalSettings=readSongBuilderSettings();const raw = localStorage.getItem(`drum-hero:builder-settings:${selectedSongId}`); const next = normalizeSongBuilderSettings(raw ? {...JSON.parse(raw),performancePresets:globalSettings.performancePresets,exportPresets:globalSettings.exportPresets,midiSeparateTracks:globalSettings.midiSeparateTracks} : globalSettings); setBuilderSettings(next); builderSettingsRef.current = next; setRecordLatency(next.midiLatencyMs); setFeelDraft({swing:next.swing,amount:next.humanizeAmount,velocity:next.humanizeVelocityAmount,seed:next.humanizeSeed}); } catch { /* Use current settings if storage is unavailable. */ }
+      try { const globalSettings=readSongBuilderSettings();const raw = localStorage.getItem(`drum-hero:builder-settings:${selectedSongId}`); const next = normalizeSongBuilderSettings(raw ? {...JSON.parse(raw),kitPresets:globalSettings.kitPresets,performancePresets:globalSettings.performancePresets,exportPresets:globalSettings.exportPresets,midiMapPresets:globalSettings.midiMapPresets,midiControlBindings:globalSettings.midiControlBindings,microtimingPresets:globalSettings.microtimingPresets,midiSeparateTracks:globalSettings.midiSeparateTracks} : {...globalSettings,projectChecklist:structuredClone(DEFAULT_SONG_BUILDER_SETTINGS.projectChecklist)}); setBuilderSettings(next); builderSettingsRef.current = next; setRecordLatency(next.midiLatencyMs); setFeelDraft({swing:next.swing,amount:next.humanizeAmount,velocity:next.humanizeVelocityAmount,seed:next.humanizeSeed}); } catch { /* Use current settings if storage is unavailable. */ }
       setVariationPreview(null);setPhrasePreview(null);setFractionalLoop(false);
       try{const saved=JSON.parse(localStorage.getItem(`drum-hero:builder-selection:${selectedSongId}`)??'null') as {sectionId?:string;clipId?:string;partId?:string}|null;
         const section=current?.sections.find(section=>section.id===saved?.sectionId)??current?.sections.find(section=>sectionClips(section).length>0)??current?.sections[0];
@@ -569,7 +603,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     followMidiClockRef.current = followMidiClock;
   }, [followMidiClock]);
   useEffect(() => {
-    if ((!midiRecording && !listenMidiClock && !followMidiClock) || !builderSettings.midiInputId) return;
+    if ((!midiRecording && !listenMidiClock && !followMidiClock && !builderSettings.midiControlBindings.length && !midiLearnAction) || !builderSettings.midiInputId) return;
     const input = midiAccessRef.current?.inputs.get(builderSettings.midiInputId);
     if (!input) return;
     const onMessage = (event: MidiMessageLike) => {
@@ -621,6 +655,34 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         }
         return;
       }
+      const command = status & 0xf0, channel = (status & 0x0f) + 1;
+      const messageType = command === 0xb0 ? "control-change" : command === 0x90 && (event.data[2] ?? 0) > 0 ? "note" : null;
+      const number = event.data[1] ?? -1, value = event.data[2] ?? 0;
+      if (midiLearnAction && messageType && value > 0) {
+        const binding = { id: uid(), action: midiLearnAction, message: messageType, number, channel } as const;
+        changeBuilderSettings(current => ({ ...current, midiControlBindings: [...current.midiControlBindings.filter(item => item.action !== midiLearnAction && !(item.message === messageType && item.number === number && item.channel === channel)), binding].slice(-14) }));
+        setMidiControlStatus(`Learned ${messageType === "note" ? "note" : "CC"} ${number} on channel ${channel} for ${midiLearnAction.replaceAll("-", " ")}.`);
+        setMidiLearnAction(null);
+        return;
+      }
+      if (command === 0x80 || (command === 0x90 && value === 0)) {
+        for (const binding of builderSettingsRef.current.midiControlBindings) if (binding.message === "note" && binding.number === number && (!binding.channel || binding.channel === channel)) midiControlActiveRef.current.delete(binding.id);
+      }
+      if (messageType) {
+        const match = builderSettingsRef.current.midiControlBindings.find(binding => binding.message === messageType && binding.number === number && (!binding.channel || binding.channel === channel));
+        if (match) {
+          if (messageType === "note") {
+            if (!midiControlActiveRef.current.has(match.id)) {
+              midiControlActiveRef.current.add(match.id);
+              midiControlActionsRef.current[match.action]();
+            }
+          } else if (value >= 64 && !midiControlActiveRef.current.has(match.id)) {
+            midiControlActiveRef.current.add(match.id);
+            midiControlActionsRef.current[match.action]();
+          } else if (value < 64) midiControlActiveRef.current.delete(match.id);
+          return;
+        }
+      }
       if (!midiRecording) return;
       const note = event.data[1] ?? -1;
       const velocity = event.data[2] ?? 0;
@@ -631,7 +693,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     input.onmidimessage = onMessage;
     void input.open().catch(() => setMidiStatus("Could not open that MIDI input."));
     return () => { if (input.onmidimessage === onMessage) input.onmidimessage = null; };
-  }, [listenMidiClock, followMidiClock, midiRecording, builderSettings.midiInputId]);
+  }, [listenMidiClock, followMidiClock, midiRecording, builderSettings.midiInputId, builderSettings.midiControlBindings, midiLearnAction]);
   useEffect(() => {
     if (!listenMidiClock && !followMidiClock) { setMidiClockState("off"); midiClockLastPulseRef.current = null; return; }
     setMidiClockState("waiting");
@@ -732,10 +794,17 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     return selectedSong ? buildArrangementBars(selectedSong, previewScope === "song" ? undefined : previewScope).map(bar=>exportVoice==="all"?bar:{...bar,hits:bar.hits.filter(hit=>hit.instrument===exportVoice)}) : [];
   }, [songs, selectedSongId, previewScope, exportVoice]);
   const playbackBars = song ? buildArrangementBars(song, playScope === "song" ? undefined : playScope) : [];
-  const activePlaybackCue = position ? trackRef.current?.bars.find(bar=>bar.index===position.barIndex)?.rehearsalCue : undefined;
+  const activePlaybackCue = position ? playbackBars[position.barIndex]?.rehearsalCue : undefined;
   const practiceBarCount = Math.max(1, playbackBars.length);
   const safePracticeStart = Math.max(1, Math.min(practiceBarCount, practiceRangeStart));
   const safePracticeEnd = Math.max(safePracticeStart, Math.min(practiceBarCount, practiceRangeEnd || practiceBarCount));
+  const lastScoreBar = Math.max(0, fullSongBars.length - 1);
+  const scoreRangeStart = Math.max(0, Math.min(lastScoreBar, practiceRangeStart - 1));
+  const scoreRangeEnd = practiceRangeEnd === 0 ? lastScoreBar : Math.max(scoreRangeStart, Math.min(lastScoreBar, practiceRangeEnd - 1));
+  const activePlaybackBar = position ? playbackBars[position.barIndex] : undefined;
+  const scoreActiveBar = position
+    ? playScope === "song" ? position.barIndex : fullSongBars.findIndex(bar => bar.sectionId === activePlaybackBar?.sectionId && bar.sectionBar === activePlaybackBar?.sectionBar && bar.sectionRepeat === activePlaybackBar?.sectionRepeat && bar.clipId === activePlaybackBar?.clipId && bar.clipRepeat === activePlaybackBar?.clipRepeat && bar.partId === activePlaybackBar?.partId)
+    : seekBar ?? -1;
   const songTitleDraft = songDraft && songDraft.songId === song?.id ? songDraft.title : song?.title ?? "";
   const songArtistDraft = songDraft && songDraft.songId === song?.id ? songDraft.artist : song?.artist ?? "";
   const notationPages=paginateNotation(notationBars,builderSettings.notation);
@@ -803,24 +872,30 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     setMessage(`${song.voiceLabels?.[voice] || BASE_VOICE_LABEL[voice]} and its notes were removed. Undo can restore them.`);
   };
 
-  const toggleStaffNote = (barIndex: number, localStep: number) => {
-    const bar=notationBars[barIndex];
+  const toggleNotationNote = (bars:ArrangementBar[],barIndex: number, localStep: number,voice:SongInstrument) => {
+    const bar=bars[barIndex];
     if(!song||!bar)return;
-    const section=song.sections.find(item=>item.id===bar.sectionId),part=section?.parts.find(item=>item.id===bar.partId);
+    const section=song.sections.find(item=>item.id===bar.sectionId),basePart=section?.parts.find(item=>item.id===bar.partId),targetBeat=localStep*4/bar.subdivision;
+    const displayedHit=bar.hits.filter(hit=>hit.instrument===voice&&hit.sourcePartId).find(hit=>Math.abs(hit.beat-targetBeat)<=2/bar.subdivision);
+    const part=section?.parts.find(item=>item.id===displayedHit?.sourcePartId)??basePart;
     if(!section||!part){setMessage("This score measure no longer has an editable pattern.");return;}
-    const step=Math.max(0,Math.min(partStepCount(part)-1,Math.round(bar.partBeatOffset*part.subdivision/4+localStep*4/bar.subdivision*part.subdivision/4)));
+    const step=Math.max(0,Math.min(partStepCount(part)-1,displayedHit?.step??Math.round(bar.partBeatOffset*part.subdivision/4+localStep*4/bar.subdivision*part.subdivision/4)));
+    const cellHits=part.hits.filter(hit=>hit.instrument===voice&&hit.step===step),cycle=cellHits.length===0?'hit':cellHits.some(hit=>!hit.accent)?'accent':'rest';
+    if(cycle==='hit'&&part.hits.length>=256){setMessage('This pattern already has 256 notes. Remove a note before adding another.');return;}
     updateSong(current=>{
       const target=current.sections.find(item=>item.id===section.id);
       if(!target)return current;
       const nextSection=editLinkedPart(target,part.id,pattern=>{
-        const exists=pattern.hits.some(hit=>hit.instrument===staffEditVoice&&hit.step===step);
-        return {...pattern,hits:exists?pattern.hits.filter(hit=>hit.instrument!==staffEditVoice||hit.step!==step):[...pattern.hits,{step,instrument:staffEditVoice,accent:false,velocity:86}]};
+        if(cycle==='rest')return {...pattern,hits:pattern.hits.filter(hit=>hit.instrument!==voice||hit.step!==step)};
+        if(cycle==='accent')return {...pattern,hits:pattern.hits.map(hit=>hit.instrument===voice&&hit.step===step?{...hit,accent:true,velocity:Math.max(hit.velocity??86,118)}:hit)};
+        return {...pattern,hits:[...pattern.hits,{step,instrument:voice,accent:false,velocity:86}]};
       });
       return {...current,sections:current.sections.map(item=>item.id===section.id?nextSection:item)};
     });
-    setActiveSectionId(section.id);setActivePartId(part.id);setActiveClipId(bar.clipId??"");setSelectedCell({instrument:staffEditVoice,step});setStaffEditBarIndex(barIndex);setStaffEditStep(localStep);
-    setMessage(`${VOICE_LABEL[staffEditVoice]} ${part.hits.some(hit=>hit.instrument===staffEditVoice&&hit.step===step)?"removed from":"added at"} measure ${bar.number}, grid step ${step+1}.`);
+    setActiveSectionId(section.id);setActivePartId(part.id);setActiveClipId(bar.clipId??"");setSelectedCell({instrument:voice,step});setStaffEditBarIndex(barIndex);setStaffEditStep(localStep);
+    setMessage(`${VOICE_LABEL[voice]} ${cycle==='hit'?'added':cycle==='accent'?'accented':'removed'} at measure ${bar.number}, grid step ${step+1}.`);
   };
+  const toggleStaffNote=(barIndex:number,localStep:number)=>toggleNotationNote(notationBars,barIndex,localStep,staffEditVoice);
 
   const updateSection = (sectionId: string, change: (current: SongSection) => SongSection) => updateSong((current) => ({
     ...current,
@@ -1565,6 +1640,34 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     previewTimersRef.current.push(window.setTimeout(()=>clearPreview(),end+700));
   };
 
+  const saveTakeFeelAsPreset=()=>{
+    if(!song||!selectedTake){setMessage('Choose a recorded take first.');return;}
+    const groups=new Map<string,{voice:SongInstrument;phase:number;sum:number;count:number}>();
+    for(const raw of selectedTake.hits){
+      const sourceSection=song.sections.find(item=>item.id===raw.sectionId),source=sourceSection?.parts.find(item=>item.id===raw.partId);if(!source||!Number.isFinite(raw.step)||raw.bpm<=0)continue;
+      const subdivision=raw.subdivision??source.subdivision,measureSteps=Math.max(1,meterBeats(source.meter||sourceSection?.meter||song.meter,source.beats)*subdivision/4),nearest=Math.round(raw.step),phase=((nearest%measureSteps)+measureSteps)%measureSteps/measureSteps,bucket=Math.round(phase*32)%32/32,offset=Math.max(-250,Math.min(250,Math.round((raw.step-nearest)*60000/raw.bpm*4/subdivision))),key=`${raw.instrument}:${bucket}`;
+      const current=groups.get(key)??{voice:raw.instrument,phase:bucket,sum:0,count:0};current.sum+=offset;current.count++;groups.set(key,current);
+    }
+    const points=[...groups.values()].map(point=>({voice:point.voice,phase:point.phase,offsetMs:Math.round(point.sum/point.count)})).filter(point=>Math.abs(point.offsetMs)>=2).slice(0,512);
+    if(!points.length){setMessage('This take has no measurable timing offsets to save. Record a pass with some natural timing variation.');return;}
+    const name=microtimingPresetName.trim().slice(0,40)||`Take feel · ${new Date().toLocaleDateString()}`,preset={id:uid(),name,points};
+    changeBuilderSettings(current=>({...current,microtimingPresets:[...current.microtimingPresets.filter(item=>item.name.toLowerCase()!==name.toLowerCase()),preset].slice(-20)}));
+    setMicrotimingPresetChoice(preset.id);setMicrotimingPresetName('');setMessage(`Saved “${name}” as a reusable timing feel with ${points.length} voice and position cues.`);
+  };
+
+  const applyMicrotimingPreset=()=>{
+    if(!song||!section||!part){setMessage('Choose a pattern in the arrangement first.');return;}
+    const preset=builderSettings.microtimingPresets.find(item=>item.id===microtimingPresetChoice);if(!preset){setMessage('Choose a saved timing feel first.');return;}
+    const measureSteps=Math.max(1,meterBeats(part.meter||section.meter||song.meter,part.beats)*part.subdivision/4),strength=microtimingStrength/100;
+    const hits=part.hits.map(hit=>{
+      const phase=(((hit.step%measureSteps)+measureSteps)%measureSteps)/measureSteps,candidates=preset.points.filter(point=>point.voice===hit.instrument);
+      if(!candidates.length)return hit;
+      const nearest=candidates.map(point=>({point,distance:Math.min(Math.abs(point.phase-phase),1-Math.abs(point.phase-phase))})).sort((a,b)=>a.distance-b.distance)[0];
+      return nearest&&nearest.distance<=0.09?{...hit,timingOffsetMs:Math.round(nearest.point.offsetMs*strength)}:hit;
+    });
+    updatePart(part.id,current=>({...current,hits}));setMessage(`Applied “${preset.name}” to ${part.name}. The notation and playback now show the transferred timing feel.`);
+  };
+
   const auditionFeel = async () => {
     if (!song) return;
     stopPlayback(); clearPreview();
@@ -1592,11 +1695,22 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     setMessage('Previewing the generated song form. The existing arrangement has not changed.');
   };
 
+  const requireSongRightsReview = (action: string) => {
+    if (!song) return false;
+    if (songRightsReviewCurrent(song)) return true;
+    setMessage(`Complete the source and rights checklist in this panel before ${action}.`);
+    return false;
+  };
+
   const exportSheet = async (format: "png" | "pdf" | "midi" | "musicxml" | "wav" | "stems", config?: { view?: NotationView; scope?: string; notation?: SongBuilderSettings["notation"] }) => {
     if (!song) return;
+    const isAudioExport = format === "wav" || format === "stems";
+    if (isAudioExport && audioExportActiveRef.current) return;
+    if (!requireSongRightsReview("exporting this score or audio")) return;
     const scope = config?.scope ?? previewScope, view = config?.view ?? notationView, notation = config?.notation ?? builderSettings.notation;
     const bars = buildArrangementBars(song, scope === "song" ? undefined : scope).map(bar => exportVoice === "all" ? bar : { ...bar, hits: bar.hits.filter(hit => hit.instrument === exportVoice) });
     if (!bars.length) { setMessage("Add at least one pattern before exporting notation."); return; }
+    if (isAudioExport) audioExportActiveRef.current = true;
     try {
       const name = `${safeName(song.title)}-${safeName(scope === "song" ? "full-song" : song.sections.find((item) => item.id === scope)?.name ?? "section")}`;
       if (format === "midi") {
@@ -1604,17 +1718,21 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
       } else if (format === "musicxml") {
         downloadBlob(arrangementMusicXml(bars, song.title, song.artist, builderSettings.midiNotes, notation), `${name}.musicxml`);
       } else if (format === "wav") {
+        cancelAudioExportRef.current = false;
+        setAudioExportProgress({ completed: 0, total: 1, label: "Preparing WAV audio" });
         setMessage("Rendering WAV audio from the drum samples…");
         const customSamples = await readCustomSamples().catch(() => ({}));
-        const backing = includeExportBacking ? await readBuilderBacking(song.id) : undefined;
-        if (includeExportBacking && !backing) throw new Error('Attach a backing track in Rehearse before including it in the WAV.');
-        downloadBlob(await arrangementWav(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed, builderSettings.humanizeVelocityAmount), swing, builderSettings.mix, customSamples, { metronome: includeExportClick, backing, backingOffsetSeconds: previewScope === 'song' ? (songBarTimes[0]??0)/1000 : (songBarTimes[fullSongBars.findIndex(bar=>bar.sectionId===previewScope)]??0)/1000, render: { sampleRate: builderSettings.audioExport.sampleRate, bitDepth: builderSettings.audioExport.bitDepth, normalizeToDbfs: builderSettings.audioExport.normalize ? builderSettings.audioExport.targetDbfs : undefined } }), `${name}.wav`);
+        const backing = includeExportBacking ? await readBuilderBackings(song.id) : [];
+        if (includeExportBacking && !backing.length) throw new Error('Attach a backing track in Rehearse before including it in the WAV.');
+        downloadBlob(await arrangementWav(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed, builderSettings.humanizeVelocityAmount), swing, builderSettings.mix, customSamples, { metronome: includeExportClick, backing, backingOffsetSeconds: previewScope === 'song' ? (songBarTimes[0]??0)/1000 : (songBarTimes[fullSongBars.findIndex(bar=>bar.sectionId===previewScope)]??0)/1000, render: { sampleRate: builderSettings.audioExport.sampleRate, bitDepth: builderSettings.audioExport.bitDepth, normalizeToDbfs: builderSettings.audioExport.normalize ? builderSettings.audioExport.targetDbfs : undefined }, onProgress:setAudioExportProgress, shouldCancel:()=>cancelAudioExportRef.current }), `${name}.wav`);
       } else if (format === "stems") {
-        setMessage("Rendering aligned voice, click, and backing stems. Long exports can take a moment…");
+        cancelAudioExportRef.current = false;
+        setAudioExportProgress({ completed: 0, total: 1, label: "Preparing stems…" });
+        setMessage("Rendering aligned voice, click, and backing stems…");
         const customSamples = await readCustomSamples().catch(() => ({}));
-        const backing = includeExportBacking ? await readBuilderBacking(song.id) : undefined;
-        if (includeExportBacking && !backing) throw new Error('Attach a backing track in Rehearse before including it as a stem.');
-        const archive = await arrangementStemsZip(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed, builderSettings.humanizeVelocityAmount), swing, builderSettings.mix, customSamples, { metronome: includeExportClick, backing, backingOffsetSeconds: previewScope === 'song' ? (songBarTimes[0]??0)/1000 : (songBarTimes[fullSongBars.findIndex(bar=>bar.sectionId===previewScope)]??0)/1000, render: { sampleRate: builderSettings.audioExport.sampleRate, bitDepth: builderSettings.audioExport.bitDepth, normalizeToDbfs: builderSettings.audioExport.normalize ? builderSettings.audioExport.targetDbfs : undefined }, stemPrefix: builderSettings.audioExport.stemPrefix });
+        const backing = includeExportBacking ? await readBuilderBackings(song.id) : [];
+        if (includeExportBacking && !backing.length) throw new Error('Attach a backing track in Rehearse before including it as a stem.');
+        const archive = await arrangementStemsZip(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed, builderSettings.humanizeVelocityAmount), swing, builderSettings.mix, customSamples, { metronome: includeExportClick, backing, backingOffsetSeconds: previewScope === 'song' ? (songBarTimes[0]??0)/1000 : (songBarTimes[fullSongBars.findIndex(bar=>bar.sectionId===previewScope)]??0)/1000, render: { sampleRate: builderSettings.audioExport.sampleRate, bitDepth: builderSettings.audioExport.bitDepth, normalizeToDbfs: builderSettings.audioExport.normalize ? builderSettings.audioExport.targetDbfs : undefined }, stemPrefix: builderSettings.audioExport.stemPrefix, onProgress: setAudioExportProgress, shouldCancel: () => cancelAudioExportRef.current });
         downloadBlob(archive, `${name}-stems.zip`);
       } else {
         const pages = paginateNotation(bars,notation).length;
@@ -1635,13 +1753,15 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
       setMessage(`${format === "musicxml" ? "MusicXML" : format === "stems" ? "Aligned WAV stems ZIP" : format.toUpperCase()} export downloaded.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The notation export failed.");
+    } finally {
+      if (isAudioExport) { setAudioExportProgress(null); audioExportActiveRef.current = false; }
     }
   };
 
   const saveExportPreset = () => {
     const name = exportPresetNameDraft.trim().slice(0, 40);
     if (!name) return;
-    const preset: SongBuilderExportPreset = { id: uid(), name, view: notationView, format: exportPresetFormat, scope: previewScope === "song" ? "song" : "section", paperSize: builderSettings.notation.paperSize ?? "letter", orientation: builderSettings.notation.orientation ?? "landscape", barsPerPage: builderSettings.notation.barsPerPage, barsPerLine: builderSettings.notation.barsPerLine ?? 2, sectionLineBreaks: builderSettings.notation.sectionLineBreaks ?? false };
+    const preset: SongBuilderExportPreset = { id: uid(), name, view: notationView, format: exportPresetFormat, scope: previewScope === "song" ? "song" : "section", paperSize: builderSettings.notation.paperSize ?? "letter", orientation: builderSettings.notation.orientation ?? "landscape", barsPerPage: builderSettings.notation.barsPerPage, barsPerLine: builderSettings.notation.barsPerLine ?? 2, sectionLineBreaks: builderSettings.notation.sectionLineBreaks ?? false, largePrint:builderSettings.notation.largePrint??false,highContrast:builderSettings.notation.highContrast??false };
     changeBuilderSettings(current => ({ ...current, exportPresets: [...current.exportPresets.filter(item => item.name.toLowerCase() !== name.toLowerCase()), preset].slice(-20) }));
     setExportPresetChoice(preset.id); setExportPresetNameDraft(""); setMessage(`Saved “${name}” as an export preset on this device.`);
   };
@@ -1651,15 +1771,16 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     if (!preset) return;
     const sectionId = song?.sections.some(item => item.id === activeSectionId) ? activeSectionId : song?.sections[0]?.id;
     const scope = preset.scope === "song" ? "song" : sectionId ?? "song";
-    const notation = { ...builderSettings.notation, paperSize: preset.paperSize, orientation: preset.orientation, barsPerPage: preset.barsPerPage, barsPerLine: preset.barsPerLine, sectionLineBreaks: preset.sectionLineBreaks };
+    const notation = { ...builderSettings.notation, paperSize: preset.paperSize, orientation: preset.orientation, barsPerPage: preset.barsPerPage, barsPerLine: preset.barsPerLine, sectionLineBreaks: preset.sectionLineBreaks,largePrint:preset.largePrint,highContrast:preset.highContrast };
     setNotationView(preset.view); setPreviewScope(scope); setPreviewPage(0);
-    changeBuilderSettings(current => ({ ...current, notation: { ...current.notation, paperSize: preset.paperSize, orientation: preset.orientation, barsPerPage: preset.barsPerPage, barsPerLine: preset.barsPerLine, sectionLineBreaks: preset.sectionLineBreaks } }));
+    changeBuilderSettings(current => ({ ...current, notation: { ...current.notation, paperSize: preset.paperSize, orientation: preset.orientation, barsPerPage: preset.barsPerPage, barsPerLine: preset.barsPerLine, sectionLineBreaks: preset.sectionLineBreaks,largePrint:preset.largePrint,highContrast:preset.highContrast } }));
     if (download) void exportSheet(preset.format, { view: preset.view, scope, notation });
     else setMessage(`Applied “${preset.name}”. Choose PNG or PDF to download the chart.`);
   };
 
   const copyPlaybackLink = async () => {
     if (!song) return;
+    if (!requireSongRightsReview("sharing a playback link")) return;
     try {
       const url = await createSongShareUrl(song);
       setShareLinkDraft(url);
@@ -1916,6 +2037,18 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   });
 
   useEffect(() => {
+    midiControlActionsRef.current = {
+      "toggle-play": () => transportActionsRef.current.toggle(),
+      stop: () => transportActionsRef.current.stop(),
+      "toggle-loop": () => setLoop(value => !value),
+      "toggle-metronome": () => setMetronome(value => !value),
+      "toggle-count-in": () => setCountInBeats(value => value === 0 ? 4 : 0),
+      "previous-measure": () => { if (fullSongBars.length) seekToBarActionRef.current(Math.max(0, (position?.barIndex ?? seekBar ?? 0) - 1)); },
+      "next-measure": () => { if (fullSongBars.length) seekToBarActionRef.current(Math.min(fullSongBars.length - 1, (position?.barIndex ?? seekBar ?? 0) + 1)); },
+    };
+  });
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       if (event.repeat || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || (target instanceof HTMLElement && target.closest("input, textarea, select, button, [contenteditable='true'], [role='gridcell'], [role='slider']"))) return;
@@ -1940,7 +2073,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     setLiveHitCount(0);setMidiRecording(true);setMidiStatus(`Recording a ${recordMode} take. Notes are captured for review before changing the arrangement.`);
   };
 
-  const seekToBar=(index:number)=>{
+  function seekToBar(index:number){
     if(!song||!fullSongBars.length)return;finishTake();clearPreview();audioRef.current?.silence?.();nextLoopScheduledRef.current=0;const targetIndex=Math.max(0,Math.min(fullSongBars.length-1,index));setSeekBar(targetIndex);
     if (practiceCaptureRef.current) {
       practiceCaptureRef.current.manualSeeks += 1;
@@ -1959,7 +2092,9 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     }
     setPosition({barIndex:targetIndex,partId:target.partId,clipId:target.clipId,step:Math.round(target.partBeatOffset*target.subdivision/4),fraction:0});
     backingRef.current?.pause();if(playbackModeRef.current==='playing')backingRef.current?.sync(songBarTimes[targetIndex]??0,target.bpm/(fullSongBars[targetIndex]?.bpm??target.bpm));
-  };
+  }
+
+  useEffect(()=>{seekToBarActionRef.current=seekToBar;});
 
   const focusPracticeMeasure=(index:number,reason:string)=>{
     if(index<0||index>=fullSongBars.length)return;
@@ -1986,13 +2121,82 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     setMessage(`${definition.label} goal set for ${section.name} · ${part.name}: ${goal.passes} scored passes of at least ${goal.score}% at ${goal.bpm} BPM. ${definition.focus}`);
   };
 
-  const saveKitPreset = () => {
+  const restoreKitPresetSamples = async (records: CustomSampleRecord[]) => {
+    await replaceCustomSampleRecords(records);
+    const loaded = await applyCustomSamplesToAudio(audioRef.current,records);
+    if (!loaded) throw new Error("A saved sample could not be decoded. The previous kit has been restored.");
+    const byVoice = new Map(records.map(record => [record.instrument, record]));
+    setCustomSampleNames(Object.fromEntries([...byVoice].map(([voice, record]) => [voice, record.name])) as Partial<Record<SongInstrument, string>>);
+    setCustomSoftSampleNames(Object.fromEntries([...byVoice].flatMap(([voice, record]) => record.softName ? [[voice, record.softName] as const] : [])) as Partial<Record<SongInstrument, string>>);
+    setCustomAccentSampleNames(Object.fromEntries([...byVoice].flatMap(([voice, record]) => record.accentName ? [[voice, record.accentName] as const] : [])) as Partial<Record<SongInstrument, string>>);
+  };
+
+  const saveKitPreset = async () => {
     const name = kitPresetName.trim().slice(0, 40);
     if (!name) return;
-    const preset: SongBuilderKitPreset = { id: uid(), name, mix: structuredClone(builderSettings.mix) };
-    changeBuilderSettings((current) => ({ ...current, kitPresets: [...current.kitPresets.filter((item) => item.name.toLowerCase() !== name.toLowerCase()), preset].slice(-20) }));
-    setKitPresetName("");
-    setMessage(`Kit preset “${name}” saved on this device.`);
+    const id = uid();
+    try {
+      await saveKitSampleSnapshot(id, await readCustomSampleRecords());
+      const preset: SongBuilderKitPreset = { id, name, mix: structuredClone(builderSettings.mix), sampleSnapshotId: id };
+      const nextPresets = [...builderSettings.kitPresets.filter((item) => item.name.toLowerCase() !== name.toLowerCase()), preset].slice(-20);
+      const retainedIds = new Set(nextPresets.map(item => item.id));
+      changeBuilderSettings((current) => ({ ...current, kitPresets: [...current.kitPresets.filter((item) => item.name.toLowerCase() !== name.toLowerCase()), preset].slice(-20) }));
+      for (const old of builderSettings.kitPresets) if (old.sampleSnapshotId && !retainedIds.has(old.id)) void deleteKitSampleSnapshot(old.sampleSnapshotId);
+      setKitPresetChoice(id);
+      setKitPresetName("");
+      setMessage(`Kit preset “${name}” saved with its mixer, custom samples, and velocity layers.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not save this kit preset."); }
+  };
+
+  const applyKitPreset = async (presetId: string) => {
+    setKitPresetChoice(presetId);
+    const preset = builderSettings.kitPresets.find(item => item.id === presetId);
+    if (!preset) return;
+    let currentSamples: CustomSampleRecord[] = [];
+    try {
+      currentSamples = await readCustomSampleRecords();
+      if (preset.sampleSnapshotId) {
+        const samples = await readKitSampleSnapshot(preset.sampleSnapshotId);
+        if (!samples) throw new Error("This kit's sample snapshot is missing from local storage. Its mixer settings were not applied.");
+        try { await restoreKitPresetSamples(samples); }
+        catch (error) { await restoreKitPresetSamples(currentSamples).catch(() => {}); throw error; }
+      }
+      const samples = preset.sampleSnapshotId ? await readKitSampleSnapshot(preset.sampleSnapshotId) ?? [] : currentSamples;
+      const voicesWithSamples = new Set(samples.map(record => record.instrument));
+      const mix = structuredClone(preset.mix);
+      for (const voice of SONG_INSTRUMENTS) {
+        if (voicesWithSamples.has(voice)) mix.sampleIndex[voice] = -1;
+        else if (mix.sampleIndex[voice] < 0) mix.sampleIndex[voice] = 0;
+      }
+      changeBuilderSettings(current => ({ ...current, mix }));
+      setMessage(preset.sampleSnapshotId ? `Loaded kit “${preset.name}” with its saved samples and mixer settings.` : `Loaded mixer settings from “${preset.name}”. This older preset has no saved samples.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not load this kit preset."); }
+  };
+
+  const removeKitPreset = async (presetId: string) => {
+    const preset = builderSettings.kitPresets.find(item => item.id === presetId);
+    if (!preset) return;
+    if (preset.sampleSnapshotId) await deleteKitSampleSnapshot(preset.sampleSnapshotId).catch(() => {});
+    changeBuilderSettings(current => ({ ...current, kitPresets: current.kitPresets.filter(item => item.id !== presetId) }));
+    setKitPresetChoice("");
+    setMessage(`Kit preset “${preset.name}” removed. The active kit was left unchanged.`);
+  };
+
+  const applyMidiMapProfile=(id:string)=>{
+    setMidiMapProfileChoice(id);
+    const saved=builderSettings.midiMapPresets.find(item=>`saved:${item.id}`===id);
+    const kit=library.kitProfiles?.find(item=>`kit:${item.id}`===id);
+    const builtIn=BUILTIN_MIDI_MAP_PRESETS.find(item=>`builtin:${item.id}`===id);
+    const notes=saved?.notes??(kit?{...DEFAULT_SONG_BUILDER_SETTINGS.midiNotes,...kit.midiNotes}:builtIn?.notes);
+    if(!notes)return;
+    changeBuilderSettings(current=>({...current,midiNotes:{...notes}}));
+    setMessage(`Applied MIDI map “${saved?.name??kit?.name??builtIn?.name}”. You can still edit each voice note number.`);
+  };
+  const saveMidiMapProfile=()=>{
+    const name=midiMapProfileName.trim().slice(0,40);if(!name)return;
+    const preset:SongBuilderMidiMapPreset={id:uid(),name,notes:{...builderSettings.midiNotes}};
+    changeBuilderSettings(current=>({...current,midiMapPresets:[...current.midiMapPresets.filter(item=>item.name.toLowerCase()!==name.toLowerCase()),preset].slice(-24)}));
+    setMidiMapProfileChoice(`saved:${preset.id}`);setMidiMapProfileName('');setMessage(`Saved MIDI map “${name}” on this device.`);
   };
 
   const auditionKitPreset = async (presetId: string, side: "a" | "b") => {
@@ -2002,6 +2206,12 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     if(previewSourceId===token){clearPreview();return;}
     stopPlayback();clearPreview();const request=previewRequestRef.current;const audio=await ensureDrumAudio();
     if(!audio||!await audio.ready||request!==previewRequestRef.current)return;
+    if(preset.sampleSnapshotId){
+      const [savedSamples,currentSamples]=await Promise.all([readKitSampleSnapshot(preset.sampleSnapshotId),readCustomSampleRecords()]);
+      if(!savedSamples){setMessage(`The custom samples for “${preset.name}” are missing from local storage.`);return;}
+      if(!await applyCustomSamplesToAudio(audio,savedSamples)){await applyCustomSamplesToAudio(audio,currentSamples);setMessage(`Could not audition the saved samples for “${preset.name}”.`);return;}
+      previewSamplesRestoreRef.current=currentSamples;
+    }
     previewMixRestoreRef.current=builderSettingsRef.current.mix;audio.setMix(preset.mix);setPreviewSourceId(token);
     const bpm=section?.bpm??song?.bpm??part.bpm,quarterMs=60000/bpm,stepMs=quarterMs*4/part.subdivision,loopMs=part.beats*quarterMs;
     for(let repeat=0;repeat<2;repeat++)for(const hit of part.hits){
@@ -2203,6 +2413,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
 
   const exportProjectFile = async () => {
     if (!song) return;
+    if (!requireSongRightsReview("exporting this complete project file")) return;
     try {
       const records = await readCustomSampleRecords();
       const selectedCustom = records.filter((record) => builderSettings.mix.sampleIndex[record.instrument] < 0);
@@ -2364,6 +2575,24 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     } catch { setMessage("Could not remove that custom sample from this browser."); }
   };
 
+  const saveEditedCustomSample = async (layer: CustomSampleLayer, name: string, blob: Blob) => {
+    const previous = (await readCustomSampleRecords().catch(() => [])).find(record => record.instrument === kitSampleVoice);
+    if (audioRef.current && !await audioRef.current.setCustomSample(kitSampleVoice, blob, layer)) throw new Error("The browser could not decode this edited sample.");
+    try {
+      const record = layer === "primary"
+        ? await saveCustomSampleBlob(kitSampleVoice, name, blob)
+        : await saveCustomSampleLayerBlob(kitSampleVoice, layer, name, blob);
+      if (layer === "primary") setCustomSampleNames(current => ({ ...current, [kitSampleVoice]: record.name }));
+      else if (layer === "soft") setCustomSoftSampleNames(current => ({ ...current, [kitSampleVoice]: record.softName ?? name }));
+      else setCustomAccentSampleNames(current => ({ ...current, [kitSampleVoice]: record.accentName ?? name }));
+      changeBuilderSettings(current => ({ ...current, mix: { ...current.mix, sampleIndex: { ...current.mix.sampleIndex, [kitSampleVoice]: -1 } } }));
+      setMessage(`${VOICE_LABEL[kitSampleVoice]} ${layer} sample saved.`);
+    } catch (error) {
+      if (previous && audioRef.current) await audioRef.current.setCustomSample(kitSampleVoice, layer === "primary" ? previous.blob : layer === "soft" ? previous.softBlob ?? null : previous.accentBlob ?? null, layer);
+      throw error;
+    }
+  };
+
   if (!ready) return <p>Loading Song Builder…</p>;
 
   return <div className={`song-builder ${compact?'song-builder-compact':''} ${beginner?'song-builder-beginner':''}`} data-workspace={workspace}>
@@ -2480,10 +2709,11 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
       </aside>
 
       {song ? <div className="song-builder-main" role="region" aria-label="Song editor">
-        <SongBuilderTimeline song={song} bars={fullSongBars} loopBounds={fractionalLoop?loopBounds:[0,fullSongBars.length]} loopDisabled={!['idle','finished'].includes(playbackMode)} onLoopChange={bounds=>{setLoopBounds(bounds);setFractionalLoop(true);setLoop(true);setPlayScope('song');}} activeBar={position?.barIndex??seekBar??0} onSeek={seekToBar} onSelect={(id,clipId)=>{setActiveSectionId(id);setActiveClipId(clipId??'');const selected=song.sections.find(s=>s.id===id);setActivePartId(clipId?sectionClips(selected!).find(c=>c.id===clipId)?.partId??'':'');setSelectedCells([]);}} onMove={(sourceId,clipId,targetId)=>{updateSong(current=>moveClipToSection(current,sourceId,clipId,targetId));setMessage('Clip moved to the selected section as an independent pattern.');}} follow={followPlayhead} onFollow={setFollowPlayhead}/><SongBuilderHealthCheck song={song} bars={fullSongBars} mix={builderSettings.mix} sampleNames={customSampleNames} notation={builderSettings.notation} onNavigate={(targetWorkspace,selector)=>{setWorkspace(targetWorkspace);window.setTimeout(()=>document.querySelector(selector)?.scrollIntoView({behavior:"smooth",block:"center"}),80);}}/><SongBuilderArrangementAutomation points={song.arrangementAutomation} bars={fullSongBars} voices={BUILDER_VOICES} labels={VOICE_LABEL} onChange={points=>updateSong(current=>({...current,arrangementAutomation:points.length?points:undefined}))}/><SongBuilderPatternCompare song={song} mix={builderSettings.mix} swing={swing}/><SongBuilderArrangementFeedback song={song} bars={fullSongBars}/><SongBuilderArrangementSuggestions song={song} previewing={previewSourceId==='arrangement-form-preview'} onPreview={sections=>void previewArrangementForm(sections)} onApply={next=>{persistSong(next);setMessage('Arrangement form added as independent, editable sections.');}}/>
+        <SongBuilderNotationNavigator key={song.id} song={song} bars={fullSongBars} view={notationView} onViewChange={setNotationView} options={builderSettings.notation} onOptionsChange={notation=>changeBuilderSettings(current=>({...current,notation}))} onScoreEdit={(barIndex,step,voice)=>toggleNotationNote(fullSongBars,barIndex,step,voice)} activeBar={scoreActiveBar} activeFraction={position?.fraction??0} range={[scoreRangeStart,scoreRangeEnd]} onRangeChange={(start,end)=>{stopPlayback();setPlayScope("song");setPracticeRangeStart(start+1);setPracticeRangeEnd(end+1);setLoop(true);}} onSeek={index=>{const bar=fullSongBars[index];seekToBar(index);if(bar){setActiveSectionId(bar.sectionId);setActiveClipId(bar.clipId??"");setActivePartId(bar.partId);}}} onPractice={()=>{stopPlayback();setPlayScope("song");setPracticeRangeStart(scoreRangeStart+1);setPracticeRangeEnd(scoreRangeEnd+1);setLoop(true);setSeekBar(scoreRangeStart);setWorkspace("rehearse");setMessage(`Practice measures ${scoreRangeStart+1}–${scoreRangeEnd+1}. Press Play to rehearse this score range.`);}} follow={followPlayhead}/>
+        <SongBuilderTimeline song={song} bars={fullSongBars} loopBounds={fractionalLoop?loopBounds:[0,fullSongBars.length]} loopDisabled={!['idle','finished'].includes(playbackMode)} onLoopChange={bounds=>{setLoopBounds(bounds);setFractionalLoop(true);setLoop(true);setPlayScope('song');}} activeBar={position?.barIndex??seekBar??0} onSeek={seekToBar} onSelect={(id,clipId)=>{setActiveSectionId(id);setActiveClipId(clipId??'');const selected=song.sections.find(s=>s.id===id);setActivePartId(clipId?sectionClips(selected!).find(c=>c.id===clipId)?.partId??'':'');setSelectedCells([]);}} onMove={(sourceId,clipId,targetId)=>{updateSong(current=>moveClipToSection(current,sourceId,clipId,targetId));setMessage('Clip moved to the selected section as an independent pattern.');}} follow={followPlayhead} onFollow={setFollowPlayhead}/><SongBuilderProjectChecklist items={builderSettings.projectChecklist} onChange={items=>changeBuilderSettings(current=>({...current,projectChecklist:items}))}/><SongBuilderHealthCheck song={song} bars={fullSongBars} mix={builderSettings.mix} sampleNames={customSampleNames} notation={builderSettings.notation} onNavigate={(targetWorkspace,selector)=>{setWorkspace(targetWorkspace);window.setTimeout(()=>document.querySelector(selector)?.scrollIntoView({behavior:"smooth",block:"center"}),80);}}/><SongBuilderArrangementAutomation points={song.arrangementAutomation} bars={fullSongBars} voices={BUILDER_VOICES} labels={VOICE_LABEL} onChange={points=>updateSong(current=>({...current,arrangementAutomation:points.length?points:undefined}))}/><SongBuilderPatternCompare key={song.id} song={song} mix={builderSettings.mix} swing={swing}/><SongBuilderArrangementFeedback song={song} bars={fullSongBars}/><SongBuilderArrangementSuggestions song={song} previewing={previewSourceId==='arrangement-form-preview'} onPreview={sections=>void previewArrangementForm(sections)} onApply={next=>{persistSong(next);setMessage('Arrangement form added as independent, editable sections.');}}/><SongBuilderConstraintAssistant song={song} previewing={previewSourceId==='arrangement-form-preview'} onPreview={sections=>void previewArrangementForm(sections)} onApply={next=>{persistSong(next);setMessage('Arrangement draft added as independent, editable sections.');}}/>
         <SongBuilderCueList bars={fullSongBars} onSeek={seekToBar}/><details className="card song-builder-cloud-tools"><summary>Cloud sync and live collaboration</summary><SongCloudPanel state={library} apply={applyCloudLibrary}/><SongBuilderCollaboration song={song} sectionId={section?.id??""} partId={part?.id??""} cursor={selectedCell} onRemoteSong={incoming=>{const current=songRef.current;if(!current||current.id!==incoming.id)return;persistSong(incoming,false,true,true);setSavedMessage("Live collaborator edits received. Review and save them through cloud sync when ready.");}}/></details>
         {song.bundled?<section className="card song-builder-backing"><h2>Backing track</h2><p>Create a personal copy to attach local audio to this example.</p><button type="button" onClick={()=>persistSong(copyAsPersonalSong(song),false)}>Create personal copy</button></section>:<SongBuilderBackingTrack ref={backingRef} key={`backing-${song.id}-${assetRevision}`} songId={song.id} targetPart={part??null} bars={fullSongBars} anchors={song.referenceTempoMap??[]} songBpm={song.bpm} onAnchorsChange={anchors=>{const normalized=normalizeTempoAnchors(anchors);if(normalized.length!==anchors.length){setMessage("Tempo anchors must increase in time and stay between 40 and 200 BPM.");return;}updateSong(current=>({...current,referenceTempoMap:normalized}));}} onApplyTempo={bpm=>{updateSong(current=>({...current,bpm}));setMessage(`Song default tempo set to ${bpm} BPM. Explicit section tempos remain unchanged.`);}} onApplyHits={applyBackingHits} onApplyArrangementHits={groups=>{try{const byPattern=new Map<string,typeof groups>();for(const group of groups){const key=`${group.sectionId}:${group.partId}`;byPattern.set(key,[...(byPattern.get(key)??[]),group]);}updateSong(current=>{let sections=current.sections;for(const grouped of byPattern.values()){const first=grouped[0];if(!first)continue;const index=sections.findIndex(item=>item.id===first.sectionId),target=sections[index];if(!target)continue;const hits=grouped.flatMap(item=>item.hits);const next=editLinkedPart(target,first.partId,source=>{const merged=new Map(source.hits.map(hit=>[`${hit.instrument}:${hit.step}`,hit]));for(const hit of hits)if(!merged.has(`${hit.instrument}:${hit.step}`))merged.set(`${hit.instrument}:${hit.step}`,hit);if(merged.size>256)throw new Error(`Suggestions exceed the 256-note limit for ${source.name}.`);return {...source,hits:[...merged.values()].sort((a,b)=>a.step-b.step||a.instrument.localeCompare(b.instrument))};});sections=sections.map((item,itemIndex)=>itemIndex===index?next:item);}return {...current,sections};});setMessage(`Added backing-track suggestions across ${groups.length} measures. Repeated uses of the same pattern share its inserted notes; undo to reverse the import.`);}catch(error){setMessage(error instanceof Error?error.message:"Could not add the full-song suggestions.");}}}/>}
-      {song && <><SongBuilderClipboard song={song} section={section} onChange={next=>updateSong(current=>({...current,sections:next.sections,referenceTempoMap:next.referenceTempoMap}))} onMessage={setMessage}/><SongBuilderTempoMap song={song} bars={fullSongBars} onChange={next=>updateSong(current=>({...current,sections:next.sections,referenceTempoMap:next.referenceTempoMap}))}/><SongBuilderStorage key={`storage-${song.id}-${assetRevision}`} songId={song.id} onBackup={()=>void exportProjectFile()} onCleanup={()=>{setAssetRevision(n=>n+1);void readBuilderTakes(song.id).then(setTakes).catch(()=>setMessage('Could not refresh takes.'));}}/></>}
+      {song && <><SongBuilderClipboard song={song} section={section} onChange={next=>updateSong(current=>({...current,sections:next.sections,referenceTempoMap:next.referenceTempoMap}))} onMessage={setMessage}/><SongBuilderTempoMap song={song} bars={fullSongBars} onChange={next=>updateSong(current=>({...current,sections:next.sections,referenceTempoMap:next.referenceTempoMap}))}/><SongBuilderTempoAutomation key={section?.id??'no-section'} section={section??null} baseBpm={song.bpm} measureCount={Math.max(1,fullSongBars.filter(bar=>bar.sectionId===section?.id&&bar.sectionRepeat===1).length)} onChange={next=>updateSection(next.id,current=>({...current,tempoRamp:next.tempoRamp,tempoPoints:next.tempoPoints}))}/><SongBuilderStorage key={`storage-${song.id}-${assetRevision}`} songId={song.id} onBackup={()=>void exportProjectFile()} onCleanup={()=>{setAssetRevision(n=>n+1);void readBuilderTakes(song.id).then(setTakes).catch(()=>setMessage('Could not refresh takes.'));}}/></>}
       {song && <details className="song-builder-more-tools card" open={workspace==="rehearse"}>
         <summary>Recording, practice, mixer, and export settings</summary>
         <div className="song-builder-tools-grid">
@@ -2503,10 +2733,11 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
             </>}
           </div><SongBuilderMicRecorder key={`mic-${song.id}-${part?.id ?? "none"}`} songId={song.id} part={part ?? null} bpm={section?.bpm ?? song.bpm} disabled={!['idle','finished'].includes(playbackMode)} onApply={(hits,replaceVoice,voice)=>{if(!part)return;updatePart(part.id,current=>{const next=new Map<string,DrumPart['hits'][number]>((replaceVoice?current.hits.filter(hit=>hit.instrument!==voice):current.hits).map(hit=>[`${hit.instrument}:${hit.step}`,hit]));for(const hit of hits)next.set(`${hit.instrument}:${hit.step}`,hit);return {...current,hits:[...next.values()].sort((a,b)=>a.step-b.step||a.instrument.localeCompare(b.instrument))};});}}/></section>
           <section><h3>Practice range and feel</h3><details><summary>Preview feel before applying</summary><label>Proposed swing · {feelDraft.swing}%<input type="range" min={50} max={75} value={feelDraft.swing} onChange={e=>setFeelDraft(current=>({...current,swing:Number(e.target.value)}))}/></label><label>Proposed timing variation · {feelDraft.amount}%<input type="range" min={0} max={100} value={feelDraft.amount} onChange={e=>setFeelDraft(current=>({...current,amount:Number(e.target.value)}))}/></label><label>Proposed velocity variation · {feelDraft.velocity}%<input type="range" min={0} max={100} value={feelDraft.velocity} onChange={e=>setFeelDraft(current=>({...current,velocity:Number(e.target.value)}))}/></label><div className="song-builder-actions"><button type="button" onClick={()=>void auditionFeel()}>Hear proposed feel</button><button type="button" onClick={()=>{clearPreview();changeBuilderSettings(current=>({...current,swing:feelDraft.swing,humanizeAmount:feelDraft.amount,humanizeVelocityAmount:feelDraft.velocity,humanizeSeed:feelDraft.seed}));setMessage('Feel applied to playback and audio exports. Grid positions remain editable.');}}>Apply feel</button><button type="button" onClick={()=>{clearPreview();setFeelDraft({swing,amount:builderSettings.humanizeAmount,velocity:builderSettings.humanizeVelocityAmount,seed:builderSettings.humanizeSeed});}}>Reset preview</button></div></details><div className="song-builder-tool-fields"><label>Loops before tempo increase<input type="number" min={1} max={32} value={builderSettings.practiceLoopsPerStep} onChange={e=>changeBuilderSettings(current=>({...current,practiceLoopsPerStep:Math.max(1,Math.min(32,Number(e.target.value)||1))}))}/></label><label>Target tempo · BPM<input type="number" min={40} max={200} value={builderSettings.practiceTargetBpm} onChange={e=>changeBuilderSettings(current=>({...current,practiceTargetBpm:clampBpm(Number(e.target.value))}))}/></label></div><div className="song-builder-tool-fields"><label>Start measure<select disabled={!['idle', 'finished'].includes(playbackMode)} value={safePracticeStart} onChange={(event) => { const value = Number(event.target.value); setPracticeRangeStart(value); if (value > safePracticeEnd) setPracticeRangeEnd(value); }}>{Array.from({ length: practiceBarCount }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select></label><label>End measure<select disabled={!['idle', 'finished'].includes(playbackMode)} value={safePracticeEnd} onChange={(event) => setPracticeRangeEnd(Math.max(safePracticeStart, Number(event.target.value)))}>{Array.from({ length: practiceBarCount - safePracticeStart + 1 }, (_, index) => <option key={safePracticeStart + index} value={safePracticeStart + index}>{safePracticeStart + index}</option>)}</select></label><label>Tempo increase<select disabled={!['idle', 'finished'].includes(playbackMode)} value={builderSettings.practiceTempoStep} onChange={(event) => changeBuilderSettings((current) => ({ ...current, practiceTempoStep: Number(event.target.value) }))}><option value={0}>Off</option><option value={1}>+1 BPM</option><option value={2}>+2 BPM</option><option value={3}>+3 BPM</option><option value={5}>+5 BPM</option></select></label></div><p>Turn on “Loop range” to repeat these measures. Tempo increases after the selected number of loops and stops increasing at the target tempo.</p><label className="song-builder-setting-slider">Humanize timing · {builderSettings.humanizeAmount}%<input type="range" min={0} max={100} step={5} value={builderSettings.humanizeAmount} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, humanizeAmount: Number(event.target.value) }))} /></label><label>Velocity variation · {builderSettings.humanizeVelocityAmount}%<input type="range" min={0} max={100} step={5} value={builderSettings.humanizeVelocityAmount} disabled={!["idle","finished"].includes(playbackMode)} onChange={e=>changeBuilderSettings(current=>({...current,humanizeVelocityAmount:Number(e.target.value)}))}/></label><label>Repeatable humanize seed<input type="number" min={0} max={2147483647} value={builderSettings.humanizeSeed} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, humanizeSeed: Math.max(0, Number(event.target.value) || 0) }))} /></label></section>
+          <details className="song-builder-microtiming"><summary>Reusable microtiming templates · {builderSettings.microtimingPresets.length}</summary><p>Save the timing feel from a recorded MIDI take, then transfer it to the selected pattern. Note spacing on the score reflects the applied offsets.</p><div className="song-builder-tool-fields"><label>Template name<input maxLength={40} value={microtimingPresetName} onChange={event=>setMicrotimingPresetName(event.target.value)} placeholder="e.g. relaxed backbeat"/></label><button type="button" disabled={!selectedTake||!selectedTake.hits.length||builderSettings.microtimingPresets.length>=20&&!builderSettings.microtimingPresets.some(item=>item.name.toLowerCase()===microtimingPresetName.trim().toLowerCase())} onClick={saveTakeFeelAsPreset}>Save feel from selected take</button></div>{builderSettings.microtimingPresets.length>0?<><div className="song-builder-tool-fields"><label>Saved timing feel<select value={microtimingPresetChoice} onChange={event=>setMicrotimingPresetChoice(event.target.value)}><option value="">Choose a feel…</option>{builderSettings.microtimingPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name} · {preset.points.length} cues</option>)}</select></label><label>Apply strength · {microtimingStrength}%<input type="range" min={0} max={100} step={5} value={microtimingStrength} onChange={event=>setMicrotimingStrength(Number(event.target.value))}/></label></div><div className="song-builder-actions"><button type="button" disabled={!part||!microtimingPresetChoice||!['idle','finished'].includes(playbackMode)} onClick={applyMicrotimingPreset}>Apply to selected pattern</button><button type="button" disabled={!microtimingPresetChoice} onClick={()=>{changeBuilderSettings(current=>({...current,microtimingPresets:current.microtimingPresets.filter(item=>item.id!==microtimingPresetChoice)}));setMicrotimingPresetChoice('');}}>Delete template</button></div></>:<p>No timing templates saved yet. Record a MIDI take and save its feel here.</p>}</details>
           <section className="song-builder-practice-report" aria-label="Local rehearsal report"><h3>Rehearsal report</h3><p>Practice sessions are stored on this device. Each run records time spent playing, measures reached, tempo range, and manual seeks.</p>{practiceReports.length ? <><p><strong>{practiceReports.length}</strong> recent sessions · {Math.round(practiceReports.reduce((sum,item)=>sum+item.durationMs,0)/60000)} active minutes · {practiceReports.filter(item=>item.completed).length} completed runs</p><div className="song-builder-practice-targets"><strong>Suggested focus targets</strong><p>Ranking blends measures you have revisited with density, offbeat notes, and ornamentation.</p>{practiceTargets.map(target=><button type="button" key={target.measure} onClick={()=>focusPracticeMeasure(target.index,target.reason)}>Measure {target.measure} · {target.reason}</button>)}</div>{(()=>{const totals=new Map<string,number>();for(const report of practiceReports)for(const [measure,count] of Object.entries(report.measureVisits))totals.set(measure,(totals.get(measure)??0)+count);const focus=[...totals.entries()].sort((a,b)=>b[1]-a[1]).slice(0,3);return focus.length>0&&<div className="song-builder-actions"><strong>Most rehearsed measures:</strong>{focus.map(([measure,count])=><button type="button" key={measure} onClick={()=>{const index=Math.max(0,Math.min(fullSongBars.length-1,Number(measure)-1));stopPlayback();setPracticeRangeStart(index+1);setPracticeRangeEnd(index+1);setPlayScope("song");setLoop(true);setSeekBar(index);setMessage(`Practice range set to measure ${index+1}. Press Play to rehearse it.`);}}>Measure {measure} · {count} passes</button>)}</div>;})()}<ul>{practiceReports.slice(0,5).map(report=><li key={report.id}><strong>{new Date(report.startedAt).toLocaleString()}</strong><span>{Math.floor(report.durationMs/60000)}:{String(Math.floor(report.durationMs/1000)%60).padStart(2,"0")} active · {Object.keys(report.measureVisits).length} measures · {report.startBpm}→{report.endBpm} BPM · {report.manualSeeks} seeks · {report.completed?"completed":"stopped"}</span></li>)}</ul></> : <p>No rehearsal sessions yet. Start playback to build a report.</p>}<Link className="button-secondary" href={section&&part?`/trainer?pattern=${encodeURIComponent(`song:${song.id}:${section.id}:${part.id}`)}`:"/trainer"}>Open active pattern in Trainer</Link></section>
           <section className="song-builder-mixer">
             <h3>Drum kit mixer</h3>
-            <label>Load saved kit<select value="" onChange={(event) => { const preset = builderSettings.kitPresets.find((item) => item.id === event.target.value); if (preset) changeBuilderSettings((current) => ({ ...current, mix: structuredClone(preset.mix) })); }}><option value="">Choose a kit preset…</option>{builderSettings.kitPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label><details className="song-builder-kit-ab"><summary>A/B compare kit presets</summary><p>The selected pattern plays twice with each preset. Custom accent samples still switch at velocity 96.</p><div className="song-builder-tool-fields"><label>Kit A<select value={kitCompareA} onChange={event=>setKitCompareA(event.target.value)}><option value="">Choose preset A</option>{builderSettings.kitPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label><label>Kit B<select value={kitCompareB} onChange={event=>setKitCompareB(event.target.value)}><option value="">Choose preset B</option>{builderSettings.kitPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label></div><div className="song-builder-actions"><button type="button" disabled={!part||!kitCompareA||!['idle','finished'].includes(playbackMode)} aria-pressed={previewSourceId===`kit-a:${kitCompareA}`} onClick={()=>void auditionKitPreset(kitCompareA,"a")}>{previewSourceId===`kit-a:${kitCompareA}`?"Stop kit A":"Audition kit A"}</button><button type="button" disabled={!part||!kitCompareB||!['idle','finished'].includes(playbackMode)} aria-pressed={previewSourceId===`kit-b:${kitCompareB}`} onClick={()=>void auditionKitPreset(kitCompareB,"b")}>{previewSourceId===`kit-b:${kitCompareB}`?"Stop kit B":"Audition kit B"}</button></div></details>
+            <div className="song-builder-tool-fields"><label>Load saved kit<select value={kitPresetChoice} onChange={(event) => void applyKitPreset(event.target.value)}><option value="">Choose a kit preset…</option>{builderSettings.kitPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name} · samples and mix</option>)}</select></label><button type="button" disabled={!kitPresetChoice} onClick={()=>void applyKitPreset(kitPresetChoice)}>Apply saved kit</button><button type="button" disabled={!kitPresetChoice} onClick={()=>void removeKitPreset(kitPresetChoice)}>Delete kit preset</button></div><details className="song-builder-kit-ab"><summary>A/B compare kit presets</summary><p>The selected pattern plays twice with each preset, including its saved primary, soft, and accent samples.</p><div className="song-builder-tool-fields"><label>Kit A<select value={kitCompareA} onChange={event=>setKitCompareA(event.target.value)}><option value="">Choose preset A</option>{builderSettings.kitPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label><label>Kit B<select value={kitCompareB} onChange={event=>setKitCompareB(event.target.value)}><option value="">Choose preset B</option>{builderSettings.kitPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label></div><div className="song-builder-actions"><button type="button" disabled={!part||!kitCompareA||!['idle','finished'].includes(playbackMode)} aria-pressed={previewSourceId===`kit-a:${kitCompareA}`} onClick={()=>void auditionKitPreset(kitCompareA,"a")}>{previewSourceId===`kit-a:${kitCompareA}`?"Stop kit A":"Audition kit A"}</button><button type="button" disabled={!part||!kitCompareB||!['idle','finished'].includes(playbackMode)} aria-pressed={previewSourceId===`kit-b:${kitCompareB}`} onClick={()=>void auditionKitPreset(kitCompareB,"b")}>{previewSourceId===`kit-b:${kitCompareB}`?"Stop kit B":"Audition kit B"}</button></div></details>
             <div className="song-builder-mix-head"><span>Voice</span><span>Level</span><span>Pan</span><span>Sample</span><span>Mute</span><span>Solo</span></div>
             {SONG_INSTRUMENTS.map((voice) => <div className="song-builder-mix-row" key={voice}>
               <strong>{VOICE_LABEL[voice]}</strong>
@@ -2518,11 +2749,13 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
             </div>)}
             <div className="song-builder-tool-actions"><label>Sample voice<select value={kitSampleVoice} onChange={(event) => setKitSampleVoice(event.target.value as SongInstrument)}>{SONG_INSTRUMENTS.map((voice) => <option key={voice} value={voice}>{VOICE_LABEL[voice]}</option>)}</select></label><label>Import primary sample<input type="file" accept="audio/*" onChange={(event) => void importCustomSample(event.target.files?.[0], "primary")} /></label><label>Soft velocity layer · below 48<input type="file" accept="audio/*" disabled={!customSampleNames[kitSampleVoice]} onChange={(event) => void importCustomSample(event.target.files?.[0], "soft")} /></label><label>Accent velocity layer · 96+<input type="file" accept="audio/*" disabled={!customSampleNames[kitSampleVoice]} onChange={(event) => void importCustomSample(event.target.files?.[0], "accent")} /></label><button type="button" disabled={!customSoftSampleNames[kitSampleVoice]} onClick={() => { void deleteCustomSample(kitSampleVoice, "soft").then(() => audioRef.current?.setCustomSample(kitSampleVoice, null, "soft")).then(() => { setCustomSoftSampleNames(current => { const next = { ...current }; delete next[kitSampleVoice]; return next; }); setMessage(`${VOICE_LABEL[kitSampleVoice]} soft layer removed.`); }).catch(() => setMessage("Could not remove that soft layer.")); }}>Remove soft layer{customSoftSampleNames[kitSampleVoice] ? ` · ${customSoftSampleNames[kitSampleVoice]}` : ""}</button><button type="button" disabled={!customAccentSampleNames[kitSampleVoice]} onClick={() => { void deleteCustomSample(kitSampleVoice, "accent").then(() => audioRef.current?.setCustomSample(kitSampleVoice, null, "accent")).then(() => { setCustomAccentSampleNames(current => { const next = { ...current }; delete next[kitSampleVoice]; return next; }); setMessage(`${VOICE_LABEL[kitSampleVoice]} accent layer removed.`); }).catch(() => setMessage("Could not remove that accent layer.")); }}>Remove accent layer{customAccentSampleNames[kitSampleVoice] ? ` · ${customAccentSampleNames[kitSampleVoice]}` : ""}</button><button type="button" onClick={() => void removeCustomSample()} disabled={!customSampleNames[kitSampleVoice]}>Remove custom sample and layers</button></div>
             <div className="song-builder-tool-fields song-builder-sound-shaping"><label>{VOICE_LABEL[kitSampleVoice]} pitch · {builderSettings.mix.pitch[kitSampleVoice]} semitones<input type="range" min={-12} max={12} step={1} value={builderSettings.mix.pitch[kitSampleVoice]} disabled={!['idle','finished'].includes(playbackMode)} onChange={event=>changeBuilderSettings(current=>({...current,mix:{...current.mix,pitch:{...current.mix.pitch,[kitSampleVoice]:Number(event.target.value)}}}))}/></label><label>{VOICE_LABEL[kitSampleVoice]} decay · {Math.round(builderSettings.mix.decay[kitSampleVoice]*100)}%<input type="range" min={5} max={100} step={5} value={Math.round(builderSettings.mix.decay[kitSampleVoice]*100)} disabled={!['idle','finished'].includes(playbackMode)} onChange={event=>changeBuilderSettings(current=>({...current,mix:{...current.mix,decay:{...current.mix.decay,[kitSampleVoice]:Number(event.target.value)/100}}}))}/></label></div>
+            <SongBuilderSampleEditor key={`${kitSampleVoice}:${builderSettings.mix.sampleIndex[kitSampleVoice]}`} voice={kitSampleVoice} sampleIndex={builderSettings.mix.sampleIndex[kitSampleVoice]} names={{primary:customSampleNames[kitSampleVoice],soft:customSoftSampleNames[kitSampleVoice],accent:customAccentSampleNames[kitSampleVoice]}} onSave={saveEditedCustomSample}/>
             <p>Import up to 12 MB per layer. Soft samples play below velocity 48, the primary sample from 48–95, and the accent layer at 96+. Pitch and decay affect playback and WAV/stem renders. Open hi-hats are choked when another hi-hat voice plays.</p>
             <details className="song-builder-custom-voices"><summary>Custom and extra percussion lanes</summary><p>Add up to eight independent custom lanes. Each lane appears in the grid, staff, mixer, MIDI map, playback and exports. Choose its sample, MIDI note and staff position below.</p><div className="song-builder-tool-actions"><button type="button" disabled={activeCustomVoiceIds.length>=customVoiceIds.length} onClick={addCustomVoice}>Add custom lane</button><span>{activeCustomVoiceIds.length} of {customVoiceIds.length} custom lanes in use</span></div>{(["cowbell", "shaker", "tambourine", ...activeCustomVoiceIds] as SongInstrument[]).map(voice=><div className="song-builder-custom-lane" key={voice}><label>{BASE_VOICE_LABEL[voice]} lane name<input maxLength={40} value={song.voiceLabels?.[voice]??""} placeholder={BASE_VOICE_LABEL[voice]} onChange={event=>{const value=event.target.value.trim().slice(0,40);updateSong(current=>{const voiceLabels={...current.voiceLabels};if(value)voiceLabels[voice]=value;else delete voiceLabels[voice];return {...current,voiceLabels:Object.keys(voiceLabels).length?voiceLabels:undefined};});}}/></label>{customVoiceIds.indexOf(voice)>=4&&<button type="button" onClick={()=>removeCustomVoice(voice)}>Remove lane</button>}</div>)}</details>
-            <div className="song-builder-tool-actions"><label>Save kit preset<input maxLength={40} value={kitPresetName} onChange={(event) => setKitPresetName(event.target.value)} placeholder="Warm club kit" /></label><button type="button" onClick={saveKitPreset} disabled={!kitPresetName.trim()}>Save preset</button></div>
+            <div className="song-builder-tool-actions"><label>Save kit preset<input maxLength={40} value={kitPresetName} onChange={(event) => setKitPresetName(event.target.value)} placeholder="Warm club kit" /></label><button type="button" onClick={()=>void saveKitPreset()} disabled={!kitPresetName.trim()}>Save samples and mixer as preset</button></div>
           </section>
-          <section><h3>MIDI drum map</h3><p>Choose the note numbers your DAW expects. The MIDI and MusicXML exports use this map.</p><label><input type="checkbox" checked={builderSettings.midiSeparateTracks} onChange={event=>changeBuilderSettings(current=>({...current,midiSeparateTracks:event.target.checked}))}/> Export one MIDI track per drum voice</label><div className="song-builder-midi-map">{SONG_INSTRUMENTS.map((voice) => <label key={voice}>{VOICE_LABEL[voice]}<input aria-label={`${VOICE_LABEL[voice]} MIDI note`} type="number" min={0} max={127} value={builderSettings.midiNotes[voice]} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, midiNotes: { ...current.midiNotes, [voice]: Math.max(0, Math.min(127, Number(event.target.value) || 0)) } }))} /></label>)}</div><button className="button-secondary" type="button" onClick={() => changeBuilderSettings((current) => ({ ...current, midiNotes: { ...DEFAULT_SONG_BUILDER_SETTINGS.midiNotes } }))}>Reset General MIDI map</button></section>
+          <section><h3>MIDI drum map</h3><p>Choose the note numbers your DAW expects. The General MIDI percussion map is the starting point; save editable maps for your devices or software.</p><div className="song-builder-tool-fields"><label>Load a MIDI map<select value={midiMapProfileChoice} disabled={!['idle','finished'].includes(playbackMode)} onChange={event=>applyMidiMapProfile(event.target.value)}><option value="">Choose a map…</option><optgroup label="Built in">{BUILTIN_MIDI_MAP_PRESETS.map(profile=><option key={profile.id} value={`builtin:${profile.id}`}>{profile.name}</option>)}</optgroup>{builderSettings.midiMapPresets.length>0&&<optgroup label="Saved on this device">{builderSettings.midiMapPresets.map(profile=><option key={profile.id} value={`saved:${profile.id}`}>{profile.name}</option>)}</optgroup>}{(library.kitProfiles??[]).some(profile=>Object.keys(profile.midiNotes).length>0)&&<optgroup label="Song Library kit profiles">{(library.kitProfiles??[]).filter(profile=>Object.keys(profile.midiNotes).length>0).map(profile=><option key={profile.id} value={`kit:${profile.id}`}>{profile.name}</option>)}</optgroup>}</select></label><label>Save current map<input maxLength={40} value={midiMapProfileName} onChange={event=>setMidiMapProfileName(event.target.value)} placeholder="My electronic kit"/></label><button type="button" disabled={!midiMapProfileName.trim()} onClick={saveMidiMapProfile}>Save MIDI map</button>{midiMapProfileChoice.startsWith('saved:')&&<button type="button" onClick={()=>{const id=midiMapProfileChoice.slice(6);changeBuilderSettings(current=>({...current,midiMapPresets:current.midiMapPresets.filter(profile=>profile.id!==id)}));setMidiMapProfileChoice('');setMessage('Saved MIDI map removed.');}}>Delete selected map</button>}</div><label><input type="checkbox" checked={builderSettings.midiSeparateTracks} onChange={event=>changeBuilderSettings(current=>({...current,midiSeparateTracks:event.target.checked}))}/> Export one MIDI track per drum voice</label><div className="song-builder-midi-map">{SONG_INSTRUMENTS.map((voice) => <label key={voice}>{VOICE_LABEL[voice]}<input aria-label={`${VOICE_LABEL[voice]} MIDI note`} type="number" min={0} max={127} value={builderSettings.midiNotes[voice]} disabled={!['idle', 'finished'].includes(playbackMode)} onChange={(event) => changeBuilderSettings((current) => ({ ...current, midiNotes: { ...current.midiNotes, [voice]: Math.max(0, Math.min(127, Number(event.target.value) || 0)) } }))} /></label>)}</div><button className="button-secondary" type="button" onClick={() => {changeBuilderSettings((current) => ({ ...current, midiNotes: { ...DEFAULT_SONG_BUILDER_SETTINGS.midiNotes } }));setMidiMapProfileChoice('builtin:gm-standard');}}>Reset General MIDI map</button></section>
+          <section className="song-builder-midi-controls"><h3>MIDI control surface</h3><p>Learn a button or knob from the selected MIDI input to control playback. Control-change knobs and faders trigger when they cross the midpoint; note buttons trigger on press.</p>{([ ["toggle-play","Play / pause"], ["stop","Stop"], ["toggle-loop","Toggle loop"], ["toggle-metronome","Toggle metronome"], ["toggle-count-in","Toggle four-beat count-in"], ["previous-measure","Previous measure"], ["next-measure","Next measure"] ] as Array<[SongBuilderMidiControlAction,string]>).map(([action,label])=>{const binding=builderSettings.midiControlBindings.find(item=>item.action===action);return <div className="song-builder-midi-control-row" key={action}><strong>{label}</strong><span>{binding?`${binding.message==="note"?"Note":"CC"} ${binding.number} · channel ${binding.channel}`:"Not mapped"}</span><button type="button" disabled={!builderSettings.midiInputId} aria-pressed={midiLearnAction===action} onClick={()=>{setMidiLearnAction(action);setMidiControlStatus(`Press a MIDI note or move a control for “${label}”.`);}}>{midiLearnAction===action?"Listening…":"Learn control"}</button>{binding&&<button type="button" onClick={()=>changeBuilderSettings(current=>({...current,midiControlBindings:current.midiControlBindings.filter(item=>item.action!==action)}))}>Clear</button>}</div>;})}<p role="status" aria-live="polite">{midiControlStatus||"Connect a MIDI input, then learn any transport controls you want to use."}</p></section>
         </div>
       </details>}
         <SongBuilderVersions key={`versions-${song.id}-${assetRevision}`} song={song} mix={builderSettings.mix} swing={swing} onRestore={restored=>{updateSong(current=>({...restored,id:current.id}));setActiveSectionId('');setActivePartId('');setActiveClipId('');setPendingGrid(null);}}/>
@@ -2558,6 +2791,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
               <details className="song-builder-automation"><summary>Section automation · {section.automation?"active":"off"}</summary><p>Shape the drum mix across this section. Changes follow its repeated passes and are included in playback and WAV exports.</p><div className="song-builder-automation-lanes">{([['volumeFrom','volumeTo','Overall volume'],['cymbalFrom','cymbalTo','Cymbal intensity']] as const).map(([fromKey,toKey,label])=><fieldset key={label}><legend>{label}</legend><label>Start · {Math.round((section.automation?.[fromKey]??1)*100)}%<input type="range" min={0} max={1} step={0.01} value={section.automation?.[fromKey]??1} onChange={event=>updateSection(section.id,current=>({...current,automation:{...current.automation,[fromKey]:Number(event.target.value)}}))}/></label><label>End · {Math.round((section.automation?.[toKey]??section.automation?.[fromKey]??1)*100)}%<input type="range" min={0} max={1} step={0.01} value={section.automation?.[toKey]??section.automation?.[fromKey]??1} onChange={event=>updateSection(section.id,current=>({...current,automation:{...current.automation,[toKey]:Number(event.target.value)}}))}/></label></fieldset>)}</div><fieldset><legend>Mute voices for this section</legend><div className="song-builder-automation-mutes">{BUILDER_VOICES.map(voice=><label key={voice}><input type="checkbox" checked={section.automation?.mutedVoices?.includes(voice)??false} onChange={event=>updateSection(section.id,current=>{const muted=new Set(current.automation?.mutedVoices??[]);if(event.target.checked)muted.add(voice);else muted.delete(voice);return {...current,automation:{...current.automation,mutedVoices:[...muted]}};})}/>{VOICE_LABEL[voice]}</label>)}</div></fieldset><SongBuilderVoiceAutomation automation={section.automation} voices={BUILDER_VOICES} labels={VOICE_LABEL} onChange={automation=>updateSection(section.id,current=>({...current,automation}))}/>{section.automation&&<button type="button" onClick={()=>updateSection(section.id,current=>({...current,automation:undefined}))}>Clear section automation</button>}</details>
               <label>Rehearsal marker<input maxLength={80} value={section.marker ?? ""} placeholder="e.g. A · Chorus" onChange={(event) => updateSection(section.id, (current) => ({ ...current, marker: event.target.value || undefined }))} /></label>
               <details className="song-builder-rehearsal-cues"><summary>Reference cue lanes · {section.rehearsalCues?.length??0}</summary><p>Add chord changes, lyric prompts, or band directions at measure boundaries. They appear during playback and in the score and MIDI marker track.</p><div className="song-builder-tool-fields"><label>Measure<input type="number" min={1} max={cueMeasureMax} value={cueMeasure} onChange={event=>{const measure=Math.max(1,Math.min(cueMeasureMax,Number(event.target.value)||1));setCueMeasure(measure);setCueDraft(section.rehearsalCues?.find(cue=>cue.measure===measure&&(cue.kind??'band')===cueKind)?.text??'');}}/></label><label>Cue lane<select value={cueKind} onChange={event=>{const kind=event.target.value as typeof cueKind;setCueKind(kind);setCueDraft(section.rehearsalCues?.find(cue=>cue.measure===cueMeasure&&(cue.kind??'band')===kind)?.text??'');}}><option value="band">Band cue</option><option value="chord">Chord</option><option value="lyric">Lyric prompt</option></select></label><label>{cueKind==='chord'?'Chord / harmony':cueKind==='lyric'?'Lyric prompt':'Band direction'}<input maxLength={240} value={cueDraft} placeholder={cueKind==='chord'?'e.g. Am7':cueKind==='lyric'?'e.g. Verse starts':'e.g. Drop to hi-hat; watch the stop'} onChange={event=>setCueDraft(event.target.value)}/></label><button type="button" disabled={!sectionMeasureCount} onClick={saveRehearsalCue}>{selectedRehearsalCue?'Update cue':'Add cue'}</button>{selectedRehearsalCue&&<button type="button" onClick={()=>{updateSection(section.id,current=>({...current,rehearsalCues:(current.rehearsalCues??[]).filter(cue=>cue.measure!==cueMeasure||(cue.kind??'band')!==cueKind)}));setCueDraft('');setMessage(`Cue removed from measure ${cueMeasure}.`);}}>Remove cue</button>}</div>{!!section.rehearsalCues?.length&&<ul>{section.rehearsalCues.map(cue=><li key={cue.id}><button type="button" onClick={()=>{const kind=cue.kind??'band';setCueMeasure(Math.min(cueMeasureMax,cue.measure));setCueKind(kind);setCueDraft(cue.text);}}>{cue.kind==='chord'?'Chord':cue.kind==='lyric'?'Lyric':'Band cue'} · Measure {cue.measure}: {cue.text}</button><button type="button" aria-label={`Delete ${cue.kind??'band'} cue at measure ${cue.measure}`} onClick={()=>updateSection(section.id,current=>({...current,rehearsalCues:(current.rehearsalCues??[]).filter(item=>item.id!==cue.id)}))}>Remove</button></li>)}</ul>}</details>
+              <SongBuilderReviewThreads section={section} measureCount={cueMeasureMax} onChange={reviewComments=>updateSection(section.id,current=>({...current,reviewComments}))}/>
               <label>Pickup length<select value={section.pickupBeats ?? 0} onChange={(event) => updateSection(section.id, (current) => ({ ...current, pickupBeats: Number(event.target.value) || undefined }))}><option value={0}>No pickup</option>{[0.5, 1, 1.5, 2, 3, 4].map((beats) => <option key={beats} value={beats}>{beats} beats</option>)}</select></label>
               <label>Repeat group<input maxLength={80} value={section.endingGroup ?? ""} placeholder="e.g. Verse loop" onChange={(event) => updateSection(section.id, (current) => ({ ...current, endingGroup: event.target.value.trim() || undefined }))} /></label>
               <label>Ending<select value={section.endingPass ?? 0} onChange={(event) => updateSection(section.id, (current) => ({ ...current, endingGroup: current.endingGroup || `repeat-${current.id.slice(0, 8)}`, endingPass: Number(event.target.value) === 1 || Number(event.target.value) === 2 ? Number(event.target.value) as 1 | 2 : undefined }))}><option value={0}>Shared section</option><option value={1}>First ending</option><option value={2}>Second ending</option></select></label>
@@ -2667,13 +2901,15 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         </div>}
 
         <section className="card song-builder-notation" aria-label="Notation preview and download">
+          {song && <SongRightsChecklist song={song} showSourceFields onSave={next=>updateSong(current=>{const draft={...current,source:next.source};const review=next.rightsReview?.sourceSignature===songRightsSourceSignature(next)?makeSongRightsReview(draft,next.rightsReview.checks,new Date(next.rightsReview.reviewedAt)):next.rightsReview;return {...draft,rightsReview:review};})}/>}
           <div className="song-builder-section-heading"><div><span className="eyebrow">Print and share</span><h2>Read the arrangement.</h2></div>
-            <div className="song-builder-tool-fields"><label>Extract drum part<select value={exportVoice} onChange={e=>setExportVoice(e.target.value as typeof exportVoice)}><option value="all">All drum voices</option>{SONG_INSTRUMENTS.map(voice=><option key={voice} value={voice}>{VOICE_LABEL[voice]}</option>)}</select></label><label><input type="checkbox" checked={includeExportClick} onChange={e=>setIncludeExportClick(e.target.checked)}/>Include metronome in WAV / stems</label><label><input type="checkbox" checked={includeExportBacking} onChange={e=>setIncludeExportBacking(e.target.checked)}/>Include backing track in WAV / stems</label></div><div className="song-builder-export-actions"><label>Show<select value={previewScope} onChange={(event) => { setPreviewScope(event.target.value); setPreviewPage(0); }}><option value="song">Full song</option>{song.sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" onClick={()=>void exportProjectFile()}>Complete project backup</button><button type="button" onClick={()=>void copyPlaybackLink()}>Copy playback link</button>{shareLinkDraft&&<label className="song-builder-share-link">Playback link<input readOnly value={shareLinkDraft} onFocus={event=>event.currentTarget.select()}/></label>}<button type="button" onClick={()=>projectFileInputRef.current?.click()}>Import project backup</button><button type="button" onClick={() => void exportSheet("png")} disabled={!notationBars.length}>PNG</button><button type="button" onClick={() => void exportSheet("pdf")} disabled={!notationBars.length}>PDF</button><button type="button" onClick={() => void exportSheet("midi")} disabled={!notationBars.length}>MIDI</button><button type="button" onClick={() => void exportSheet("musicxml")} disabled={!notationBars.length}>MusicXML</button><button type="button" onClick={() => void exportSheet("wav")} disabled={!notationBars.length}>WAV audio</button><button type="button" onClick={() => void exportSheet("stems")} disabled={!notationBars.length}>Aligned stems ZIP</button></div><small>Stem archives support arrangements up to three minutes per export. Choose a section to split a longer song.</small>
+            <div className="song-builder-tool-fields"><label>Extract drum part<select value={exportVoice} onChange={e=>setExportVoice(e.target.value as typeof exportVoice)}><option value="all">All drum voices</option>{SONG_INSTRUMENTS.map(voice=><option key={voice} value={voice}>{VOICE_LABEL[voice]}</option>)}</select></label><label><input type="checkbox" checked={includeExportClick} onChange={e=>setIncludeExportClick(e.target.checked)}/>Include metronome in WAV / stems</label><label><input type="checkbox" checked={includeExportBacking} onChange={e=>setIncludeExportBacking(e.target.checked)}/>Include backing tracks in WAV / stems</label></div><div className="song-builder-export-actions"><label>Show<select value={previewScope} onChange={(event) => { setPreviewScope(event.target.value); setPreviewPage(0); }}><option value="song">Full song</option>{song.sections.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" onClick={()=>void exportProjectFile()}>Complete project backup</button><button type="button" onClick={()=>void copyPlaybackLink()}>Copy playback link</button>{shareLinkDraft&&<label className="song-builder-share-link">Playback link<input readOnly value={shareLinkDraft} onFocus={event=>event.currentTarget.select()}/></label>}<button type="button" onClick={()=>projectFileInputRef.current?.click()}>Import project backup</button><button type="button" onClick={() => void exportSheet("png")} disabled={!notationBars.length}>PNG</button><button type="button" onClick={() => void exportSheet("pdf")} disabled={!notationBars.length}>PDF</button><button type="button" onClick={() => void exportSheet("midi")} disabled={!notationBars.length}>MIDI</button><button type="button" onClick={() => void exportSheet("musicxml")} disabled={!notationBars.length}>MusicXML</button><button type="button" onClick={() => void exportSheet("wav")} disabled={!notationBars.length||!!audioExportProgress}>WAV audio</button><button type="button" onClick={() => void exportSheet("stems")} disabled={!notationBars.length||!!audioExportProgress}>Aligned stems ZIP</button></div><small>WAV and aligned stem exports support arrangements up to eight minutes. WAV cancel takes effect after the current audio render; ZIP cancel stops before the next stem.</small>
+            {audioExportProgress&&<div className="song-builder-stem-progress" role="status" aria-live="polite"><progress max={audioExportProgress.total} value={audioExportProgress.completed}/><span>{audioExportProgress.label} · {audioExportProgress.completed} of {audioExportProgress.total}</span><button type="button" onClick={()=>{cancelAudioExportRef.current=true;setMessage("Export cancellation requested. The current render will finish before it stops.");}}>Cancel export</button></div>}
             <details className="song-builder-audio-export"><summary>Audio export format and size estimate</summary><p>Applies to WAV and aligned stems. Peak normalization analyzes the rendered audio before writing PCM.</p><div className="song-builder-tool-fields"><label>Sample rate<select value={builderSettings.audioExport.sampleRate} onChange={event=>changeBuilderSettings(current=>({...current,audioExport:{...current.audioExport,sampleRate:Number(event.target.value) as 44100|48000}}))}><option value={44100}>44.1 kHz</option><option value={48000}>48 kHz</option></select></label><label>PCM bit depth<select value={builderSettings.audioExport.bitDepth} onChange={event=>changeBuilderSettings(current=>({...current,audioExport:{...current.audioExport,bitDepth:Number(event.target.value) as 16|24}}))}><option value={16}>16-bit</option><option value={24}>24-bit</option></select></label><label>Stem filename prefix<input maxLength={40} value={builderSettings.audioExport.stemPrefix} onChange={event=>changeBuilderSettings(current=>({...current,audioExport:{...current.audioExport,stemPrefix:event.target.value}}))}/></label><label><input type="checkbox" checked={builderSettings.audioExport.normalize} onChange={event=>changeBuilderSettings(current=>({...current,audioExport:{...current.audioExport,normalize:event.target.checked}}))}/>Peak normalize</label>{builderSettings.audioExport.normalize&&<label>Target peak · dBFS<input type="number" min={-12} max={-0.1} step={0.1} value={builderSettings.audioExport.targetDbfs} onChange={event=>changeBuilderSettings(current=>({...current,audioExport:{...current.audioExport,targetDbfs:Math.max(-12,Math.min(-0.1,Number(event.target.value)||-1))}}))}/></label>}</div>{(()=>{const seconds=notationBars.reduce((sum,bar)=>sum+bar.beats*60/bar.bpm,0)+1;const bytes=Math.round(seconds*builderSettings.audioExport.sampleRate*2*(builderSettings.audioExport.bitDepth/8));const voices=new Set(notationBars.flatMap(bar=>bar.hits.map(hit=>hit.instrument==='openhat'&&hit.articulation==='foot-splash'?'openhat':hit.instrument))).size;const bytesLabel=(value:number)=>value>=1024*1024?`${(value/1024/1024).toFixed(1)} MB`:`${Math.ceil(value/1024)} KB`;return <p>Selected range: {Math.floor(seconds/60)}:{String(Math.round(seconds%60)).padStart(2,'0')} · stereo WAV estimate {bytesLabel(bytes)} · drum stem estimate about {bytesLabel(bytes*Math.max(1,voices))}, before ZIP compression.</p>;})()}</details>
           </div>
           <details className="card song-builder-extra song-builder-export-presets"><summary>Reusable chart presets · {builderSettings.exportPresets.length}</summary><p>Save the notation view, page layout, song or section scope, and preferred download format. Section presets use the currently selected section when applied.</p><div className="song-builder-tool-fields"><label>Preset name<input maxLength={40} value={exportPresetNameDraft} onChange={event=>setExportPresetNameDraft(event.target.value)} placeholder="e.g. Rehearsal staff PDF"/></label><label>Preferred download<select value={exportPresetFormat} onChange={event=>setExportPresetFormat(event.target.value as "png"|"pdf")}><option value="pdf">Paginated PDF</option><option value="png">PNG image</option></select></label><button type="button" disabled={!exportPresetNameDraft.trim()} onClick={saveExportPreset}>Save current chart preset</button></div>{builderSettings.exportPresets.length>0&&<div className="song-builder-tool-fields"><label>Saved preset<select value={exportPresetChoice} onChange={event=>setExportPresetChoice(event.target.value)}><option value="">Choose a preset…</option>{builderSettings.exportPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name} · {preset.view} · {preset.scope} · {preset.format.toUpperCase()}</option>)}</select></label><button type="button" disabled={!exportPresetChoice} onClick={()=>applyExportPreset(false)}>Apply preset</button><button type="button" disabled={!exportPresetChoice||!notationBars.length} onClick={()=>applyExportPreset(true)}>Apply and download</button></div>}</details>
-          <SongBuilderExportPreparation song={song} bars={notationBars} view={notationView} options={builderSettings.notation} onChange={notation=>changeBuilderSettings(current=>({...current,notation}))}/><div className="song-builder-view-switch" role="group" aria-label="Notation view"><button type="button" aria-pressed={notationView === "tab"} onClick={() => setNotationView("tab")}>Drum tab</button><button type="button" aria-pressed={notationView === "staff"} onClick={() => setNotationView("staff")}>Percussion staff</button><span>{notationView === "tab" ? "K kick · S snare · H hi-hat · T tom · C crash · ◆ accent" : "Kick low · snare center · tom middle · cymbals cross-headed"}</span></div>
-          {notationView==='staff'&&<div className="song-builder-staff-edit"><label><input type="checkbox" checked={staffEditMode} onChange={event=>setStaffEditMode(event.target.checked)}/> Edit notes on the staff</label>{staffEditMode&&<><p>Choose a voice, then click the note’s time position in a measure. The grid step controls provide the same edit for keyboard and screen reader users.</p><div className="song-builder-tool-fields"><label>Drum voice<select value={staffEditVoice} onChange={event=>setStaffEditVoice(event.target.value as SongInstrument)}>{BUILDER_VOICES.map(voice=><option key={voice} value={voice}>{VOICE_LABEL[voice]}</option>)}</select></label><label>Measure<select value={Math.min(Math.max(0,staffEditBarIndex),Math.max(0,notationBars.length-1))} onChange={event=>{const index=Number(event.target.value);setStaffEditBarIndex(index);setStaffEditStep(0);}}>{notationBars.map((bar,index)=><option key={`${bar.index}:${index}`} value={index}>{bar.number} · {bar.sectionName} · {bar.partName}</option>)}</select></label><label>Grid step<input type="number" min={1} max={Math.max(1,Math.round((notationBars[Math.min(staffEditBarIndex,notationBars.length-1)]?.beats??4)*(notationBars[Math.min(staffEditBarIndex,notationBars.length-1)]?.subdivision??8)/4))} value={staffEditStep+1} onChange={event=>setStaffEditStep(Math.max(0,Number(event.target.value)-1))}/></label><button type="button" disabled={!notationBars.length} onClick={()=>toggleStaffNote(staffEditBarIndex,staffEditStep)}>Toggle selected note</button></div></>}</div>}
+          <SongBuilderExportPreparation song={song} bars={notationBars} view={notationView} options={builderSettings.notation} onChange={notation=>changeBuilderSettings(current=>({...current,notation}))}/><SongBuilderRoundTripCheck bars={notationBars.map(bar=>exportVoice==='all'?bar:{...bar,hits:bar.hits.filter(hit=>hit.instrument===exportVoice)})} title={song.title} artist={song.artist} noteMap={builderSettings.midiNotes} swing={swing} separateTracks={builderSettings.midiSeparateTracks} notation={builderSettings.notation}/><div className="song-builder-view-switch" role="group" aria-label="Notation view"><button type="button" aria-pressed={notationView === "tab"} onClick={() => setNotationView("tab")}>Drum tab</button><button type="button" aria-pressed={notationView === "staff"} onClick={() => setNotationView("staff")}>Percussion staff</button><span>{notationView === "tab" ? "K kick · S snare · H hi-hat · T tom · C crash · ◆ accent" : "Kick low · snare center · tom middle · cymbals cross-headed"}</span></div>
+          <div className="song-builder-staff-edit"><label><input type="checkbox" checked={staffEditMode} onChange={event=>setStaffEditMode(event.target.checked)}/> Edit notes on notation</label>{staffEditMode&&<><p>Click a drum-tab lane or staff position to cycle rest → hit → accent → rest. Use these controls for keyboard and screen-reader note entry.</p><div className="song-builder-tool-fields"><label>Drum voice<select value={staffEditVoice} onChange={event=>setStaffEditVoice(event.target.value as SongInstrument)}>{BUILDER_VOICES.map(voice=><option key={voice} value={voice}>{VOICE_LABEL[voice]}</option>)}</select></label><label>Measure<select value={Math.min(Math.max(0,staffEditBarIndex),Math.max(0,notationBars.length-1))} onChange={event=>{const index=Number(event.target.value);setStaffEditBarIndex(index);setStaffEditStep(0);}}>{notationBars.map((bar,index)=><option key={`${bar.index}:${index}`} value={index}>{bar.number} · {bar.sectionName} · {bar.partName}</option>)}</select></label><label>Grid step<input type="number" min={1} max={Math.max(1,Math.round((notationBars[Math.min(staffEditBarIndex,notationBars.length-1)]?.beats??4)*(notationBars[Math.min(staffEditBarIndex,notationBars.length-1)]?.subdivision??8)/4))} value={staffEditStep+1} onChange={event=>setStaffEditStep(Math.max(0,Number(event.target.value)-1))}/></label><button type="button" disabled={!notationBars.length} onClick={()=>toggleStaffNote(staffEditBarIndex,staffEditStep)}>Cycle selected note</button></div></>}</div>
           <div className="song-builder-notation-controls" aria-label="Notation layout controls">
             <label>Measures per page<select value={builderSettings.notation.barsPerPage} onChange={(event) => changeBuilderSettings((current) => ({ ...current, notation: { ...current.notation, barsPerPage: Number(event.target.value) as 4 | 6 | 8 } }))}><option value={4}>4 · spacious</option><option value={6}>6 · standard</option><option value={8}>8 · compact</option></select></label>
             <label>Measures per line<select value={builderSettings.notation.barsPerLine??2} onChange={event=>changeBuilderSettings(current=>({...current,notation:{...current.notation,barsPerLine:Number(event.target.value) as 1|2|3|4}}))}>{[1,2,3,4].map(value=><option key={value} value={value}>{value}</option>)}</select></label>
@@ -2686,8 +2922,9 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
             <label className="song-builder-check"><input type="checkbox" checked={builderSettings.notation.showArticulationMarks!==false} onChange={event=>changeBuilderSettings(current=>({...current,notation:{...current.notation,showArticulationMarks:event.target.checked}}))}/> Show accents and articulation marks</label>
             <details className="song-builder-staff-setup"><summary>Adjust percussion staff positions</summary><p>Move each voice in half-space steps. The preview, PNG, PDF and MusicXML use the same placements.</p><div className="song-builder-tool-fields">{BUILDER_VOICES.map(voice=>{const position=builderSettings.notation.staffPositions?.[voice]??0;return <label key={voice}>{VOICE_LABEL[voice]} · {position===0?"center":position>0?"down":"up"}<select aria-label={`${VOICE_LABEL[voice]} staff position`} value={position} onChange={event=>changeBuilderSettings(current=>({...current,notation:{...current.notation,staffPositions:{...current.notation.staffPositions,[voice]:Number(event.target.value)}}}))}>{Array.from({length:17},(_,index)=>index-8).map(value=><option key={value} value={value}>{value===0?"Center":`${Math.abs(value)} half-space${Math.abs(value)===1?"":"s"} ${value<0?"above":"below"}`}</option>)}</select></label>;})}</div><button type="button" onClick={()=>changeBuilderSettings(current=>({...current,notation:{...current.notation,staffPositions:{kick:3,snare:-1,rimshot:-1,tom:-2,hihat:-5,openhat:-5,ride:-4,crash:-6,cowbell:-3,shaker:-7,tambourine:-6}}}))}>Reset standard drum layout</button></details>
           </div>
-          <div className="song-builder-sheet-wrap"><div className="song-builder-sheet-frame"><canvas ref={previewCanvasRef} width={SHEET_WIDTH} height={SHEET_HEIGHT} tabIndex={0} role="img" aria-label={`${song.title}, ${notationView === "tab" ? "drum tab" : "percussion staff"} notation, page ${currentPage + 1} of ${pageCount}. ${notationView==='staff'&&staffEditMode?`Click to edit ${VOICE_LABEL[staffEditVoice]} notes; use the controls above for keyboard access.`:'Click a measure to seek; use the text score or Seek measure slider for keyboard access.'}`} onClick={event=>{const bounds=event.currentTarget.getBoundingClientRect(),x=(event.clientX-bounds.left)/bounds.width*event.currentTarget.width,y=(event.clientY-bounds.top)/bounds.height*event.currentTarget.height;if(notationView==='staff'&&staffEditMode){const cell=notationStaffStepAtPoint(notationBars,currentPage,builderSettings.notation,x,y);if(cell){toggleStaffNote(cell.barIndex,cell.step);return;}}const index=notationBarAtPoint(notationBars,currentPage,builderSettings.notation,x,y);if(index!==undefined){const target=previewScope==='song'?index:fullSongBars.indexOf(fullSongBars.filter(bar=>bar.sectionId===previewScope)[index]);if(target>=0)seekToBar(target);}}} /></div></div>
+          <div className="song-builder-sheet-wrap"><div className="song-builder-sheet-frame"><canvas ref={previewCanvasRef} width={SHEET_WIDTH} height={SHEET_HEIGHT} tabIndex={0} role="img" aria-label={`${song.title}, ${notationView === "tab" ? "drum tab" : "percussion staff"} notation, page ${currentPage + 1} of ${pageCount}. ${staffEditMode?`Click a note to cycle its hit state; keyboard entry is available above.`:'Click a measure to seek; use the text score or Seek measure slider for keyboard access.'}`} onClick={event=>{const bounds=event.currentTarget.getBoundingClientRect(),x=(event.clientX-bounds.left)/bounds.width*event.currentTarget.width,y=(event.clientY-bounds.top)/bounds.height*event.currentTarget.height;if(staffEditMode){const cell=notationCellAtPoint(notationBars,currentPage,builderSettings.notation,notationView,x,y,staffEditVoice);if(cell){toggleNotationNote(notationBars,cell.barIndex,cell.step,cell.instrument);return;}}const index=notationBarAtPoint(notationBars,currentPage,builderSettings.notation,x,y);if(index!==undefined){const target=previewScope==='song'?index:fullSongBars.indexOf(fullSongBars.filter(bar=>bar.sectionId===previewScope)[index]);if(target>=0)seekToBar(target);}}} /></div></div>
           <SongBuilderAccessibleScore bars={notationBars} onSeek={bar=>{const selectedIndex=notationBars.indexOf(bar);const signature=(item:typeof bar)=>item.sectionId===bar.sectionId&&item.sectionBar===bar.sectionBar&&item.clipId===bar.clipId&&item.partId===bar.partId;const occurrence=notationBars.slice(0,selectedIndex+1).filter(signature).length-1;const matches=fullSongBars.filter(signature);const target=matches[Math.max(0,occurrence)];if(target)seekToBar(target.index);}}/>
+          <SongProgressHistory song={song} state={library} onPractice={(sectionId,partId,bar,bpm)=>{const matches=fullSongBars.filter(item=>item.sectionId===sectionId&&item.partId===partId);const target=matches[Math.max(0,Math.min(matches.length-1,bar-1))];if(target)focusPracticeMeasure(target.index,`score-linked practice result at ${bpm} BPM`);}}/>
           {pageCount > 1 && <div className="song-builder-pages"><button type="button" onClick={() => setPreviewPage((current) => Math.max(0, current - 1))} disabled={currentPage === 0}>Previous page</button><span>Page {currentPage + 1} of {pageCount}</span><button type="button" onClick={() => setPreviewPage((current) => Math.min(pageCount - 1, current + 1))} disabled={currentPage === pageCount - 1}>Next page</button></div>}
           <p className="song-builder-status" role="status">{message || `${notationBars.length} measures · ${savedMessage}`}</p>
         </section>

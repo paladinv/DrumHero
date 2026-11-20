@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { migrateSongLibrary, type SongLibraryState } from "./song-library";
+import { migrateSongLibrary, stripOriginalMusicXml, type SongLibraryState } from "./song-library";
 let client: SupabaseClient | undefined;
 export const SONG_CLOUD_SYNC_KEY = "drum-hero:song-cloud-sync:v1";
 export type SongCloudCheckpoint = { accountId: string; libraryId: string; revision: number; signature: string };
@@ -16,7 +16,7 @@ export function getSongCloudClient() {
   client ??= createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "drum-hero:cloud-account:v1" } });
   return client;
 }
-export function cloudLibraryState(state: SongLibraryState): SongLibraryState { return { ...state, recordings: [], referenceTracks: [] }; }
+export function cloudLibraryState(state: SongLibraryState): SongLibraryState { return { ...state, songs: state.songs.map(stripOriginalMusicXml), recordings: [], referenceTracks: [] }; }
 export type CloudLibrary = { id: string; name: string; owner_id: string; revision: number; state: SongLibraryState; updated_at: string; share_scope?: boolean };
 export function readCloudLibrary(value: unknown): CloudLibrary {
   if (!value || typeof value !== "object") throw new Error("Invalid cloud response.");

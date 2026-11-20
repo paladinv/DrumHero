@@ -23,12 +23,14 @@ export function TrainerCueSequenceEditor({ value, beatsPerBar, disabled, onChang
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const load = () => {
       try { setSaved(parseSavedTrainerCueSequences(localStorage.getItem(KEY))); }
       catch { setSaved([]); }
       setReady(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
+    };
+    const timer = window.setTimeout(load, 0);
+    window.addEventListener("drum-hero:trainer-library-change", load);
+    return () => { window.clearTimeout(timer); window.removeEventListener("drum-hero:trainer-library-change", load); };
   }, []);
 
   const update = (next: TrainerCueSequence) => {

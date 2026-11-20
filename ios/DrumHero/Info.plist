@@ -18,6 +18,10 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>DrumHeroSupabaseURL</key>
+	<string>$(DRUM_HERO_SUPABASE_URL)</string>
+	<key>DrumHeroSupabasePublishableKey</key>
+	<string>$(DRUM_HERO_SUPABASE_PUBLISHABLE_KEY)</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

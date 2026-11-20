@@ -1,9 +1,9 @@
 import { mappedSeconds } from "./song-builder-tools";
-import { SONG_INSTRUMENTS, type Groove, type SongHitArticulation, type SongInstrument } from "./types";
+import { SONG_INSTRUMENTS, type Groove, type MidiArticulation, type SongHitArticulation, type SongInstrument } from "./types";
 import type { DrumPart, DrumSong, SongArrangementAutomationPoint, SongClip, SongClipOverrides, SongFeel, SongPlaybackFeel, SongSection, SongSectionAutomation } from "./song-library";
 import type { DrumMixSettings } from "./audio";
 
-export type ArrangedHit = { beat: number; fraction: number; instrument: SongInstrument; accent: boolean; velocity: number; ghost: boolean; step: number; sourceSubdivision?: DrumPart["subdivision"]; sourcePartId?: string; articulation?: SongHitArticulation; sticking?: "R" | "L" };
+export type ArrangedHit = { beat: number; fraction: number; instrument: SongInstrument; accent: boolean; velocity: number; ghost: boolean; step: number; sourceSubdivision?: DrumPart["subdivision"]; sourcePartId?: string; articulation?: SongHitArticulation; notationCue?: MidiArticulation; sticking?: "R" | "L"; diffStatus?: "added" | "removed" | "changed" };
 export type ArrangementBar = {
   index: number;
   number: number;
@@ -270,6 +270,17 @@ function expandEndingGroups(sections: SongSection[]) {
   return expanded;
 }
 
+export function sectionTempoAtMeasure(section:SongSection,baseBpm:number,measureIndex:number){
+  const points=section.tempoPoints??[];
+  if(!points.length){const ramp=section.tempoRamp,progress=ramp?Math.min(1,(measureIndex+1)/ramp.bars):0;return Math.round(baseBpm+((ramp?.targetBpm??baseBpm)-baseBpm)*progress);}
+  const sorted=[...points].sort((a,b)=>a.measure-b.measure),timeline=sorted[0]?.measure===1?sorted:[{id:"section-start",measure:1,bpm:baseBpm,curve:"linear" as const},...sorted],measure=measureIndex+1;
+  let left=timeline[0]!;
+  for(let index=1;index<timeline.length;index++){const candidate=timeline[index];if(candidate&&candidate.measure<=measure)left=candidate;else break;}
+  const leftIndex=timeline.findIndex(point=>point===left),right=timeline[leftIndex+1];if(!right||right.measure<=left.measure)return left.bpm;
+  const raw=Math.max(0,Math.min(1,(measure-left.measure)/(right.measure-left.measure))),progress=left.curve==="ease-in"?raw*raw:left.curve==="ease-out"?1-(1-raw)*(1-raw):left.curve==="ease-in-out"?raw<.5?2*raw*raw:1-Math.pow(-2*raw+2,2)/2:raw;
+  return Math.round(left.bpm+(right.bpm-left.bpm)*progress);
+}
+
 export function buildArrangementBars(song: DrumSong, sectionId?: string): ArrangementBar[] {
   const selectedSections = sectionId ? song.sections.filter((section) => section.id === sectionId) : song.sections;
   const expandedSections: Array<{ section: SongSection; repeat: number; endingPass?: 1 | 2 }> = sectionId ? selectedSections.flatMap((section) => Array.from({ length: Math.max(1, Math.min(32, Math.round(section.repeats ?? 1))) }, (_, index) => ({ section, repeat: index + 1 }))) : expandEndingGroups(selectedSections);
@@ -306,9 +317,7 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
           const longestLayer = Math.max(...layerParts.map(layer => layer.beats));
           const barCount = Math.max(1, Math.min(32, Math.ceil(longestLayer / measureLength - 0.00001)));
           for (let barIndex = 0; barIndex < barCount; barIndex += 1) {
-            const ramp = section.tempoRamp;
-            const rampProgress = ramp ? Math.min(1, (repeatBarCursor + 1) / ramp.bars) : 0;
-            const bpm = Math.round(baseBpm + ((ramp?.targetBpm ?? baseBpm) - baseBpm) * rampProgress);
+            const bpm = sectionTempoAtMeasure(section,baseBpm,repeatBarCursor);
             const pickup = sectionRepeat === 1 && repeatBarCursor === 0 && section.pickupBeats
               ? Math.min(measureLength, Math.max(0.5, section.pickupBeats))
               : 0;
@@ -323,7 +332,7 @@ export function buildArrangementBars(song: DrumSong, sectionId?: string): Arrang
                 const localBeat = beat - startBeat;
                 if (localBeat < -0.00001 || localBeat >= layerRemaining - 0.00001) return [];
                 const performanceBeat = Math.max(0, Math.min(layerRemaining - 0.001, localBeat + (hit.timingOffsetMs ?? 0) * bpm / 60000));
-                return [{ beat: performanceBeat, fraction: localBeat / (pickup ? layerRemaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, sourceSubdivision: layer.subdivision, sourcePartId: layer.id, articulation: hit.articulation, sticking: hit.sticking }];
+                return [{ beat: performanceBeat, fraction: performanceBeat / (pickup ? layerRemaining : measureLength), instrument: hit.instrument, accent: hit.accent === true, velocity: hit.ghost ? Math.min(hit.velocity ?? 86, 42) : hit.velocity ?? (hit.accent ? 118 : 86), ghost: hit.ghost === true, step: hit.step, sourceSubdivision: layer.subdivision, sourcePartId: layer.id, articulation: hit.articulation, sticking: hit.sticking }];
               });
             });
             const measureCues = section.rehearsalCues?.filter(cue => cue.measure === repeatBarCursor + 1) ?? [];

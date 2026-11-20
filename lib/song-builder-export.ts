@@ -5,7 +5,7 @@ import { DEFAULT_DRUM_MIX, type DrumMixSettings } from "./audio";
 import { arrangementAutomationValue, automationScaleAtHit, type ArrangementBar } from "./song-builder";
 import { notationQuarterScale, paginateNotation, notationSystems, percussionRhythm, DEFAULT_NOTATION_OPTIONS, type NotationOptions } from "./song-builder-notation";
 
-export { drawNotationPage, paginateNotation, notationGeometry, notationBarAtPoint, notationStaffStepAtPoint, SHEET_WIDTH, SHEET_HEIGHT, BARS_PER_SHEET_PAGE, DEFAULT_NOTATION_OPTIONS, type NotationView, type NotationOptions } from "./song-builder-notation";
+export { drawNotationPage, paginateNotation, notationGeometry, notationBarAtPoint, notationStaffStepAtPoint, notationCellAtPoint, NOTATION_VOICES, SHEET_WIDTH, SHEET_HEIGHT, BARS_PER_SHEET_PAGE, DEFAULT_NOTATION_OPTIONS, type NotationView, type NotationOptions } from "./song-builder-notation";
 
 const VOICE_NAMES: Record<SongInstrument, string> = Object.fromEntries([["kick","KICK"],["snare","SNARE"],["hihat","HI-HAT"],["openhat","OPEN HAT"],["ride","RIDE"],["rimshot","RIMSHOT"],["tom","TOM"],["crash","CRASH"],["cowbell","COWBELL"],["shaker","SHAKER"],["tambourine","TAMBOURINE"],...Array.from({length:8},(_,index)=>[`custom${index+1}`,`CUSTOM ${index+1}`])]) as Record<SongInstrument,string>;
 
@@ -225,8 +225,11 @@ const wavSamplePaths = {
 } as Record<SongInstrument, string[]>;
 
 export type AudioRenderOptions = { sampleRate: 44100 | 48000; bitDepth: 16 | 24; normalizeToDbfs?: number };
-export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number; render?: AudioRenderOptions } = {}) {
+export type BackingAudioInput = { id?: string; name?: string; blob: Blob; downbeat: number; volume: number; muted?: boolean; solo?: boolean };
+export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, options: { metronome?: boolean; backing?: BackingAudioInput | BackingAudioInput[]; backingOffsetSeconds?: number; render?: AudioRenderOptions; onProgress?: (progress: { completed: number; total: number; label: string }) => void; shouldCancel?: () => boolean } = {}) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
+  if (options.shouldCancel?.()) throw new Error("WAV export cancelled.");
+  options.onProgress?.({ completed: 0, total: 1, label: "Preparing WAV audio" });
   const sampleRate = options.render?.sampleRate ?? 44_100;
   const bitDepth = options.render?.bitDepth ?? 16;
   const totalSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0) + 1;
@@ -257,6 +260,8 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
     if (!response.ok) throw new Error(`Could not load the ${VOICE_NAMES[voice]} sample for WAV export.`);
     buffers.set(key, { primary: await context.decodeAudioData(await response.arrayBuffer()) });
   }));
+  if (options.shouldCancel?.()) throw new Error("WAV export cancelled before rendering.");
+  options.onProgress?.({ completed: 0, total: 1, label: "Rendering WAV audio" });
   let startSeconds = 0;
   let activeOpenHat: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
   for (const bar of bars) {
@@ -318,13 +323,20 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
     startSeconds += bar.beats * quarterSeconds;
   }
   if (options.backing) {
-    const buffer = await context.decodeAudioData(await options.backing.blob.arrayBuffer());
-    const source = context.createBufferSource(), gain = context.createGain(); source.buffer = buffer;
-    gain.gain.value = options.backing.volume; source.connect(gain).connect(context.destination);
-    const offset = options.backing.downbeat + (options.backingOffsetSeconds ?? 0), start = Math.max(0,-offset);
-    if (Math.max(0,offset) < buffer.duration && start < totalSeconds) source.start(start,Math.max(0,offset),Math.min(buffer.duration-Math.max(0,offset),totalSeconds-start));
+    const backingTracks = Array.isArray(options.backing) ? options.backing : [options.backing];
+    const hasSolo = backingTracks.some(track => track.solo && !track.muted);
+    for (const backing of backingTracks) {
+      if (backing.muted || (hasSolo && !backing.solo)) continue;
+      const buffer = await context.decodeAudioData(await backing.blob.arrayBuffer());
+      const source = context.createBufferSource(), gain = context.createGain(); source.buffer = buffer;
+      gain.gain.value = Math.max(0, Math.min(1, backing.volume)); source.connect(gain).connect(context.destination);
+      const offset = backing.downbeat + (options.backingOffsetSeconds ?? 0), start = Math.max(0,-offset);
+      if (Math.max(0,offset) < buffer.duration && start < totalSeconds) source.start(start,Math.max(0,offset),Math.min(buffer.duration-Math.max(0,offset),totalSeconds-start));
+    }
   }
   const rendered = await context.startRendering();
+  if (options.shouldCancel?.()) throw new Error("WAV export cancelled after the current audio render.");
+  options.onProgress?.({ completed: 1, total: 1, label: "WAV audio ready" });
   const leftSamples = rendered.getChannelData(0);
   const rightSamples = rendered.getChannelData(1);
   let peak = 0;
@@ -411,23 +423,44 @@ export async function arrangementStemsZip(
   swing = 50,
   mix: DrumMixSettings = DEFAULT_DRUM_MIX,
   customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {},
-  options: { metronome?: boolean; backing?: { blob: Blob; downbeat: number; volume: number }; backingOffsetSeconds?: number; render?: AudioRenderOptions; stemPrefix?: string } = {}
+  options: { metronome?: boolean; backing?: BackingAudioInput | BackingAudioInput[]; backingOffsetSeconds?: number; render?: AudioRenderOptions; stemPrefix?: string; onProgress?: (progress: { completed: number; total: number; label: string }) => void; shouldCancel?: () => boolean } = {}
 ) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
   const durationSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0);
-  if (durationSeconds > 180) throw new Error("Stem ZIP exports are limited to three minutes to keep the browser memory use reasonable. Choose a section and export the remaining sections separately.");
+  if (durationSeconds > 8 * 60) throw new Error("Stem ZIP exports support arrangements up to eight minutes. Export longer works in sections to keep browser memory use predictable.");
   const voices = [...new Set(bars.flatMap(bar => bar.hits.map(hit => hit.articulation === "foot-splash" ? "openhat" : hit.instrument)))];
-  if (!voices.length && !options.metronome && !options.backing) throw new Error("There are no drum hits or optional tracks to export in this range.");
+  const backingTracks = options.backing ? Array.isArray(options.backing) ? options.backing : [options.backing] : [];
+  if (!voices.length && !options.metronome && !backingTracks.some(track => !track.muted)) throw new Error("There are no drum hits or optional tracks to export in this range.");
   const files: StemZipFile[] = [];
+  const total = voices.length + 1 + Number(!!options.metronome) + backingTracks.filter(track => !track.muted).length;
+  let completed = 0;
+  const progress = (label: string) => { completed += 1; options.onProgress?.({ completed, total, label }); };
+  const checkCancelled = () => { if (options.shouldCancel?.()) throw new Error("Stem export cancelled after the current render step."); };
   for (const voice of voices) {
+    checkCancelled();
+    options.onProgress?.({ completed, total, label: `${voice} stem` });
     const soloMix = (source: DrumMixSettings): DrumMixSettings => ({ ...source, solo: "", muted: Object.fromEntries(Object.keys(source.muted).map(key => [key, key === voice ? source.muted[voice] : true])) as DrumMixSettings["muted"] });
     const stemMix = soloMix(mix);
     const stemBars = bars.map(bar => bar.kitMix ? { ...bar, kitMix: soloMix(bar.kitMix) } : bar);
     files.push({ name: `${options.stemPrefix || "drums"}-${voice}.wav`, blob: await arrangementWav(stemBars, swing, stemMix, customSamples, { render: options.render }) });
+    progress(`${voice} stem ready`);
   }
+  checkCancelled();
   files.push({ name: "tempo-map.mid", blob: arrangementMidi(bars.map(bar => ({ ...bar, hits: [] })), "Tempo and meter map") });
-  if (options.metronome) files.push({ name: `${options.stemPrefix || "drums"}-metronome.wav`, blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { metronome: true, render: options.render }) });
-  if (options.backing) files.push({ name: `${options.stemPrefix || "drums"}-backing-track.wav`, blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { backing: options.backing, backingOffsetSeconds: options.backingOffsetSeconds, render: options.render }) });
+  progress("tempo map ready");
+  if (options.metronome) {
+    checkCancelled(); options.onProgress?.({ completed, total, label: "Metronome stem" });
+    files.push({ name: `${options.stemPrefix || "drums"}-metronome.wav`, blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { metronome: true, render: options.render }) });
+    progress("Metronome stem ready");
+  }
+  for (const [index, backing] of backingTracks.entries()) {
+    if (backing.muted) continue;
+    checkCancelled(); options.onProgress?.({ completed, total, label: `${backing.name || `reference ${index + 1}`} stem` });
+    const safeName = (backing.name || `reference-${index + 1}`).replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || `reference-${index + 1}`;
+    files.push({ name: `${options.stemPrefix || "drums"}-reference-${index + 1}-${safeName}.wav`, blob: await arrangementWav(bars.map(bar => ({ ...bar, hits: [] })), swing, { ...mix, solo: "" }, {}, { backing, backingOffsetSeconds: options.backingOffsetSeconds, render: options.render }) });
+    progress(`${safeName} stem ready`);
+  }
+  checkCancelled();
   const minutes = Math.floor(durationSeconds / 60), seconds = Math.round(durationSeconds % 60);
   const readme = [
     "Drum Hero aligned WAV stems",

@@ -164,3 +164,26 @@ export function groupGrooveFamilies(patterns: PracticePattern[]) {
   return [...groups.entries()].map(([style, grooves]) => ({ style, grooves: [...grooves].sort((a, b) => rank[a.level] - rank[b.level] || a.defaultBpm - b.defaultBpm || a.name.localeCompare(b.name)) }))
     .sort((a, b) => a.style.localeCompare(b.style));
 }
+
+/** Pick an unseen pattern that preserves the source pattern's main musical constraint. */
+export function recommendUnfamiliarTransferPattern(source: PracticePattern, patterns: PracticePattern[], rounds: TrainerRound[]) {
+  const attempted = new Set(rounds.map(round => round.patternId));
+  const sourceStyle = "style" in source ? String(source.style ?? "") : "";
+  const sourceIsFill = /fill/i.test(sourceStyle) || Boolean(source.trainerFillStepRanges?.length);
+  const sourceMeter = "meter" in source ? String(source.meter ?? "") : "";
+  const levelRank = { Beginner: 0, Intermediate: 1, Advanced: 2 } as const;
+  const candidates = patterns.flatMap(pattern => {
+    if (pattern.id === source.id || attempted.has(pattern.id) || pattern.id.startsWith("song:")) return [];
+    const style = "style" in pattern ? String(pattern.style ?? "") : "";
+    const isFill = /fill/i.test(style) || Boolean(pattern.trainerFillStepRanges?.length);
+    if (sourceIsFill !== isFill) return [];
+    const meter = "meter" in pattern ? String(pattern.meter ?? "") : "";
+    const sameStyle = Boolean(sourceStyle && style === sourceStyle);
+    const sameMeter = Boolean(sourceMeter && meter === sourceMeter) || (source.beats === pattern.beats && source.subdivision === pattern.subdivision);
+    const sameSubdivision = source.subdivision === pattern.subdivision;
+    const levelGap = Math.abs(levelRank[source.level] - levelRank[pattern.level]);
+    const score = Number(sameStyle) * 4 + Number(sameMeter) * 3 + Number(sameSubdivision) * 2 - levelGap;
+    return [{ pattern, score }];
+  }).sort((a, b) => b.score - a.score || a.pattern.name.localeCompare(b.pattern.name));
+  return candidates[0]?.pattern ?? null;
+}

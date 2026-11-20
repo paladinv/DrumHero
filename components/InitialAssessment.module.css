@@ -4,8 +4,12 @@
 .actions { display:flex; flex-wrap:wrap; gap:.75rem; margin:1rem 0; }
 .pads { display:flex; flex-wrap:wrap; gap:.5rem; }
 .pads button { min-width:85px; min-height:64px; touch-action:manipulation; }
+.root[data-large-pads="true"] .pads button { min-width:130px; min-height:100px; font-size:1.15rem; }
 .notes { overflow-x:auto; max-width:100%; }
 .notes canvas { max-width:100%; height:auto; }
+.rhythmGuide { margin:.75rem 0; padding:.85rem; border:1px solid var(--line); border-radius:10px; background:var(--theme-bg-surface,var(--surface)); }
+.rhythmGuide ol { display:grid; gap:.4rem; padding-inline-start:1.4rem; }
+.rhythmGuide li { line-height:1.55; }
 .root[data-large-notation="true"] .notes canvas { width:150%; max-width:none; }
 .check { display:flex; align-items:center; gap:.65rem; min-height:44px; }
 .check input { width:1.25rem; height:1.25rem; }

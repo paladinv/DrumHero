@@ -12,7 +12,7 @@ export default async function SongBuilderPage({ searchParams }: { searchParams: 
     <header className="page-heading">
       <span className="eyebrow"><LocalizedText text="Your music, your way"/></span>
       <h1><LocalizedText text="Write the part you hear."/></h1>
-      <p><LocalizedText text="Arrange grooves and fills, edit every drum hit, then hear the whole song or follow the moving notes. Your songs stay in this browser and appear in the Song Library."/></p>
+      <p><LocalizedText text="Arrange grooves and fills, edit every drum hit, then hear the whole song or follow the moving notes. Your songs stay local by default and can sync when you opt in."/></p>
       <Link className="button-secondary song-builder-library-link" href="/song-library"><LocalizedText text="Open Song Library"/></Link>
     </header>
     <SongBuilder initialSongId={params.song ?? ""} />

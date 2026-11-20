@@ -38,11 +38,13 @@
 		92907146E843F7CA27C5F5D6 /* MobileSongLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38B2EE6D9A8B970A74045D98 /* MobileSongLibrary.swift */; };
 		9590734AFF7D00EF0464F8B6 /* AssessmentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD8E5042C8A3D2C94A75E95F /* AssessmentController.swift */; };
 		95C560B53D52C159DA34E60C /* DrumHeroUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65488FD0266A262D217416E4 /* DrumHeroUITests.swift */; };
+		A18B3F14D8C7432CB1E4D556 /* PracticeCloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28C4A25E9D8543DC2F5E667 /* PracticeCloudSync.swift */; };
 		A3EE70B39E9D3569993F7138 /* scoring-fixtures.json in Resources */ = {isa = PBXBuildFile; fileRef = 2B781A129DD39ADB5E3CBFDF /* scoring-fixtures.json */; };
 		AFF6137BC80CA90B241535B8 /* hihat-2.wav in Resources */ = {isa = PBXBuildFile; fileRef = EB718E07C041D33CF47F674B /* hihat-2.wav */; };
 		B3F139265D2A6A4BFF4B8C48 /* assessment-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = 42585C509E61885E2F32C84B /* assessment-v1.json */; };
 		BC225EA7E05D6087C3FD0C1A /* crash-4.wav in Resources */ = {isa = PBXBuildFile; fileRef = F98561CFA1432B632F382487 /* crash-4.wav */; };
 		CA5874693558DC1CBAD9DD81 /* kick-1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 10951FB54832B2362A51ED78 /* kick-1.wav */; };
+		C39D5B36F0EA654ED306F778 /* PracticeReminderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4AE6C47A1FB765FE4170899 /* PracticeReminderService.swift */; };
 		D0E5636A49D1BBC62F7186D9 /* InitialAssessmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F376B42CDF6C928432D55ECE /* InitialAssessmentView.swift */; };
 		D23A6DB10104F7143DF09F8D /* hihat-4.wav in Resources */ = {isa = PBXBuildFile; fileRef = ADA7E7983D6DAEE9F52F1ECA /* hihat-4.wav */; };
 		D7A16140F7D7DA6AFA5CBD98 /* MobileInputServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A530BC6893712B77AF48CC6 /* MobileInputServices.swift */; };
@@ -101,10 +103,12 @@
 		AD6DE1474BE371846962DF83 /* SightReadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SightReadingView.swift; sourceTree = "<group>"; };
 		ADA7E7983D6DAEE9F52F1ECA /* hihat-4.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-4.wav"; sourceTree = "<group>"; };
 		AFED9018B2E7997CD6CDCFE9 /* AssessmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentTests.swift; sourceTree = "<group>"; };
+		B28C4A25E9D8543DC2F5E667 /* PracticeCloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeCloudSync.swift; sourceTree = "<group>"; };
 		BD33984B818527B09E1AE8FF /* kick-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "kick-3.wav"; sourceTree = "<group>"; };
 		C232EA11EFFCE0D8211227C0 /* hihat-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-3.wav"; sourceTree = "<group>"; };
 		C904CB01AB709B3BF11A3084 /* SightReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SightReading.swift; sourceTree = "<group>"; };
 		C9438C4A1E0F0C77F4DF9293 /* tom-3.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "tom-3.wav"; sourceTree = "<group>"; };
+		D4AE6C47A1FB765FE4170899 /* PracticeReminderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PracticeReminderService.swift; sourceTree = "<group>"; };
 		CE6910310322362D474F1415 /* ContentAndRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentAndRulesTests.swift; sourceTree = "<group>"; };
 		D41A0D0BB570C3439EE39E69 /* hihat-1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "hihat-1.wav"; sourceTree = "<group>"; };
 		DBD728EB85D6279843D3FC26 /* drum-content.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "drum-content.json"; sourceTree = "<group>"; };
@@ -244,7 +248,9 @@
 				FD8E5042C8A3D2C94A75E95F /* AssessmentController.swift */,
 				986003818D51DEA41831B39B /* DrumAudioService.swift */,
 				5A530BC6893712B77AF48CC6 /* MobileInputServices.swift */,
+				B28C4A25E9D8543DC2F5E667 /* PracticeCloudSync.swift */,
 				9081AA73CEF3876A1250C34F /* PracticeController.swift */,
+				D4AE6C47A1FB765FE4170899 /* PracticeReminderService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -524,7 +530,9 @@
 				5E1B86117209D386137606F3 /* MobileContent.swift in Sources */,
 				D7A16140F7D7DA6AFA5CBD98 /* MobileInputServices.swift in Sources */,
 				92907146E843F7CA27C5F5D6 /* MobileSongLibrary.swift in Sources */,
+				A18B3F14D8C7432CB1E4D556 /* PracticeCloudSync.swift in Sources */,
 				012539B413458CF3CA91AA28 /* PracticeController.swift in Sources */,
+				C39D5B36F0EA654ED306F778 /* PracticeReminderService.swift in Sources */,
 				E4C20B42DF10AD1D782D4FFE /* PracticeRules.swift in Sources */,
 				215A584DAAAC62E8EC1EBDC8 /* ProgressModels.swift in Sources */,
 				891D8CD3E5D6940B49BFF4F7 /* SightReading.swift in Sources */,

@@ -1,5 +1,6 @@
 import source from '@/shared/assessment-v1.json';
 import { scoreEarAttempt } from './ear-training';
+import { patterns } from './curriculum';
 import type { Instrument, PatternHit, PracticePattern } from './types';
 import type { TrainerRound } from './trainer';
 
@@ -23,7 +24,7 @@ export type AssessmentEducatorComparison = { teacherEstimatedLevel: { pulse: num
 export type AssessmentAnswer = { questionId: string; choice: number };
 export type AssessmentReflection = { domain: 'pulse'|'subdivisions'|'coordination'; rating: 'easy'|'about-right'|'hard'|'input-issue' };
 export type AssessmentConfirmation = { probeId: string; attempt: AssessmentAttempt };
-export type AssessmentResult = { version: 1; contentVersion?: number; id: string; playedAt: string; input: AssessmentInput; inputProfile: string; adaptation: AssessmentAdaptation; goal?: AssessmentGoal; quizFormat?: AssessmentQuizFormat; timingCorrectionMs?: number; timingCalibrated?: boolean; questionIds?: string[]; attempts: AssessmentAttempt[]; confirmations?: AssessmentConfirmation[]; reflections?: AssessmentReflection[]; transferAttempt?: AssessmentAttempt; internalPulseAttempt?: AssessmentAttempt; tempoAttempts?: AssessmentTempoAttempt[]; educatorComparison?: AssessmentEducatorComparison; answers: AssessmentAnswer[]; skipped: string[]; endedEarly: boolean };
+export type AssessmentResult = { version: 1; contentVersion?: number; id: string; playedAt: string; input: AssessmentInput; inputProfile: string; adaptation: AssessmentAdaptation; goal?: AssessmentGoal; quizFormat?: AssessmentQuizFormat; rhythmFirst?: boolean; timingCorrectionMs?: number; timingCalibrated?: boolean; largeNotation?: boolean; slowDemonstration?: boolean; extendedCountIn?: boolean; largePads?: boolean; spokenCountIn?: boolean; hapticCountIn?: boolean; questionIds?: string[]; attempts: AssessmentAttempt[]; confirmations?: AssessmentConfirmation[]; reflections?: AssessmentReflection[]; transferAttempt?: AssessmentAttempt; transferAttemptedAt?: string; transferFollowUpAttempt?: AssessmentAttempt; transferFollowUpAttemptedAt?: string; reportedPracticeMinutes?: number; internalPulseAttempt?: AssessmentAttempt; tempoAttempts?: AssessmentTempoAttempt[]; educatorComparison?: AssessmentEducatorComparison; answers: AssessmentAnswer[]; skipped: string[]; endedEarly: boolean };
 export type AssessmentStore = { version: 1; results: AssessmentResult[]; appliedId: string | null };
 export const emptyAssessmentStore = (): AssessmentStore => ({ version: 1, results: [], appliedId: null });
 export function assessmentProbeVariant(probe: AssessmentProbe, variant: number): AssessmentProbe {
@@ -36,7 +37,7 @@ function shuffled<T>(items: T[], seed: number): T[] {
   for (let i=result.length-1;i>0;i--) { state=(Math.imul(state,1664525)+1013904223)>>>0; const j=Math.floor(state/4294967296*(i+1)); [result[i],result[j]]=[result[j],result[i]]; }
   return result;
 }
-export function assessmentQuestionsForResult(result: Pick<AssessmentResult, 'id'|'answers'|'quizFormat'|'questionIds'> & { skipped?: string[] }) {
+export function assessmentQuestionsForResult(result: Pick<AssessmentResult, 'id'|'answers'|'quizFormat'|'rhythmFirst'|'questionIds'> & { skipped?: string[] }) {
   if (result.questionIds?.length) {
     const selected = result.questionIds.flatMap(id => { const question=assessmentContent.questions.find(item=>item.id===id); return question?[question]:[]; });
     if (selected.length === result.questionIds.length) return selected;
@@ -44,12 +45,12 @@ export function assessmentQuestionsForResult(result: Pick<AssessmentResult, 'id'
   const seed = stableSeed(result.id);
   const listening = shuffled(assessmentContent.questions.filter(q=>q.kind==='listening'), seed + 17).slice(0,2);
   const reading = shuffled(assessmentContent.questions.filter(q=>q.kind==='reading'), seed + 31).slice(0,2);
-  let selected = result.quizFormat === 'audio'
+  let selected = result.quizFormat === 'audio' || result.rhythmFirst
     ? shuffled(assessmentContent.questions.filter(q=>q.kind==='listening'), seed + 17)
     : [listening[0], reading[0], listening[1], reading[1]].filter((q): q is AssessmentQuestion => !!q);
   // Keep answered and skipped items visible when old saved results use a previous selection seed.
   const preserved = [...new Set([...result.answers.map(answer=>answer.questionId),...(result.skipped??[])])].flatMap(id=>{const question=assessmentContent.questions.find(q=>q.id===id);return question?[question]:[];});
-  selected = [...preserved,...selected.filter(question=>!preserved.some(old=>old.id===question.id))].slice(0,4);
+  selected = [...preserved,...selected.filter(question=>!preserved.some(old=>old.id===question.id))].slice(0,8);
   return selected;
 }
 export function assessmentReadingSummary(result:AssessmentResult){
@@ -57,7 +58,25 @@ export function assessmentReadingSummary(result:AssessmentResult){
   const answers=result.answers.filter(answer=>questions.some(question=>question.id===answer.questionId));
   const correct=answers.filter(answer=>questions.some(question=>question.id===answer.questionId&&question.answer===answer.choice)).length;
   const tier=questions.length>0&&answers.length===questions.length?Math.min(3,Math.round(2*correct/questions.length)+1):null;
-  return {tier,correct,answered:answers.length,total:questions.length};
+  const byDomain=Object.fromEntries(assessmentDomains.map(domain=>{
+    const rows=questions.filter(question=>question.probeId.startsWith(`${domain}-`));
+    const domainAnswers=answers.filter(answer=>rows.some(question=>question.id===answer.questionId));
+    return [domain,{correct:domainAnswers.filter(answer=>rows.some(question=>question.id===answer.questionId&&question.answer===answer.choice)).length,answered:domainAnswers.length,total:rows.length}];
+  })) as Record<typeof assessmentDomains[number],{correct:number;answered:number;total:number}>;
+  return {tier,correct,answered:answers.length,total:questions.length,byDomain,provisional:assessmentDomains.some(domain=>byDomain[domain].total===1)};
+}
+function assessmentReadingConcern(result:AssessmentResult){
+  const questions=assessmentQuestionsForResult(result).filter(question=>question.kind==='reading');
+  for(const domain of assessmentDomains){
+    const rows=questions.filter(question=>question.probeId.startsWith(`${domain}-`));
+    const answers=result.answers.filter(answer=>rows.some(question=>question.id===answer.questionId));
+    const correct=answers.filter(answer=>rows.some(question=>question.id===answer.questionId&&question.answer===answer.choice)).length;
+    if(answers.length&&answers.length-correct>correct){
+      const answer=answers.find(item=>rows.some(question=>question.id===item.questionId&&question.answer!==item.choice));
+      if(answer){const question=rows.find(item=>item.id===answer.questionId);if(question)return {question,answer};}
+    }
+  }
+  return null;
 }
 export function selectAssessmentQuestions(id: string, quizFormat: AssessmentQuizFormat | undefined, history: AssessmentResult[] = []) {
   const seed=stableSeed(id);
@@ -66,8 +85,31 @@ export function selectAssessmentQuestions(id: string, quizFormat: AssessmentQuiz
   const prior=new Set(history.flatMap(row=>row.questionIds??assessmentQuestionsForResult(row).map(q=>q.id)));
   const choose=(pool:AssessmentQuestion[],count:number)=>[...pool.filter(q=>!prior.has(q.id)),...pool.filter(q=>prior.has(q.id))].slice(0,count);
   if(quizFormat==='audio')return choose(listening,4).map(q=>q.id);
-  const audio=choose(listening,2), notation=choose(reading,3);
+  const audio=choose(listening,2);
+  const readingPool=choose(reading,reading.length);
+  const notation:AssessmentQuestion[]=[];
+  for(const domain of assessmentDomains){const item=readingPool.find(question=>question.probeId.startsWith(`${domain}-`)&&!notation.some(selected=>selected.id===question.id));if(item)notation.push(item);}
+  for(const item of readingPool)if(notation.length<3&&!notation.some(selected=>selected.id===item.id))notation.push(item);
+  notation.splice(3);
   return [audio[0],notation[0],audio[1],notation[1],notation[2]].filter((question):question is AssessmentQuestion=>!!question).map(q=>q.id);
+}
+export function assessmentReadingFollowUpQuestion(result: AssessmentResult, answeredQuestionId: string, history: AssessmentResult[] = []) {
+  if (result.quizFormat === 'audio' || result.rhythmFirst || !result.questionIds?.length) return null;
+  const question=assessmentContent.questions.find(item=>item.id===answeredQuestionId&&item.kind==='reading');
+  const answer=result.answers.find(item=>item.questionId===answeredQuestionId);
+  if(!question||!answer)return null;
+  const domain=assessmentDomains.find(item=>question.probeId.startsWith(`${item}-`));
+  if(!domain||!result.attempts.some(attempt=>attempt.probeId.startsWith(`${domain}-`)))return null;
+  const current=assessmentQuestionsForResult(result);
+  if(current.filter(item=>item.kind==='reading'&&item.probeId.startsWith(`${domain}-`)).length>=2)return null;
+  const tier=assessmentTier(result,domain), correct=answer.choice===question.answer;
+  if(!((tier>=2&&!correct)||(tier<=1&&correct)))return null;
+  const used=new Set(result.questionIds);
+  const candidates=assessmentContent.questions.filter(item=>item.kind==='reading'&&item.probeId.startsWith(`${domain}-`)&&!used.has(item.id));
+  if(!candidates.length)return null;
+  const prior=new Set(history.flatMap(row=>row.questionIds??assessmentQuestionsForResult(row).map(item=>item.id)));
+  const ordered=shuffled(candidates,stableSeed(`${result.id}:${question.id}:reading-follow-up`));
+  return ordered.find(item=>!prior.has(item.id))??ordered[0];
 }
 export function assessmentQuestionChoiceSeed(result: Pick<AssessmentResult, 'id'>, question: AssessmentQuestion) {
   return stableSeed(result.id) + Math.max(0, assessmentContent.questions.findIndex(candidate=>candidate.id===question.id));
@@ -204,7 +246,7 @@ export function assessmentConfirmationLabel(original:AssessmentAttempt,confirmat
 export function assessmentRecommendation(result: AssessmentResult): string | null {
   if (!result.attempts.length && !result.answers.length && !result.internalPulseAttempt) return null;
   const has = (domain: AssessmentDomain) => result.attempts.some(a => a.probeId.startsWith(`${domain}-`));
-  const wrongReading = result.answers.some(a => { const q = assessmentContent.questions.find(q => q.id === a.questionId); return q?.kind === 'reading' && a.choice !== q.answer; });
+  const wrongReading = !!assessmentReadingConcern(result);
   const dynamicsNeedsPractice = result.attempts.some(a => a.probeId === 'dynamics-1' && a.dynamicsContrast !== null && !a.passed);
   if (result.internalPulseAttempt && !result.internalPulseAttempt.passed) return 'count-the-grid';
   if (result.goal === 'read-notation' && result.quizFormat !== 'audio' && result.answers.some(a => assessmentContent.questions.some(q => q.id === a.questionId && q.kind === 'reading'))) return 'count-the-grid';
@@ -234,8 +276,7 @@ export function assessmentRecommendationReason(result: AssessmentResult): string
 export function assessmentRecommendationDetails(result: AssessmentResult) {
   const lessonId = assessmentRecommendation(result);
   if (!lessonId) return null;
-  const wrongReading = result.answers.find(a=>{const q=assessmentContent.questions.find(q=>q.id===a.questionId);return q?.kind==='reading'&&q.answer!==a.choice;});
-  const question = wrongReading ? assessmentContent.questions.find(q=>q.id===wrongReading.questionId) : undefined;
+  const question = assessmentReadingConcern(result)?.question;
   let domain: AssessmentDomain = 'pulse';
   if (lessonId==='first-backbeat'||lessonId==='limb-independence') domain='coordination';
   else if (lessonId==='sixteenth-control') domain='subdivisions';
@@ -271,19 +312,26 @@ export function assessmentMicroPractice(result:AssessmentResult){
   const lessonId=assessmentRecommendation(result);
   const domain=lessonId==='first-backbeat'||lessonId==='limb-independence'||lessonId==='syncopated-pocket'&&assessmentTier(result,'pulse')>=3?'coordination':lessonId==='sixteenth-control'?'subdivisions':lessonId==='dynamic-arc'?'dynamics':'pulse';
   const latest=[...result.attempts].reverse().find(attempt=>attempt.probeId.startsWith(`${domain}-`));
-  const probe=latest?assessmentContent.probes.find(item=>item.id===latest.probeId):undefined;
+  const baseProbe=latest?assessmentContent.probes.find(item=>item.id===latest.probeId):undefined;
+  const probe=baseProbe?assessmentProbeVariant(baseProbe,latest?.variant??0):undefined;
   const reportedHard=result.reflections?.some(row=>row.domain===domain&&row.rating==='hard')??false;
   const bpm=Math.max(50,Math.round(((probe?.bpm??72)*(reportedHard?0.75:0.85))/5)*5);
   const notes=probe?.hits??[];
   const measuredVoice=notes.length?notes.reduce((best,hit)=>notes.filter(other=>other.instrument===hit.instrument).length>notes.filter(other=>other.instrument===best).length?hit.instrument:best,notes[0].instrument):null;
   const voice=result.adaptation==='single-voice'?'snare':result.adaptation==='hands-only'&&measuredVoice==='kick'?'tom':measuredVoice;
   const focus=latest&&latest.extras>0&&latest.extras>=latest.misses?'Count through the rests; keep unmarked spaces quiet.':latest&&latest.misses>0?'Count aloud, then add the missed strokes only after the pulse feels steady.':latest&&(latest.timingSpreadMs??0)>55?'Aim for even spacing and relaxed strokes.':latest&&(latest.meanOffsetMs??0)>18?'Wait for the beat; your notes tended late.':latest&&(latest.meanOffsetMs??0)<-18?'Let the beat land before the stroke; your notes tended early.':'Play the groove evenly and build speed only when it feels comfortable.';
-  return {durationSeconds:60,bpm,domain,voice,focus,steps:[`0–20 seconds: count the pulse aloud at ${bpm} BPM.`,`20–40 seconds: practice ${voice??domain} alone; ${focus}`,`40–60 seconds: add the ${result.adaptation==='single-voice'?'same voice':result.adaptation==='hands-only'?'adapted groove':'full groove'} while keeping the same pulse.`]};
+  return {durationSeconds:60,bpm,domain,voice,focus,probe:probe?{...probe,bpm}:undefined,steps:[`0–20 seconds: count the pulse aloud at ${bpm} BPM.`,`20–40 seconds: read and practice the notation one bar at a time; ${focus}`,`40–60 seconds: play the full notated groove while keeping the same pulse.`]};
 }
 export function assessmentTransferProbe() { return assessmentContent.probes.find(probe => probe.id === 'transfer-1') ?? null; }
 export function assessmentTransferVariant(result: AssessmentResult) {
   const probe = assessmentTransferProbe();
   return probe ? stableSeed(result.id) % ((probe.alternates?.length ?? 0) + 1) : 0;
+}
+export function assessmentTransferFollowUpVariant(result: AssessmentResult) {
+  const probe=assessmentTransferProbe();
+  if(!probe||!result.transferAttempt)return assessmentTransferVariant(result);
+  const forms=(probe.alternates?.length??0)+1;
+  return forms>1?((result.transferAttempt.variant??assessmentTransferVariant(result))+1)%forms:0;
 }
 export function assessmentInternalPulseProbe() { return assessmentContent.probes.find(probe => probe.id === 'internal-pulse-1') ?? null; }
 export function assessTempoProgress(result: Pick<AssessmentResult, 'tempoAttempts'>) {
@@ -340,12 +388,14 @@ export function parseAssessmentDraft(raw: string | null, now = Date.now()): Asse
 export function serializeAssessmentDraft(result: AssessmentResult, savedAt = new Date().toISOString()) {
   return JSON.stringify({ version: 1, savedAt, result });
 }
-export function assessmentEducatorReview(result: AssessmentResult) {
+export function assessmentEducatorReview(result: AssessmentResult, practiceContext: { rounds: number; minutes: number | null } | null = null) {
   const questions = assessmentQuestionsForResult(result);
   const readingTier = assessmentReadingSummary(result).tier;
+  const transferStart=Date.parse(result.transferAttemptedAt??''),transferEnd=Date.parse(result.transferFollowUpAttemptedAt??'');
+  const transferElapsedSeconds=Number.isFinite(transferStart)&&Number.isFinite(transferEnd)&&transferEnd>=transferStart?Math.round((transferEnd-transferStart)/1000):null;
   return {
     format: 'drum-hero-assessment-review', version: 1,
-    input: result.input, adaptation: result.adaptation, goal: assessmentGoalLabel(result.goal), quizFormat: result.quizFormat ?? 'visual', timingCorrectionMs: result.timingCorrectionMs ?? null, timingCalibrated: result.timingCalibrated ?? null, pilotCode: result.educatorComparison?.pilotCode?.trim() || null, recommendedLesson: assessmentRecommendation(result), appTiers: { ...Object.fromEntries(assessmentDomains.map(domain => [domain, result.attempts.some(attempt=>attempt.probeId.startsWith(`${domain}-`)) ? assessmentTier(result, domain) : null])), reading: readingTier }, endedEarly: result.endedEarly,
+    input: result.input, adaptation: result.adaptation, goal: assessmentGoalLabel(result.goal), quizFormat: result.quizFormat ?? 'visual', accessibilityOptions:{rhythmFirst:result.rhythmFirst??false,largeNotation:result.largeNotation??false,slowDemonstration:result.slowDemonstration??false,extendedCountIn:result.extendedCountIn??false,largePads:result.largePads??false,spokenCountIn:result.spokenCountIn??false,hapticCountIn:result.hapticCountIn??false}, timingCorrectionMs: result.timingCorrectionMs ?? null, timingCalibrated: result.timingCalibrated ?? null, pilotCode: result.educatorComparison?.pilotCode?.trim() || null, recommendedLesson: assessmentRecommendation(result), appTiers: { ...Object.fromEntries(assessmentDomains.map(domain => [domain, result.attempts.some(attempt=>attempt.probeId.startsWith(`${domain}-`)) ? assessmentTier(result, domain) : null])), reading: readingTier }, readingSummary:assessmentReadingSummary(result), endedEarly: result.endedEarly,
     contentVersion: result.contentVersion ?? null,
     attempts: result.attempts.map(attempt=>({
       probeId: attempt.probeId, task: assessmentContent.probes.find(probe=>probe.id===attempt.probeId)?.name ?? attempt.probeId,
@@ -355,7 +405,8 @@ export function assessmentEducatorReview(result: AssessmentResult) {
       meanAbsoluteMs: attempt.meanAbsoluteMs, meanOffsetMs: attempt.meanOffsetMs ?? null, timingSpreadMs: attempt.timingSpreadMs ?? null,
       dynamicsContrast: attempt.dynamicsContrast, passed: attempt.passed
     })),
-    transfer: result.transferAttempt ? { task: 'Fresh groove transfer check', ...result.transferAttempt } : null,
+    transfer: result.transferAttempt ? { task: 'Fresh groove pre-practice baseline', ...result.transferAttempt } : null,
+    transferFollowUp: result.transferFollowUpAttempt ? { task: 'Fresh groove after-practice check', elapsedSinceBaselineSeconds: transferElapsedSeconds, trainerPracticeRounds: practiceContext?.rounds ?? null, trainerPracticeMinutes: practiceContext?.minutes ?? null, reportedPracticeMinutes: result.reportedPracticeMinutes ?? null, ...result.transferFollowUpAttempt } : null,
     internalPulse: result.internalPulseAttempt ? { task: 'Metronome dropout pulse check', ...result.internalPulseAttempt } : null,
     tempoCheck: (result.tempoAttempts?.length ?? 0) ? { highestDemonstratedBpm: assessTempoProgress(result).highestBpm, attempts: result.tempoAttempts } : null,
     confirmations: (result.confirmations??[]).map(row=>({probeId:row.probeId,passed:row.attempt.passed,score:row.attempt.score,matchedPercent:row.attempt.accuracy,meanAbsoluteMs:row.attempt.meanAbsoluteMs})),
@@ -363,13 +414,13 @@ export function assessmentEducatorReview(result: AssessmentResult) {
     learnerFeedback: result.reflections ?? [],
     questions: questions.map(question=>{
       const answer=result.answers.find(row=>row.questionId===question.id);
-      return { itemId: question.id, kind: question.kind, prompt: question.prompt, choices: question.choices, selectedChoice: answer?.choice ?? null, answer: question.answer, correct: answer ? answer.choice===question.answer : null };
+      return { itemId: question.id, kind: question.kind, prompt: question.prompt, readingDomain: question.kind==='reading'?question.probeId.split('-')[0]:null, choices: question.choices, selectedChoice: answer?.choice ?? null, answer: question.answer, correct: answer ? answer.choice===question.answer : null };
     })
   };
 }
 export function assessmentComparison(result: AssessmentResult, history: AssessmentResult[]) {
   const currentDate = Date.parse(result.playedAt);
-  const previous = history.filter(row=>row.id!==result.id&&row.inputProfile===result.inputProfile&&row.adaptation===result.adaptation&&row.contentVersion===result.contentVersion&&row.timingCalibrated===result.timingCalibrated&&Math.abs((row.timingCorrectionMs??0)-(result.timingCorrectionMs??0))<10&&Date.parse(row.playedAt)<currentDate).sort((a,b)=>Date.parse(b.playedAt)-Date.parse(a.playedAt))[0];
+  const previous = history.filter(row=>row.id!==result.id&&row.inputProfile===result.inputProfile&&row.adaptation===result.adaptation&&row.contentVersion===result.contentVersion&&row.quizFormat===result.quizFormat&&row.timingCalibrated===result.timingCalibrated&&row.rhythmFirst===result.rhythmFirst&&row.largeNotation===result.largeNotation&&row.slowDemonstration===result.slowDemonstration&&row.extendedCountIn===result.extendedCountIn&&row.largePads===result.largePads&&row.spokenCountIn===result.spokenCountIn&&row.hapticCountIn===result.hapticCountIn&&Math.abs((row.timingCorrectionMs??0)-(result.timingCorrectionMs??0))<10&&Date.parse(row.playedAt)<currentDate).sort((a,b)=>Date.parse(b.playedAt)-Date.parse(a.playedAt))[0];
   if (!previous) return null;
   const summary = assessmentDomains.flatMap(domain=>{
     const currentAttempt = result.attempts.some(a=>a.probeId.startsWith(`${domain}-`));
@@ -388,7 +439,7 @@ export function assessmentComparison(result: AssessmentResult, history: Assessme
   return summary.length ? { previous, summary:summary.join(' · ') } : null;
 }
 export function assessmentTrend(result: AssessmentResult, history: AssessmentResult[], limit = 6) {
-  const comparable = history.filter(row => row.id !== result.id && row.inputProfile === result.inputProfile && row.adaptation === result.adaptation && row.contentVersion === result.contentVersion && row.timingCalibrated === result.timingCalibrated && Math.abs((row.timingCorrectionMs ?? 0) - (result.timingCorrectionMs ?? 0)) < 10);
+  const comparable = history.filter(row => row.id !== result.id && row.inputProfile === result.inputProfile && row.adaptation === result.adaptation && row.contentVersion === result.contentVersion && row.quizFormat === result.quizFormat && row.timingCalibrated === result.timingCalibrated && row.rhythmFirst===result.rhythmFirst && row.largeNotation===result.largeNotation && row.slowDemonstration === result.slowDemonstration && row.extendedCountIn === result.extendedCountIn && row.largePads===result.largePads && row.spokenCountIn===result.spokenCountIn && row.hapticCountIn===result.hapticCountIn && Math.abs((row.timingCorrectionMs ?? 0) - (result.timingCorrectionMs ?? 0)) < 10);
   return [...comparable, result].sort((a,b)=>Date.parse(a.playedAt)-Date.parse(b.playedAt)).slice(-Math.max(2,limit)).map(row=>{
     const detail=(domain:AssessmentDomain)=>{const attempts=row.attempts.filter(attempt=>attempt.probeId.startsWith(`${domain}-`));const latest=attempts.at(-1);return {tier:attempts.length?assessmentTier(row,domain):null,matched:latest?.accuracy??null,timing:latest?.meanAbsoluteMs??null};};
     return {id:row.id,playedAt:row.playedAt,pulse:detail('pulse'),subdivisions:detail('subdivisions'),coordination:detail('coordination')};
@@ -403,10 +454,11 @@ export function shuffledAssessmentChoices(question: AssessmentQuestion, seed: nu
 function validResult(value: unknown): value is AssessmentResult {
   if (!value || typeof value !== 'object') return false;
   const r = value as AssessmentResult;
-  if (r.version !== 1 || (r.contentVersion !== undefined && (!Number.isInteger(r.contentVersion) || r.contentVersion < 1 || r.contentVersion > 1000)) || typeof r.id !== 'string' || !r.id || r.id.length > 100 || typeof r.playedAt !== 'string' || !Number.isFinite(Date.parse(r.playedAt)) || !['keyboard','touch','midi'].includes(r.input) || typeof r.inputProfile !== 'string' || r.inputProfile.length > 200 || !['standard','hands-only','single-voice'].includes(r.adaptation) || (r.goal !== undefined && !['balanced','play-with-others','play-expressively','read-notation'].includes(r.goal)) || (r.quizFormat !== undefined && !['visual','audio'].includes(r.quizFormat)) || (r.timingCorrectionMs !== undefined && (!Number.isFinite(r.timingCorrectionMs) || Math.abs(r.timingCorrectionMs) > 250)) || (r.timingCalibrated !== undefined && typeof r.timingCalibrated !== 'boolean') || typeof r.endedEarly !== 'boolean') return false;
-  if (!Array.isArray(r.attempts) || r.attempts.length > 20 || !Array.isArray(r.answers) || r.answers.length > 5 || !Array.isArray(r.skipped) || r.skipped.length > 20) return false;
+  if (r.version !== 1 || (r.contentVersion !== undefined && (!Number.isInteger(r.contentVersion) || r.contentVersion < 1 || r.contentVersion > 1000)) || typeof r.id !== 'string' || !r.id || r.id.length > 100 || typeof r.playedAt !== 'string' || !Number.isFinite(Date.parse(r.playedAt)) || !['keyboard','touch','midi'].includes(r.input) || typeof r.inputProfile !== 'string' || r.inputProfile.length > 200 || !['standard','hands-only','single-voice'].includes(r.adaptation) || (r.goal !== undefined && !['balanced','play-with-others','play-expressively','read-notation'].includes(r.goal)) || (r.quizFormat !== undefined && !['visual','audio'].includes(r.quizFormat)) || (r.timingCorrectionMs !== undefined && (!Number.isFinite(r.timingCorrectionMs) || Math.abs(r.timingCorrectionMs) > 250)) || (r.timingCalibrated !== undefined && typeof r.timingCalibrated !== 'boolean') || [r.rhythmFirst,r.largeNotation,r.slowDemonstration,r.extendedCountIn,r.largePads,r.spokenCountIn,r.hapticCountIn].some(value=>value!==undefined&&typeof value!=='boolean') || typeof r.endedEarly !== 'boolean') return false;
+  if ([r.transferAttemptedAt,r.transferFollowUpAttemptedAt].some(value=>value!==undefined&&(typeof value!=='string'||!Number.isFinite(Date.parse(value)))) || (r.transferAttemptedAt!==undefined&&!r.transferAttempt) || (r.transferFollowUpAttemptedAt!==undefined&&(!r.transferFollowUpAttempt||r.transferAttemptedAt===undefined||Date.parse(r.transferFollowUpAttemptedAt)<Date.parse(r.transferAttemptedAt))) || (r.transferFollowUpAttempt!==undefined&&!r.transferAttempt) || (r.reportedPracticeMinutes!==undefined&&(!r.transferAttempt||!Number.isInteger(r.reportedPracticeMinutes)||r.reportedPracticeMinutes<0||r.reportedPracticeMinutes>600))) return false;
+  if (!Array.isArray(r.attempts) || r.attempts.length > 20 || !Array.isArray(r.answers) || r.answers.length > 8 || !Array.isArray(r.skipped) || r.skipped.length > 20) return false;
   const ids = [...assessmentContent.probes, ...assessmentContent.questions].map(p=>p.id);
-  if(r.questionIds!==undefined&&(!Array.isArray(r.questionIds)||![4,5].includes(r.questionIds.length)||new Set(r.questionIds).size!==r.questionIds.length||!r.questionIds.every(id=>assessmentContent.questions.some(question=>question.id===id))))return false;
+  if(r.questionIds!==undefined&&(!Array.isArray(r.questionIds)||r.questionIds.length<4||r.questionIds.length>8||new Set(r.questionIds).size!==r.questionIds.length||!r.questionIds.every(id=>assessmentContent.questions.some(question=>question.id===id))))return false;
   if (!r.skipped.every(id => typeof id === 'string' && ids.includes(id)) || new Set(r.skipped).size !== r.skipped.length) return false;
   if (!r.attempts.every(a => {
     const probe = a && assessmentContent.probes.find(p=>p.id===a.probeId);
@@ -433,6 +485,11 @@ function validResult(value: unknown): value is AssessmentResult {
     const attempt = r.transferAttempt;
     const probe = assessmentContent.probes.find(p=>p.id==='transfer-1');
     if (!probe || attempt.probeId !== 'transfer-1' || (attempt.variant!==undefined&&(!Number.isInteger(attempt.variant)||attempt.variant<0||attempt.variant>(probe.alternates?.length??0))) || ![attempt.score,attempt.accuracy].every(n=>Number.isInteger(n)&&n>=0&&n<=100) || ![attempt.misses,attempt.extras].every(n=>Number.isInteger(n)&&n>=0&&n<=10000) || !(attempt.meanAbsoluteMs===null||Number.isFinite(attempt.meanAbsoluteMs)&&attempt.meanAbsoluteMs>=0&&attempt.meanAbsoluteMs<=100) || !(attempt.meanOffsetMs===undefined||attempt.meanOffsetMs===null||Number.isFinite(attempt.meanOffsetMs)&&Math.abs(attempt.meanOffsetMs)<=100) || !(attempt.timingSpreadMs===undefined||attempt.timingSpreadMs===null||Number.isFinite(attempt.timingSpreadMs)&&attempt.timingSpreadMs>=0&&attempt.timingSpreadMs<=100) || attempt.dynamicsContrast!==null || typeof attempt.passed!=='boolean' || attempt.passed!==passedAssessment(attempt)) return false;
+  }
+  if (r.transferFollowUpAttempt !== undefined) {
+    const attempt=r.transferFollowUpAttempt;
+    const probe=assessmentTransferProbe();
+    if(!r.transferAttempt||!probe||attempt.probeId!==probe.id||(attempt.variant!==undefined&&(!Number.isInteger(attempt.variant)||attempt.variant<0||attempt.variant>(probe.alternates?.length??0)))||!Number.isInteger(attempt.score)||attempt.score<0||attempt.score>100||!Number.isInteger(attempt.accuracy)||attempt.accuracy<0||attempt.accuracy>100||!Number.isInteger(attempt.misses)||attempt.misses<0||attempt.misses>10000||!Number.isInteger(attempt.extras)||attempt.extras<0||attempt.extras>10000||!(attempt.meanAbsoluteMs===null||Number.isFinite(attempt.meanAbsoluteMs)&&attempt.meanAbsoluteMs>=0&&attempt.meanAbsoluteMs<=100)||!(attempt.meanOffsetMs===undefined||attempt.meanOffsetMs===null||Number.isFinite(attempt.meanOffsetMs)&&Math.abs(attempt.meanOffsetMs)<=100)||!(attempt.timingSpreadMs===undefined||attempt.timingSpreadMs===null||Number.isFinite(attempt.timingSpreadMs)&&attempt.timingSpreadMs>=0&&attempt.timingSpreadMs<=100)||attempt.dynamicsContrast!==null||typeof attempt.passed!=='boolean'||attempt.passed!==passedAssessment(attempt))return false;
   }
   if (r.internalPulseAttempt !== undefined) {
     const attempt = r.internalPulseAttempt;
@@ -490,4 +547,23 @@ export function assessmentPracticeReadiness(rounds: TrainerRound[], baseline: Pi
     if (consecutive === 1) { latestScore = score; latestAccuracy = accuracy; latestTimingMs = timing; }
   }
   return { consecutive, required: 3, ready: consecutive >= 3, latestScore, latestAccuracy, latestTimingMs };
+}
+export function assessmentTransferPracticeContext(rounds: TrainerRound[], result: AssessmentResult) {
+  const start=Date.parse(result.transferAttemptedAt??''),end=Date.parse(result.transferFollowUpAttemptedAt??'');
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)return null;
+  const adaptation=result.adaptation==='hands-only'?'seated':result.adaptation;
+  const matches=rounds.filter(round=>{
+    const date=Date.parse(round.playedAt);
+    return round.mode==='scored'&&!!round.result&&date>start&&date<=end&&round.inputProfile===result.inputProfile&&(round.adaptation??'standard')===adaptation&&
+      (result.timingCalibrated===undefined||round.timingCalibrated===result.timingCalibrated)&&Math.abs((round.timingCorrectionMs??0)-(result.timingCorrectionMs??0))<10&&
+      !round.uncertainDetections&&!round.inputClipped&&!round.focusedDrill&&!round.learningMode;
+  });
+  let allDurationsKnown=matches.length>0;
+  const seconds=matches.reduce((sum,round)=>{
+    if(typeof round.durationSeconds==='number'&&Number.isFinite(round.durationSeconds))return sum+round.durationSeconds;
+    const pattern=patterns.find(item=>item.id===round.patternId);
+    if(!pattern){allDurationsKnown=false;return sum;}
+    return sum+pattern.beats*(round.repetitions??10)*60/round.bpm;
+  },0);
+  return { rounds:matches.length, minutes:allDurationsKnown?Math.round(seconds/60):null };
 }

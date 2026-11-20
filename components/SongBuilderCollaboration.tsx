@@ -24,13 +24,28 @@ function mergePartEdits(base:DrumPart,local:DrumPart,remote:DrumPart):DrumPart{
   return merged;
 }
 
+function mergeReviewThreads(base:SongSection["reviewComments"],local:SongSection["reviewComments"],remote:SongSection["reviewComments"]):SongSection["reviewComments"]{
+  const before=new Map((base??[]).map(item=>[item.id,item])),mine=new Map((local??[]).map(item=>[item.id,item])),theirs=new Map((remote??[]).map(item=>[item.id,item]));
+  return [...new Set([...before.keys(),...mine.keys(),...theirs.keys()])].flatMap(id=>{
+    const b=before.get(id),l=mine.get(id),r=theirs.get(id);
+    const localChanged=JSON.stringify(l)!==JSON.stringify(b),remoteChanged=JSON.stringify(r)!==JSON.stringify(b);
+    if(!l&&!r)return [];
+    if(!l&&r&&!remoteChanged)return [];
+    if(!r&&l&&!localChanged)return [];
+    const selected=!r?l!:!l?r!:remoteChanged&&localChanged?(Date.parse(r.updatedAt)>=Date.parse(l.updatedAt)?r:l):remoteChanged?r:localChanged?l:b!;
+    const replies=new Map([...(l?.replies??[]),...(r?.replies??[])].map(reply=>[reply.id,reply]));
+    return [{...selected,replies:replies.size?[...replies.values()].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)).slice(-100):undefined}];
+  }).sort((a,b)=>a.measure-b.measure||(a.beat??-1)-(b.beat??-1)||a.createdAt.localeCompare(b.createdAt));
+}
+
 function mergeSectionEdits(base:SongSection,local:SongSection,remote:SongSection):SongSection{
   const before=new Map(base.parts.map(part=>[part.id,part])),mine=new Map(local.parts.map(part=>[part.id,part])),theirs=new Map(remote.parts.map(part=>[part.id,part]));
   const parts=remote.parts.flatMap(part=>{const b=before.get(part.id),l=mine.get(part.id);if(b&&!l&&JSON.stringify(part)===JSON.stringify(b))return [];return b&&l?[mergePartEdits(b,l,part)]:[part];});
   for(const part of local.parts)if(!before.has(part.id)&&!theirs.has(part.id))parts.push(part);
-  const merged={...local,...remote,parts};
+  const reviewComments=mergeReviewThreads(base.reviewComments,local.reviewComments,remote.reviewComments);
+  const merged={...local,...remote,parts,reviewComments};
   const allKeys=new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remote)]);
-  for(const field of allKeys){if(field==="parts"||field==="id")continue;if(JSON.stringify((remote as unknown as Record<string,unknown>)[field])===JSON.stringify((base as unknown as Record<string,unknown>)[field]))(merged as unknown as Record<string,unknown>)[field]=(local as unknown as Record<string,unknown>)[field];}
+  for(const field of allKeys){if(field==="parts"||field==="reviewComments"||field==="id")continue;if(JSON.stringify((remote as unknown as Record<string,unknown>)[field])===JSON.stringify((base as unknown as Record<string,unknown>)[field]))(merged as unknown as Record<string,unknown>)[field]=(local as unknown as Record<string,unknown>)[field];}
   return merged;
 }
 

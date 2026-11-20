@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { Instrument } from "@/lib/types";
+import { techniqueDemoVideos } from "@/lib/technique-demo-videos";
+import styles from "./TechniqueDemonstration.module.css";
 import { useLocalization } from "./LocalizationProvider";
 
 type Limb = "Right hand" | "Left hand" | "Right foot" | "Left foot";
@@ -43,6 +45,7 @@ const handOrigins: Record<Limb, { x: number; y: number }> = {
 
 export function TechniqueDemonstration({ lessonId }: { lessonId: string }) {
   const demonstration = demonstrations[lessonId];
+  const expertVideo = techniqueDemoVideos[lessonId];
   const steps = demonstration?.steps ?? [];
   const { t, formatNumber } = useLocalization();
   const [stepIndex, setStepIndex] = useState(0);
@@ -92,6 +95,14 @@ export function TechniqueDemonstration({ lessonId }: { lessonId: string }) {
 
   return <section className="technique-demo" aria-labelledby={`technique-demo-${lessonId}`}>
     <div className="technique-demo-copy"><h4 id={`technique-demo-${lessonId}`}>{t("Technique demonstration")}</h4><p>{t(demonstration.cue)}</p></div>
+    {expertVideo && <figure className={`${styles.video} technique-demo-video`}>
+      <video controls playsInline preload="none" poster={expertVideo.poster} aria-label={`${t("Expert technique video")}: ${t(demonstration.cue)}`}>
+        <source src={expertVideo.src} type={expertVideo.mimeType} />
+        {expertVideo.captionTracks.map((track) => <track key={track.language} kind="captions" src={track.src} srcLang={track.language} label={track.label} default={track.isDefault} />)}
+        {t("Your browser cannot play this video. Follow the step-by-step visual demonstration below.")}
+      </video>
+      <figcaption>{t("Expert demonstration")}: {expertVideo.credit}</figcaption>
+    </figure>}
     <div className="technique-demo-layout">
       <figure className="technique-demo-kit">
         <svg viewBox="0 0 320 240" role="img" aria-labelledby={`technique-svg-title-${lessonId}`}>

@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { learnerStorageKey } from "@/lib/learner-profiles";
-import { createRetentionRoutine, groupGrooveFamilies } from "@/lib/trainer-next";
+import { createRetentionRoutine, groupGrooveFamilies, recommendUnfamiliarTransferPattern } from "@/lib/trainer-next";
 import type { TrainerRound } from "@/lib/trainer";
 import type { PracticePattern } from "@/lib/types";
 import type { TrainerRoutineStep } from "@/lib/trainer-enhancements";
+import { TrainerNotationView } from "@/components/TrainerNotationView";
 
 type Goal = { bpm: number; accuracy: number; passes: number };
 type GoalMap = Record<string, Goal>;
@@ -41,7 +42,7 @@ function goalStreak(rounds: TrainerRound[], patternId: string, goal: Goal) {
   return count;
 }
 
-export function TrainerLearningTools({ rounds, pattern, patterns, profileId, disabled, onSelectPattern, onUseGoalTempo, onStartRetention }: {
+export function TrainerLearningTools({ rounds, pattern, patterns, profileId, disabled, onSelectPattern, onUseGoalTempo, onStartRetention, onStartTransfer }: {
   rounds: TrainerRound[];
   pattern: PracticePattern;
   patterns: PracticePattern[];
@@ -50,6 +51,7 @@ export function TrainerLearningTools({ rounds, pattern, patterns, profileId, dis
   onSelectPattern: (id: string) => void;
   onUseGoalTempo: (bpm: number) => void;
   onStartRetention: (steps: TrainerRoutineStep[]) => void;
+  onStartTransfer: (pattern: PracticePattern) => void;
 }) {
   const goalKey = learnerStorageKey("drum-hero:trainer-goals:v1", profileId);
   const noteKey = learnerStorageKey("drum-hero:trainer-pattern-notes:v1", profileId);
@@ -67,6 +69,8 @@ export function TrainerLearningTools({ rounds, pattern, patterns, profileId, dis
   const note = storageReady ? notes[pattern.id] ?? "" : "";
   const families = useMemo(() => groupGrooveFamilies(patterns), [patterns]);
   const retentionSteps = useMemo(() => createRetentionRoutine(rounds, patterns), [patterns, rounds]);
+  const transferCandidate = useMemo(() => recommendUnfamiliarTransferPattern(pattern, patterns, rounds), [pattern, patterns, rounds]);
+  const transferAttempts = rounds.filter(round => round.transferFromPatternId === pattern.id && round.mode === "scored" && round.result && !round.inputClipped && !round.uncertainDetections);
   const passed = goalStreak(rounds, pattern.id, goal);
 
   useEffect(() => {
@@ -132,6 +136,17 @@ export function TrainerLearningTools({ rounds, pattern, patterns, profileId, dis
       <summary>Retention remix · grooves and fills</summary>
       <p>Revisit grooves you have played reliably, start near your recent successful tempo, and add a compatible fill that has fewer or weaker results. Groove and fill steps alternate.</p>
       {retentionSteps.length ? <><small>{retentionSteps.length} steps ready · 8 repetitions each · lower-confidence fills are paired where available.</small><button type="button" disabled={disabled} onClick={() => onStartRetention(retentionSteps)}>Start retention remix</button></> : <p>Complete two reliable rounds on at least one groove to build a personalized retention session.</p>}
+    </details>
+
+    <details className="trainer-transfer-check">
+      <summary>Unfamiliar pattern transfer{transferAttempts.length ? ` · ${transferAttempts.length} scored checks` : ""}</summary>
+      {transferCandidate ? <>
+        <p>Try a pattern you have not scored before that shares a style, meter, subdivision, or fill role with <strong>{pattern.name}</strong>. This checks whether the skill carries to new notes rather than repeating a memorized chart.</p>
+        <TrainerNotationView pattern={transferCandidate} compact />
+        <p><strong>{transferCandidate.name}</strong> · {transferCandidate.level} · {"meter" in transferCandidate && transferCandidate.meter ? String(transferCandidate.meter) : `${transferCandidate.beats}/4`} · {transferCandidate.defaultBpm} BPM</p>
+        <button type="button" disabled={disabled} onClick={() => onStartTransfer(transferCandidate)}>Set up scored transfer check</button>
+      </> : <p>No unplayed related pattern is available in this library. Add a groove or fill you have not practised yet to try a transfer check.</p>}
+      {transferAttempts.length > 0 && <p role="status">Your latest reliable transfer score was {transferAttempts[0]?.result?.accuracy}% on a new pattern.</p>}
     </details>
     {storageMessage && <p role="status">{storageMessage}</p>}
   </div>;

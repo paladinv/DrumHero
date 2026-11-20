@@ -1,37 +1,43 @@
-# Move learning work between web and iOS
+# Cross-platform transfer and sync
 
-Drum Hero uses explicit files for cross-platform transfer. Files are reviewed before import; progress transfers merge into the current learner profile and do not upload data.
+Drum Hero provides a portable learning archive, optional account sync, and a separate coach-review exchange. Each path has a different purpose and includes a review step before imported data is applied.
 
-## Learning progress and preferred tempo
+## Learning archive
 
-On web, open **Progress → Back up or move your work → Move learning progress between web and iOS**. On iOS, open **Progress → Move learning progress between web and iOS**. Export a `drum-hero-progress-transfer-v1` JSON file on the source device, move it with Files, AirDrop, or another method you trust, then choose it on the destination device and review the counts before merging.
+Web, native iOS, and Android use the JSON format `drum-hero-learning-archive-v1`. Web, iOS, and Android continue to accept the legacy `drum-hero-progress-transfer-v1` progress-only file. The maximum file size is 32 MB.
 
-The transfer contains completed lesson IDs, up to 50 recent scored practice summaries, best scores, and preferred tempo. Web exports are capped at 50 summaries to match iOS. Web transfers also carry the active profile’s weekly goal and a saved guided session, with its timer paused at export. On web import, progress merges into the active learner profile, and the review lets you choose whether to replace that profile’s session and goal. iOS stores and displays these two optional fields, includes them when re-exporting, and can return them to web; the guided session itself resumes in the web app. Existing lesson completions and session history are kept; matching session IDs are updated. The destination retains at most 50 scored sessions. Web skips unknown lesson IDs and keeps unfamiliar pattern IDs as history labels so custom and older patterns are preserved. iOS imports only lesson and pattern IDs in its installed curriculum and reports skipped rows. Import changes the destination’s preferred tempo to the value in the reviewed file; web Practice and Trainer use that preference for subsequent sessions.
+The archive can contain:
 
-The transfer does not include recordings, microphone audio, MIDI or latency calibration, learner profiles, assessment answers, personal notes, Song Library attachments, or account credentials. It includes only completed lessons, scored practice summaries, and the optional guided-session and weekly-goal settings described above.
+- Completed lesson IDs and completion dates
+- Up to 50 scored Practice Pad sessions, best scores, and preferred tempo
+- Up to 50 Trainer round summaries, with optional detailed per-hit timing (up to 600 hits per round), plus the personal routine, saved cue sequences, and coach feedback text
+- Up to 100 optional ear-training results
+- A paused guided session and the active profile's weekly goal
+- Up to 200 personal Song Library songs
+- Up to 100 custom grooves
 
-## Personal songs
+Web lets learners include or omit ear-training history and detailed Trainer timing, and choose whether those fields are merged on import. iOS preserves imported ear-training results and per-hit timing for re-export while importing the Trainer summaries it supports. Android merges its lesson and Practice Pad records and retains the optional ear-training, Trainer, song, groove, guided-session, and weekly-goal fields for a later web or iOS export; it does not interpret those Android-unsupported records. Matching session and Trainer round IDs are updated; matching song and groove IDs keep the copy already on the destination. A supplied routine replaces the personal routine, cue sequences merge by ID, preferred tempo is applied, and the optional guided session and weekly goal replace their destination copies only when included in the archive. Unknown lesson or pattern IDs are skipped with a review summary. iOS also names and skips personal songs it cannot decode or play with its supported voices; it preserves custom-groove JSON fields while loading playable patterns into the native Trainer and Practice screen.
 
-For one personal song, export its Drum Hero song JSON from **Song Library** on either platform and import that file into the other platform’s Song Library. The shared format is `drum-hero-song-v1`.
+The archive contains no audio recordings, reference tracks, samples, device calibration, or account credentials. Full recovery backups remain platform-specific. Use the platform backup on the Progress page to preserve platform-local data.
 
-To move several songs at once, use **Web–iOS transfer packs** on web or **Export all personal songs** on iOS. On web, choose individual songs or start from a collection, review the selected count, and prepare numbered packs split to stay under 200 songs and 32 MiB each. Download packs one at a time. If the selection includes unsupported iOS voices, map them to kick, snare, hi-hat, tom, or crash and preview remapped hits and same-step collisions before saving separate compatible song copies; source arrangements remain unchanged. The destination reviews each pack before saving: match by song ID first and then by normalized title and artist, and choose whether to add, replace, copy, or skip each match. iOS imports compatible songs from a mixed pack and lists songs it cannot read, including unsupported drum voices, so the rest can still be reviewed.
+## Optional account sync
 
-Song JSON and transfer packs contain arrangements, embedded song/section/part notes, and source attribution metadata. They do not include learner journals or annotations, practice history, goals, recorded takes, reference audio, or other attached files. Those remain local unless you include audio in a platform’s separate backup.
+The web and iOS Progress screens can sync the same learner profile through the existing Supabase practice snapshot table. Separately, iOS Song Library can explicitly append compatible songs to or import missing songs from an editable web library; see [Song Library account exchange](SONG_LIBRARY_SYNC.md#ios-song-library-account-exchange). The learner must sign in with the same account and use the same profile code. Sync is manual: review the cloud revision, then merge it locally or merge local and cloud progress and upload that result with revision conflict protection. Trainer summaries, the personal routine, saved cue sequences, and coach feedback text now merge across platforms. Device profiles, MIDI maps, latency calibration, per-hit timing, and audio remain local; older snapshots are sanitized when loaded and are not re-uploaded in that form.
 
-## Full backups and sync
+On iOS, set `DRUM_HERO_SUPABASE_URL` and `DRUM_HERO_SUPABASE_PUBLISHABLE_KEY` in the Xcode build environment and apply migration `202610210001_practice_snapshots.sql`. The key is the public Supabase publishable key; authorization is enforced by the signed-in user and database policies. Create the account through the web sign-in flow if needed.
 
-Full backups are recovery files for the platform that created them. The web full backup can include browser settings, libraries, samples, and local audio. The iOS version 2 backup can include SwiftData progress and personal song projects, but no recordings. Do not use one platform’s full backup as the other platform’s restore file.
+The native iOS sync uploads lesson completions, Practice Pad sessions, Trainer round summaries, best scores, preferred tempo, and the portable Trainer assets described above. It does not upload local audio, hit timing, or device calibration. Use the learning archive when you want to move the same portable data by file instead of through the signed-in snapshot. Account sync is not a substitute for a learning archive or local recovery backup.
 
-Web account sync is separate from these file transfers and does not currently sync native iOS progress. Keep a copy of important work before replacing or clearing local data. Transfer files contain private learning history; share them only with a destination you trust.
+## Trainer catalog publishing
 
-## Release checks
+The authenticated editorial catalog uses `supabase/migrations/202611170004_trainer_catalog_publishing.sql`. It keeps submitted revisions and reviews private to signed-in editorial members, exposes only published catalog rows, requires source attribution and rights metadata, blocks authors from reviewing their own revision, and requires two independent approvals plus an editor or admin publish action. Assign `reviewer`, `editor`, or `admin` membership directly through a trusted Supabase admin session; the app has no self-service role assignment. See `docs/TRAINER_CATALOG_PUBLISHING.md` before enabling the workflow.
 
-- Export a progress transfer from web and merge it on iOS; repeat from iOS to web.
-- Confirm lesson completion, recognized scored sessions, best scores, and preferred tempo are present on the destination.
-- Transfer an unfinished guided session and a weekly goal in both directions. Confirm the session arrives paused, the web destination can resume it, and the destination goal is only replaced after the import review is accepted.
-- Import the same file twice and confirm it does not duplicate completed lessons or session IDs.
-- Import a file with an unknown lesson or pattern ID and confirm the review reports skipped records while keeping existing data.
-- Export a single song and a multi-song pack on each platform, then import them on the other; review matching choices, imported arrangements, and unsupported iOS voice warnings.
-- Confirm full backups from one platform are rejected by the other platform’s full-backup importer without changing local data.
+## Coach take review
 
-These checks are release procedures, not device sign-off. Record platform versions and observations in [device validation](DEVICE_VALIDATION.md).
+From a saved web Trainer take, choose **Export for coach**. That file includes the selected recording and timing markers, so it leaves the device only when the learner shares it. A coach opens the file locally, adds timestamped comments, and exports a feedback JSON without audio. The learner imports the response to attach the comments to the matching saved take and can jump the recording to each note. No account upload is involved.
+
+## Local reminders and Android
+
+iOS practice reminders are repeating local notifications. Their schedule stays on the device and does not include practice history or profile data.
+
+The Android Compose app reuses shared lessons, grooves, notation cues, and drum sounds for offline Learn and score-led Practice. It stores lesson and practice history in SQLite, supports reviewed archive import/export, and accepts General MIDI USB/Bluetooth drum input with per-port timing calibration. Account sync, microphone scoring, reminders, Song Library workflows, and full feature parity remain planned. Physical MIDI validation is still required.

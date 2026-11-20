@@ -1,7 +1,8 @@
 export type TrainerClipSettings = { feel?: string; swingRatio?: number; pocketMs?: number; learningMode?: string; source?: string; inputProfile?: string; targetVoice?: string; beatsPerBar?: number };
 export type TrainerDynamicsMarker = { timeMs: number; velocity: number };
 export type TrainerClip = { blob: Blob; expectedMarkersMs: number[]; actualMarkersMs: number[]; expectedDynamics?: TrainerDynamicsMarker[]; actualDynamics?: TrainerDynamicsMarker[]; bookmarksMs?: number[]; patternId: string; patternName: string; bpm: number; createdAt: string; settings?: TrainerClipSettings };
-export type SavedTrainerTake = TrainerClip & { id: string; name: string; pinned: boolean; notes?: string };
+export type TrainerCoachReviewRecord = { patternName: string; bpm: number; receivedAt: string; comments: Array<{ id: string; timeMs: number; note: string; createdAt: string }> };
+export type SavedTrainerTake = TrainerClip & { id: string; name: string; pinned: boolean; notes?: string; coachReviews?: TrainerCoachReviewRecord[] };
 const limit = 12;
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

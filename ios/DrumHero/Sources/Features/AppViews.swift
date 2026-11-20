@@ -114,7 +114,7 @@ struct LearnView: View {
     var body: some View {
         NavigationStack {
             List {
-                NavigationLink("Sight reading") { SightReadingView() }
+                NavigationLink("Sight reading") { SightReadingView(content: content) }
                 Section {
                     Picker("Lesson level", selection: $level) {
                         Text("All levels").tag(LearnerLevel?.none)
@@ -304,16 +304,21 @@ struct PracticeView: View {
     @Binding var bpm: Int
     @Environment(\.locale) private var locale
     @Environment(\.modelContext) private var modelContext
+    @AppStorage("drumHero.portableCustomGroovesJSON") private var portableCustomGroovesJSON = "[]"
     @Query(sort: \PracticeSessionRecord.playedAt, order: .reverse) private var records: [PracticeSessionRecord]
     @State private var saveWarning = ""
-    private var selectedPattern: PracticePattern? { content.practicePatterns.first { $0.id == selectedPatternID } }
+    private var allPatterns: [PracticePattern] {
+        let custom = (try? JSONDecoder().decode([PracticePattern].self, from: Data(portableCustomGroovesJSON.utf8))) ?? []
+        return content.practicePatterns + custom
+    }
+    private var selectedPattern: PracticePattern? { allPatterns.first { $0.id == selectedPatternID } }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
                     Picker("Pattern", selection: $selectedPatternID) {
-                        ForEach(content.practicePatterns) { pattern in Text("\(content.localized("pattern.\(pattern.id).name", fallback: pattern.name, locale: locale)) · \(content.localized(pattern.level.rawValue, fallback: pattern.level.rawValue, locale: locale))").tag(pattern.id) }
+                        ForEach(allPatterns) { pattern in Text("\(content.localized("pattern.\(pattern.id).name", fallback: pattern.name, locale: locale)) · \(content.localized(pattern.level.rawValue, fallback: pattern.level.rawValue, locale: locale))").tag(pattern.id) }
                     }.pickerStyle(.menu).accessibilityIdentifier("practice.pattern")
                     if let selectedPattern {
                         VStack(alignment: .leading, spacing: 9) {
@@ -366,7 +371,7 @@ struct PracticeView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { LanguageSettingsButton() } }
             .onChange(of: selectedPatternID) { _, newValue in
                 if controller.currentPatternID != newValue { controller.reset() }
-                if let pattern = content.practicePatterns.first(where: { $0.id == newValue }) { bpm = pattern.defaultBpm }
+                if let pattern = allPatterns.first(where: { $0.id == newValue }) { bpm = pattern.defaultBpm }
             }
             .onChange(of: bpm) { _, newValue in if controller.currentTempo != newValue { controller.reset() } }
             .onChange(of: controller.result?.id) { _, newValue in if newValue != nil, let result = controller.result { save(result) } }
@@ -602,6 +607,7 @@ struct TrainerView: View {
     @StateObject private var midiInput = MobileMIDIInput()
     @AppStorage("drumHero.nativeInputOffset.touch") private var touchInputOffsetMs = 0.0
     @AppStorage("drumHero.nativeInputOffset.microphone") private var microphoneInputOffsetMs = 0.0
+    @AppStorage("drumHero.portableCustomGroovesJSON") private var portableCustomGroovesJSON = "[]"
     @State private var patternID = "single-stroke"
     @State private var skillFocus = TrainerSkillFocus.all
     @State private var bpm = 70
@@ -610,6 +616,8 @@ struct TrainerView: View {
     @State private var mode = "Self-rated"
     @State private var inputMode = "Touch pads"
     @State private var microphoneVoice: DrumVoice = .snare
+    @State private var microphoneMultiVoice = false
+    @State private var microphoneUncertainAtRoundStart = 0
     @State private var selectedMidiSourceID = ""
     @State private var microphoneSensitivity = 0.035
     @State private var adaptation = "Standard pattern"
@@ -617,7 +625,10 @@ struct TrainerView: View {
     @State private var ratings: [TrainerRating] = []
     @State private var pendingRating = false
     @State private var savedRound = false
-    private var patterns: [PracticePattern] { content.rudiments + content.grooves }
+    private var patterns: [PracticePattern] {
+        let custom = (try? JSONDecoder().decode([PracticePattern].self, from: Data(portableCustomGroovesJSON.utf8))) ?? []
+        return content.rudiments + content.grooves + custom
+    }
     private var visiblePatterns: [PracticePattern] { patterns.filter(skillFocus.includes) }
     private var pattern: PracticePattern { patterns.first { $0.id == patternID } ?? patterns[0] }
     private var roundPattern: PracticePattern {
@@ -638,8 +649,53 @@ struct TrainerView: View {
         return selected
     }
     private var visibleVoices: [DrumVoice] { adaptation == "One voice / reduced reach" ? [adaptiveVoice] : Array(DrumVoice.allCases) }
+    private var repetitionProgressTitle: String {
+        let current: Int
+        if mode == "Scored" {
+            current = min(repetitions, controller.playhead / max(1, pattern.totalSteps) + 1)
+        } else {
+            current = ratings.count + 1
+        }
+        return "Repetition \(current) of \(repetitions)"
+    }
+    private var roundPhaseDescription: String {
+        if controller.status == .countIn { return "Count in · \(controller.playhead + 1)" }
+        if controller.status == .paused { return "Paused" }
+        return "Step \(controller.playhead + 1) of \(pattern.totalSteps)"
+    }
+    @ViewBuilder private var activeRepetitionSection: some View {
+        if controller.status == .countIn || controller.status == .playing || controller.status == .paused {
+            Section("Repetition") {
+                Text(repetitionProgressTitle)
+                Text(roundPhaseDescription)
+                if controller.status == .playing && inputMode == "Touch pads" {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
+                        ForEach(visibleVoices) { voice in trainerVoicePad(voice) }
+                    }
+                } else if controller.status == .playing {
+                    Text(inputMode == "Microphone" ? "Play the selected drum voice." : "Play the connected MIDI kit.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+    private func trainerVoicePad(_ voice: DrumVoice) -> some View {
+        Button(voice.title) { controller.hit(voice, correctionMs: touchInputOffsetMs) }
+            .frame(maxWidth: .infinity, minHeight: 60)
+            .buttonStyle(.bordered)
+            .accessibilityLabel("\(voice.title) drum pad")
+            .accessibilityHint("Tap to play and score the \(voice.title)")
+            .accessibilityIdentifier("trainer.pad.\(voice.rawValue)")
+    }
+    private var languageSettingsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) { LanguageSettingsButton() }
+    }
     private var midiInputOffsetMs: Double { NativeMIDICalibration.correction(for: selectedMidiSourceID) }
-    private var activeInputProfile: String { inputMode == "MIDI" ? selectedMidiSourceID : inputMode == "Microphone" ? "microphone" : "touch" }
+    private var activeInputProfile: String {
+        if inputMode == "MIDI" { return selectedMidiSourceID }
+        if inputMode == "Microphone" { return microphoneMultiVoice ? "microphone-kit-classifier" : "microphone" }
+        return "touch"
+    }
     private var activeInputCorrectionMs: Double { inputMode == "MIDI" ? midiInputOffsetMs : inputMode == "Microphone" ? microphoneInputOffsetMs : touchInputOffsetMs }
     private var activeInputCalibrated: Bool { inputMode == "MIDI" ? NativeMIDICalibration.wasCalibrated(for: selectedMidiSourceID) : inputMode == "Microphone" ? NativeMIDICalibration.microphoneWasCalibrated : NativeMIDICalibration.touchWasCalibrated }
     private var recentMatchingRounds: [TrainerRoundRecord] {
@@ -649,14 +705,14 @@ struct TrainerView: View {
         guard let assessmentSince, let assessmentInputProfile, let assessmentAdaptation,
               assessmentSince <= .now else { return nil }
         let matches = trainerRounds.filter {
-            $0.patternID == patternID && $0.mode.hasPrefix("scored") && $0.playedAt > assessmentSince &&
+            $0.patternID == patternID && ["scored", "scored-adapted"].contains($0.mode) && $0.playedAt > assessmentSince &&
             $0.inputProfile == assessmentInputProfile && $0.assessmentAdaptation == assessmentAdaptation &&
-            $0.timingCalibrated == assessmentTimingCalibrated &&
+            (assessmentTimingCalibrated == nil || $0.timingCalibrated == assessmentTimingCalibrated) &&
             abs(($0.timingCorrectionMs ?? 0) - (assessmentCorrectionMs ?? 0)) < 10
         }.sorted { $0.playedAt > $1.playedAt }
         var streak = 0
         for row in matches {
-            guard (row.score ?? 0) >= 85, (row.accuracy ?? 0) >= 85 else { break }
+            guard (row.score ?? 0) >= 85, (row.accuracy ?? 0) >= 85, let timing = row.meanAbsoluteTimingMs, timing <= 60 else { break }
             streak += 1
         }
         return streak
@@ -691,11 +747,11 @@ struct TrainerView: View {
     var body: some View {
         NavigationStack {
             Form {
-                NavigationLink("Sight reading") { SightReadingView() }
+                NavigationLink("Sight reading") { SightReadingView(content: content) }
                 if let streak = assessmentRecheckStreak {
                     Section("Assessment practice") {
-                        Text(streak >= 3 ? "Ready for a recheck · \(min(streak, 3))/3 consecutive scored rounds reached 85% score and matched hits." : "\(min(streak, 3))/3 consecutive scored rounds reached 85% score and matched hits. Keep practising, then return to your assessment.")
-                        Text("This native Trainer history does not store hit timing offsets, so this readiness check uses score and matched-hit percentage only.").font(.caption).foregroundStyle(.secondary)
+                        Text(streak >= 3 ? "Ready for a recheck · \(min(streak, 3))/3 consecutive scored rounds met the score, hit-match, and timing targets." : "\(min(streak, 3))/3 consecutive scored rounds met the score, hit-match, and timing targets. Keep practising, then return to your assessment.")
+                        Text("Each counted round needs at least 85 score, 85% matched hits, and 60 ms mean absolute timing error or lower, with the same input and calibration.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Section("Round setup") {
@@ -727,28 +783,54 @@ struct TrainerView: View {
                     Text(inputMode == "Touch pads"
                          ? "Touch scoring works without permissions or extra equipment."
                          : inputMode == "Microphone"
-                            ? "Choose one drum voice. Drum Hero detects level changes on this device and does not record or save audio. Use headphones to reduce playback bleed."
+                            ? "Choose one voice, or calibrate five drums for experimental kit classification. Audio is analyzed on this device and is not recorded."
                             : "Connect a USB or Bluetooth MIDI drum kit. Standard General MIDI drum notes are set by default and can be changed below.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if inputMode == "Microphone" {
                     Section("Microphone setup") {
-                        Picker("Score this voice", selection: $microphoneVoice) {
-                            ForEach(DrumVoice.allCases) { Text($0.title).tag($0) }
+                        Toggle("Experimental five-voice kit classification", isOn: $microphoneMultiVoice)
+                            .disabled(microphoneInput.isListening)
+                        if microphoneMultiVoice {
+                            Text(microphoneInput.canClassifyKit
+                                 ? "Calibrated kit classification is experimental. Uncertain strikes are skipped, and this signal has not been validated across kits or rooms."
+                                 : "To calibrate: turn this option off, enable the microphone, calibrate each drum below with six isolated strikes, stop the microphone, then turn kit classification on.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Picker("Score this voice", selection: $microphoneVoice) {
+                                ForEach(DrumVoice.allCases) { Text($0.title).tag($0) }
+                            }.onChange(of: microphoneVoice) { _, voice in microphoneInput.setVoice(voice) }
                         }
-                        Button(microphoneInput.isListening ? "Stop microphone input" : "Enable microphone input",
+                        DisclosureGroup("Local kit voice profiles · \(microphoneInput.calibratedVoices.count)/5") {
+                            Text("Start microphone input in single-voice mode, then record six clear strikes per drum. The app stores spectral templates on this device, not audio recordings.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            ForEach(DrumVoice.allCases) { voice in
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(voice.title)
+                                        Text(microphoneInput.calibratedVoices.contains(voice) ? "Calibrated on this device" : "Needs six calibration strikes")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button(microphoneInput.calibratingVoice == voice ? "Calibrating \(microphoneInput.calibrationHitCount)/6" : "Calibrate") {
+                                        microphoneInput.calibrateVoice(voice)
+                                    }.disabled(!microphoneInput.isListening || controller.status == .playing || controller.status == .countIn || controller.status == .paused)
+                                }
+                            }
+                        }
+                        Button(microphoneInput.isListening ? "Stop microphone input" : microphoneMultiVoice ? "Enable experimental kit input" : "Enable microphone input",
                                systemImage: microphoneInput.isListening ? "mic.slash" : "mic") {
                             if microphoneInput.isListening {
                                 microphoneInput.stop()
                             } else {
                                 Task {
-                                    try? await microphoneInput.start(voice: microphoneVoice) { voice, at in
+                                    try? await microphoneInput.start(voice: microphoneVoice, classifyVoices: microphoneMultiVoice) { voice, at in
                                         controller.hit(voice, at: at,
                                                        correctionMs: UserDefaults.standard.double(forKey: "drumHero.nativeInputOffset.microphone"))
                                     }
                                 }
                             }
-                        }
+                        }.disabled(!microphoneInput.isListening && microphoneMultiVoice && !microphoneInput.canClassifyKit)
                         Button("Measure room noise", systemImage: "waveform.path") {
                             Task { await microphoneInput.calibrateRoomNoise() }
                         }.disabled(!microphoneInput.isListening)
@@ -759,6 +841,11 @@ struct TrainerView: View {
                         Text(microphoneInput.status).font(.caption).foregroundStyle(.secondary)
                             .accessibilityIdentifier("trainer.microphone.status")
                             .accessibilityAddTraits(.updatesFrequently)
+                        if microphoneInput.isListening && microphoneMultiVoice {
+                            Text("Calibrated voices: \(microphoneInput.calibratedVoices.count)/5 · uncertain strikes skipped: \(microphoneInput.uncertainStrikes)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if !microphoneInput.lastVoiceMatch.isEmpty { Text("Latest voice signal: \(microphoneInput.lastVoiceMatch)").font(.caption).foregroundStyle(.secondary) }
+                        }
                     }
                 }
                 if inputMode == "MIDI" {
@@ -811,27 +898,7 @@ struct TrainerView: View {
                     }
                     if controller.status != .idle { Button("Reset round", systemImage: "arrow.counterclockwise", role: .destructive) { resetRound() } }
                 }
-                if controller.status == .countIn || controller.status == .playing || controller.status == .paused {
-                    Section("Repetition") {
-                        Text(mode == "Scored" ? "Repetition \(min(repetitions, controller.playhead / max(1, pattern.totalSteps) + 1)) of \(repetitions)" : "Repetition \(ratings.count + 1) of \(repetitions)")
-                        Text(controller.status == .countIn ? "Count in · \(controller.playhead + 1)" : controller.status == .paused ? "Paused" : "Step \(controller.playhead + 1) of \(pattern.totalSteps)")
-                        if controller.status == .playing && inputMode == "Touch pads" {
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
-                                ForEach(visibleVoices) { voice in
-                                    Button(voice.title) { controller.hit(voice, correctionMs: touchInputOffsetMs) }
-                                        .frame(maxWidth: .infinity, minHeight: 60)
-                                        .buttonStyle(.bordered)
-                                        .accessibilityLabel("\(voice.title) drum pad")
-                                        .accessibilityHint("Tap to play and score the \(voice.title)")
-                                        .accessibilityIdentifier("trainer.pad.\(voice.rawValue)")
-                                }
-                            }
-                        } else if controller.status == .playing {
-                            Text(inputMode == "Microphone" ? "Play the selected drum voice." : "Play the connected MIDI kit.")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                activeRepetitionSection
                 if mode == "Self-rated" && !ratings.isEmpty {
                     Section("Ratings so far") { Text(ratings.map(\.title).joined(separator: " · ")) }
                 }
@@ -840,6 +907,12 @@ struct TrainerView: View {
                         ResultCard(result: result)
                         Text(roundPracticeAdvice ?? "Repeat the pattern at a comfortable tempo.").font(.subheadline)
                             .accessibilityIdentifier("trainer.result.nextStep")
+                        if inputMode == "Microphone" && microphoneMultiVoice {
+                            Text(microphoneInput.uncertainStrikes > microphoneUncertainAtRoundStart
+                                 ? "This experimental round had uncertain strikes. The score is saved for review but excluded from Trainer progress and best-score history."
+                                 : "This experimental classifier has not been validated. The score is saved for review but excluded from Trainer progress and best-score history.")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
                     }
                 }
                 Section("Practice progress") {
@@ -854,7 +927,8 @@ struct TrainerView: View {
                 if initialAdaptation == "hands-only" { adaptation = "Seated / no kick target" }
                 if initialAdaptation == "single-voice" { adaptation = "One voice / reduced reach" }
             }
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { LanguageSettingsButton() } }
+            .onChange(of: inputMode) { _, selected in if selected != "Microphone" { microphoneInput.stop() } }
+            .toolbar { languageSettingsToolbar }
             .confirmationDialog("How did that repetition feel?", isPresented: $pendingRating, titleVisibility: .visible) {
                 ForEach(TrainerRating.allCases) { rating in Button(rating.title) { record(rating) } }
             }
@@ -893,19 +967,25 @@ struct TrainerView: View {
                     midiInput.stop()
                 }
             }
-            .onDisappear { microphoneInput.stop(); midiInput.stop() }
+            .onDisappear(perform: stopRoundInputs)
         }
     }
 
     private func beginRound() {
         ratings = []; pendingRating = false; savedRound = false
+        microphoneUncertainAtRoundStart = microphoneInput.uncertainStrikes
         controller.start(pattern: roundPattern, bpm: bpm, repetitions: mode == "Scored" ? repetitions : 1,
                          countInBeats: countInBeats)
     }
 
+    private func stopRoundInputs() {
+        microphoneInput.stop()
+        midiInput.stop()
+    }
+
     private func connectSelectedMIDI() {
         guard !selectedMidiSourceID.isEmpty else { return }
-        midiInput.connectSelectedSource(selectedMidiSourceID) { voice, at, _, sourceID in
+        midiInput.connectSelectedSource(selectedMidiSourceID) { voice, at, _, sourceID, _ in
             controller.hit(voice, at: at, correctionMs: NativeMIDICalibration.correction(for: sourceID))
         }
     }
@@ -924,7 +1004,9 @@ struct TrainerView: View {
 
     private func saveScoredRound() {
         guard !savedRound, let result = controller.result else { return }
-        if adaptation == "Standard pattern" {
+        let experimentalMicrophoneRound = inputMode == "Microphone" && microphoneMultiVoice
+        let uncertainMicrophoneRound = experimentalMicrophoneRound && microphoneInput.uncertainStrikes > microphoneUncertainAtRoundStart
+        if adaptation == "Standard pattern" && !experimentalMicrophoneRound {
             modelContext.insert(PracticeSessionRecord(result))
             let bestDescriptor = FetchDescriptor<PatternBestRecord>(predicate: #Predicate { $0.patternID == result.patternID })
             if let best = try? modelContext.fetch(bestDescriptor).first {
@@ -934,7 +1016,7 @@ struct TrainerView: View {
             }
         }
         saveRound(TrainerRoundRecord(patternID: pattern.id, patternName: roundPattern.name, bpm: bpm,
-                                     mode: adaptation == "Standard pattern" ? "scored" : "scored-adapted", repetitions: repetitions, ratings: [], score: result.score, accuracy: result.accuracy, inputProfile: inputMode == "MIDI" ? selectedMidiSourceID : inputMode == "Microphone" ? "microphone" : "touch", assessmentAdaptation: adaptation == "Standard pattern" ? "standard" : adaptation == "Seated / no kick target" ? "hands-only" : "single-voice", timingCorrectionMs: activeInputCorrectionMs, timingCalibrated: activeInputCalibrated))
+                                     mode: uncertainMicrophoneRound ? "scored-mic-uncertain" : experimentalMicrophoneRound ? "scored-mic-experimental" : adaptation == "Standard pattern" ? "scored" : "scored-adapted", repetitions: repetitions, ratings: [], score: result.score, accuracy: result.accuracy, inputProfile: activeInputProfile, assessmentAdaptation: adaptation == "Standard pattern" ? "standard" : adaptation == "Seated / no kick target" ? "hands-only" : "single-voice", timingCorrectionMs: activeInputCorrectionMs, timingCalibrated: activeInputCalibrated, meanAbsoluteTimingMs: { let offsets = controller.ratings.filter { $0.rating == .great || $0.rating == .good }.compactMap(\.offsetMs).map { abs(Double($0)) }; return offsets.isEmpty ? nil : offsets.reduce(0, +) / Double(offsets.count) }()))
         let descriptor = FetchDescriptor<PracticeSessionRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
         if let all = try? modelContext.fetch(descriptor) { for stale in all.dropFirst(50) { modelContext.delete(stale) } }
         let rounds = FetchDescriptor<TrainerRoundRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
@@ -1030,6 +1112,7 @@ struct MobileBackupTrainerRound: Codable {
     let assessmentAdaptation: String?
     let timingCorrectionMs: Double?
     let timingCalibrated: Bool?
+    let meanAbsoluteTimingMs: Double?
 
     init(_ record: TrainerRoundRecord) {
         id = record.id
@@ -1046,11 +1129,12 @@ struct MobileBackupTrainerRound: Codable {
         assessmentAdaptation = record.assessmentAdaptation
         timingCorrectionMs = record.timingCorrectionMs
         timingCalibrated = record.timingCalibrated
+        meanAbsoluteTimingMs = record.meanAbsoluteTimingMs
     }
 
     func makeRecord() -> TrainerRoundRecord {
         TrainerRoundRecord(id: id, patternID: patternID, patternName: patternName, bpm: bpm, playedAt: playedAt,
-                           mode: mode, repetitions: repetitions, ratings: ratings, score: score, accuracy: accuracy, inputProfile: inputProfile, assessmentAdaptation: assessmentAdaptation, timingCorrectionMs: timingCorrectionMs, timingCalibrated: timingCalibrated)
+                           mode: mode, repetitions: repetitions, ratings: ratings, score: score, accuracy: accuracy, inputProfile: inputProfile, assessmentAdaptation: assessmentAdaptation, timingCorrectionMs: timingCorrectionMs, timingCalibrated: timingCalibrated, meanAbsoluteTimingMs: meanAbsoluteTimingMs)
     }
 }
 
@@ -1174,7 +1258,8 @@ struct MobileProgressBackup: Codable {
                       (40...200).contains(item.bpm) && ["self", "scored", "self-adapted", "scored-adapted"].contains(item.mode) &&
                       (1...32).contains(item.repetitions) && item.ratings.count <= item.repetitions &&
                       (item.score.map { (0...100).contains($0) } ?? true) && (item.accuracy.map { (0...100).contains($0) } ?? true) &&
-                      (item.timingCorrectionMs.map { $0.isFinite && abs($0) <= 250 } ?? true)
+                      (item.timingCorrectionMs.map { $0.isFinite && abs($0) <= 250 } ?? true) &&
+                      (item.meanAbsoluteTimingMs.map { $0.isFinite && (0...100).contains($0) } ?? true)
               }) else { throw MobileBackupError.invalidRecords }
 
         guard (schemaVersion == 2 || personalSongs.isEmpty), personalSongs.count <= 20,
@@ -1415,9 +1500,233 @@ private func parsePortableTransferDate(_ value: String) -> Date? {
     return formatter.date(from: value)
 }
 
+private indirect enum PortableArchiveJSON: Codable {
+    case object([String: PortableArchiveJSON])
+    case array([PortableArchiveJSON])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([PortableArchiveJSON].self) { self = .array(value) }
+        else if let value = try? container.decode([String: PortableArchiveJSON].self) { self = .object(value) }
+        else { throw MobileBackupError.invalidRecords }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+
+    var foundationObject: Any {
+        switch self {
+        case .object(let value): value.mapValues(\.foundationObject)
+        case .array(let value): value.map(\.foundationObject)
+        case .string(let value): value
+        case .number(let value): value
+        case .bool(let value): value
+        case .null: NSNull()
+        }
+    }
+
+    static func from<T: Encodable>(_ value: T) -> PortableArchiveJSON? {
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return try? JSONDecoder().decode(PortableArchiveJSON.self, from: data)
+    }
+}
+
+private struct MobileTrainerPortableResult: Codable {
+    var id: String
+    var patternId: String
+    var patternName: String
+    var bpm: Int
+    var playedAt: String
+    var score: Int
+    var accuracy: Int
+    var great: Int
+    var good: Int
+    var miss: Int
+    var extra: Int
+    var maxCombo: Int
+}
+
+private struct MobileTrainerPortableRound: Codable {
+    var id: String
+    var patternId: String
+    var patternName: String
+    var bpm: Int
+    var playedAt: String
+    var mode: String
+    var source: String
+    var ratings: [TrainerRating]
+    var repetitions: Int?
+    var durationSeconds: Int?
+    var result: MobileTrainerPortableResult?
+    var adaptation: String?
+    var summaryOnly: Bool
+    var hits: [PortableArchiveJSON]?
+
+    private enum CodingKeys: String, CodingKey { case id, patternId, patternName, bpm, playedAt, mode, source, ratings, repetitions, durationSeconds, result, adaptation, summaryOnly, hits }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        patternId = try values.decode(String.self, forKey: .patternId)
+        patternName = try values.decode(String.self, forKey: .patternName)
+        bpm = try values.decode(Int.self, forKey: .bpm)
+        playedAt = try values.decode(String.self, forKey: .playedAt)
+        mode = try values.decode(String.self, forKey: .mode)
+        source = try values.decode(String.self, forKey: .source)
+        ratings = try values.decode([TrainerRating].self, forKey: .ratings)
+        repetitions = try values.decodeIfPresent(Int.self, forKey: .repetitions)
+        durationSeconds = try values.decodeIfPresent(Int.self, forKey: .durationSeconds)
+        result = try values.decodeIfPresent(MobileTrainerPortableResult.self, forKey: .result)
+        adaptation = try values.decodeIfPresent(String.self, forKey: .adaptation)
+        summaryOnly = try values.decode(Bool.self, forKey: .summaryOnly)
+        hits = try values.decodeIfPresent([PortableArchiveJSON].self, forKey: .hits)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(patternId, forKey: .patternId)
+        try values.encode(patternName, forKey: .patternName)
+        try values.encode(bpm, forKey: .bpm)
+        try values.encode(playedAt, forKey: .playedAt)
+        try values.encode(mode, forKey: .mode)
+        try values.encode(source, forKey: .source)
+        try values.encode(ratings, forKey: .ratings)
+        try values.encodeIfPresent(repetitions, forKey: .repetitions)
+        try values.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
+        try values.encode(result, forKey: .result)
+        try values.encodeIfPresent(adaptation, forKey: .adaptation)
+        try values.encode(summaryOnly, forKey: .summaryOnly)
+        try values.encodeIfPresent(hits, forKey: .hits)
+    }
+
+    init(_ record: TrainerRoundRecord) {
+        let formatter = ISO8601DateFormatter()
+        id = record.id
+        patternId = record.patternID
+        patternName = record.patternName
+        bpm = record.bpm
+        playedAt = formatter.string(from: record.playedAt)
+        mode = record.mode.hasPrefix("scored") ? "scored" : "self"
+        source = "touch"
+        ratings = record.ratings
+        repetitions = record.repetitions
+        durationSeconds = nil
+        summaryOnly = true
+        hits = nil
+        if let score = record.score, let accuracy = record.accuracy {
+            result = MobileTrainerPortableResult(id: record.id, patternId: record.patternID, patternName: record.patternName,
+                bpm: record.bpm, playedAt: formatter.string(from: record.playedAt), score: score, accuracy: accuracy,
+                great: 0, good: 0, miss: 0, extra: 0, maxCombo: 0)
+        } else { result = nil }
+        if record.assessmentAdaptation == "hands-only" { adaptation = "seated" }
+        else if record.assessmentAdaptation == "single-voice" { adaptation = "single-voice" }
+        else { adaptation = record.assessmentAdaptation == "standard" ? "standard" : nil }
+    }
+
+    func makeRecord() -> TrainerRoundRecord {
+        TrainerRoundRecord(id: id, patternID: patternId, patternName: patternName, bpm: bpm,
+            playedAt: parsePortableTransferDate(playedAt) ?? .now, mode: mode, repetitions: repetitions ?? 1,
+            ratings: ratings, score: result?.score, accuracy: result?.accuracy, assessmentAdaptation: adaptation)
+    }
+}
+
+private struct MobileTrainerCoachComment: Codable {
+    var id: String
+    var timeMs: Double
+    var note: String
+    var createdAt: String
+}
+
+private struct MobileTrainerCoachFeedback: Codable {
+    var id: String
+    var takeId: String
+    var patternName: String
+    var bpm: Int
+    var receivedAt: String
+    var comments: [MobileTrainerCoachComment]
+}
+
+private struct MobileTrainerPractice: Codable {
+    var rounds: [MobileTrainerPortableRound]
+    var routine: PortableArchiveJSON?
+    var cueSequences: [PortableArchiveJSON]?
+    var coachFeedback: [MobileTrainerCoachFeedback]?
+}
+
+private func decodePortableTimingMap(_ raw: String) -> [String: [PortableArchiveJSON]] {
+    guard let data = raw.data(using: .utf8),
+          let value = try? JSONDecoder().decode([String: [PortableArchiveJSON]].self, from: data) else { return [:] }
+    return value.filter { !$0.key.isEmpty && $0.key.count <= 120 && $0.value.count <= 600 }
+}
+
+private func validPortableTrainerTiming(_ hits: [PortableArchiveJSON]?) -> Bool {
+    guard let hits else { return true }
+    guard hits.count <= 600 else { return false }
+    return hits.allSatisfy { raw in
+        guard case .object(let hit) = raw,
+              case .string(let voice)? = hit["instrument"], ["kick", "snare", "hihat", "tom", "crash"].contains(voice),
+              case .string(let rating)? = hit["rating"], ["great", "good", "miss", "extra"].contains(rating) else { return false }
+        if let offset = hit["offsetMs"], case .number(let value) = offset, abs(value) > 60_000 { return false }
+        if let time = hit["atMs"], case .number(let value) = time, value < -1_000 || value > 3_600_000 { return false }
+        return true
+    }
+}
+
+private func validPortableEarHistory(_ results: [PortableArchiveJSON]?) -> Bool {
+    guard let results else { return true }
+    guard results.count <= 100 else { return false }
+    var ids = Set<String>()
+    return results.allSatisfy { raw in
+        guard case .object(let result) = raw,
+              case .string(let id)? = result["id"], !id.isEmpty, id.count <= 120, ids.insert(id).inserted,
+              case .string(let date)? = result["playedAt"], parsePortableTransferDate(date) != nil,
+              case .number(let score)? = result["score"], score >= 0, score <= 100 else { return false }
+        return true
+    }
+}
+
+private func decodePortableJSON(_ raw: String) -> PortableArchiveJSON? {
+    guard let data = raw.data(using: .utf8) else { return nil }
+    return try? JSONDecoder().decode(PortableArchiveJSON.self, from: data)
+}
+
+private func decodePortableJSONArray(_ raw: String) -> [PortableArchiveJSON]? {
+    guard let data = raw.data(using: .utf8) else { return nil }
+    return try? JSONDecoder().decode([PortableArchiveJSON].self, from: data)
+}
+
+private func mergePortableArchiveItems(_ current: [PortableArchiveJSON], _ incoming: [PortableArchiveJSON], limit: Int = 30) -> [PortableArchiveJSON] {
+    var byID: [String: PortableArchiveJSON] = [:]
+    var orderedIDs: [String] = []
+    for item in incoming + current {
+        guard case .object(let object) = item, case .string(let id)? = object["id"], !id.isEmpty else { continue }
+        if byID[id] == nil { orderedIDs.append(id); byID[id] = item }
+    }
+    return orderedIDs.prefix(limit).compactMap { byID[$0] }
+}
+
 private struct MobileProgressTransfer: Codable {
-    static let formatID = "drum-hero-progress-transfer-v1"
-    static let maximumBytes = 4 * 1_024 * 1_024
+    static let formatID = "drum-hero-learning-archive-v1"
+    static let legacyFormatID = "drum-hero-progress-transfer-v1"
+    static let maximumBytes = 32 * 1_024 * 1_024
     var application: String
     var format: String
     var version: Int
@@ -1428,9 +1737,17 @@ private struct MobileProgressTransfer: Codable {
     var preferredBpm: Int
     var guidedPracticeSession: PortableGuidedPracticeSession?
     var weeklyGoal: PortableWeeklyGoal?
+    var personalSongs: [PortableArchiveJSON]?
+    var customGrooves: [PortableArchiveJSON]?
+    var trainerPractice: MobileTrainerPractice?
+    var earTraining: [PortableArchiveJSON]?
 
     init(lessonProgress: [LessonProgressRecord], practiceSessions: [PracticeSessionRecord], bests: [PatternBestRecord], preferredBpm: Int,
-         guidedPracticeSession: PortableGuidedPracticeSession? = nil, weeklyGoal: PortableWeeklyGoal? = nil) {
+         guidedPracticeSession: PortableGuidedPracticeSession? = nil, weeklyGoal: PortableWeeklyGoal? = nil,
+         personalSongs: [MobileSong] = [], customGrooves: [PortableArchiveJSON] = [], trainerRounds: [TrainerRoundRecord] = [],
+         trainerRoutine: PortableArchiveJSON? = nil, trainerCueSequences: [PortableArchiveJSON]? = nil,
+         trainerCoachFeedback: [MobileTrainerCoachFeedback] = [], trainerTiming: [String: [PortableArchiveJSON]] = [:],
+         earTraining: [PortableArchiveJSON] = []) {
         let formatter = ISO8601DateFormatter()
         application = "Drum Hero"
         format = Self.formatID
@@ -1450,13 +1767,28 @@ private struct MobileProgressTransfer: Codable {
         self.preferredBpm = min(200, max(40, preferredBpm))
         self.guidedPracticeSession = guidedPracticeSession?.paused()
         self.weeklyGoal = weeklyGoal
+        self.personalSongs = personalSongs.prefix(200).compactMap { PortableArchiveJSON.from($0) }
+        self.customGrooves = Array(customGrooves.prefix(100))
+        let portableRounds = trainerRounds.prefix(50).map { record -> MobileTrainerPortableRound in
+            var round = MobileTrainerPortableRound(record)
+            if let hits = trainerTiming[round.id], validPortableTrainerTiming(hits) { round.hits = hits }
+            return round
+        }
+        self.earTraining = earTraining.isEmpty ? nil : Array(earTraining.suffix(100))
+        if !portableRounds.isEmpty || trainerRoutine != nil || trainerCueSequences?.isEmpty == false || !trainerCoachFeedback.isEmpty {
+            trainerPractice = MobileTrainerPractice(rounds: portableRounds, routine: trainerRoutine,
+                cueSequences: trainerCueSequences, coachFeedback: Array(trainerCoachFeedback.suffix(100)))
+        } else { trainerPractice = nil }
     }
 
     func review(content: MobileContentDocument) throws -> MobileProgressTransferReview {
         let validDate: (String) -> Bool = { value in parsePortableTransferDate(value) != nil }
-        guard application == "Drum Hero", format == Self.formatID, version == 1,
+        guard application == "Drum Hero", (format == Self.formatID || format == Self.legacyFormatID), version == 1,
               validDate(exportedAt), (40...200).contains(preferredBpm),
               completedLessons.count <= 100, practiceSessions.count <= 100,
+              (personalSongs?.count ?? 0) <= 200, (customGrooves?.count ?? 0) <= 100,
+              (trainerPractice?.rounds.count ?? 0) <= 50, (trainerPractice?.cueSequences?.count ?? 0) <= 30,
+              (trainerPractice?.coachFeedback?.count ?? 0) <= 100,
               guidedPracticeSession?.isValid() ?? true, weeklyGoal?.isValid() ?? true,
               bestScores.count <= 256, bestScores.allSatisfy({ !$0.key.isEmpty && $0.key.count <= 160 && (0...100).contains($0.value) }),
               Set(completedLessons.map(\.id)).count == completedLessons.count,
@@ -1467,10 +1799,38 @@ private struct MobileProgressTransfer: Codable {
                       !item.patternName.isEmpty && item.patternName.count <= 200 && (40...200).contains(item.bpm) &&
                       validDate(item.playedAt) && (0...100).contains(item.score) && (0...100).contains(item.accuracy) &&
                       [item.great, item.good, item.miss, item.extra, item.maxCombo].allSatisfy { (0...100_000).contains($0) }
+              }),
+              Set((trainerPractice?.rounds ?? []).map(\.id)).count == (trainerPractice?.rounds.count ?? 0),
+              (trainerPractice?.rounds ?? []).allSatisfy({ item in
+                  !item.id.isEmpty && item.id.count <= 120 && !item.patternId.isEmpty && item.patternId.count <= 200 &&
+                      !item.patternName.isEmpty && item.patternName.count <= 200 && (40...200).contains(item.bpm) && validDate(item.playedAt) &&
+                      ["self", "scored"].contains(item.mode) && ["keyboard", "touch", "midi", "audio-timing", "audio-voices", "self"].contains(item.source) &&
+                      item.ratings.count <= 16 && item.summaryOnly && (item.durationSeconds == nil || [30, 60, 120].contains(item.durationSeconds!)) &&
+                      (item.repetitions == nil || (1...2000).contains(item.repetitions!)) &&
+                      (item.result.map { (0...100).contains($0.score) && (0...100).contains($0.accuracy) } ?? (item.mode == "self")) && validPortableTrainerTiming(item.hits)
+              }),
+              validPortableEarHistory(earTraining),
+              Set((trainerPractice?.coachFeedback ?? []).map(\.id)).count == (trainerPractice?.coachFeedback?.count ?? 0),
+              (trainerPractice?.coachFeedback ?? []).allSatisfy({ item in
+                  !item.id.isEmpty && item.id.count <= 200 && !item.takeId.isEmpty && item.takeId.count <= 200 &&
+                      !item.patternName.isEmpty && item.patternName.count <= 200 && (40...220).contains(item.bpm) && validDate(item.receivedAt) &&
+                      item.comments.count <= 100 && item.comments.allSatisfy({ !$0.id.isEmpty && $0.id.count <= 100 && (0...3_600_000).contains($0.timeMs) && !$0.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.note.count <= 600 && validDate($0.createdAt) })
               }) else { throw MobileBackupError.invalidRecords }
 
         let lessonIDs = Set(content.lessons.map(\.id))
         let patternIDs = Set(content.practicePatterns.map(\.id))
+        let validSongs: [MobileSong] = (personalSongs ?? []).compactMap { raw in
+            guard let song = raw.foundationObject as? [String: Any],
+                  let wrapped = try? JSONSerialization.data(withJSONObject: ["format": MobileSongProjectCodec.format, "song": song]) else { return nil }
+            return try? MobileSongProjectCodec.decode(wrapped)
+        }
+        let validGrooves: [(PortableArchiveJSON, PracticePattern)] = (customGrooves ?? []).compactMap { raw in
+            guard let data = try? JSONEncoder().encode(raw), let groove = try? JSONDecoder().decode(PracticePattern.self, from: data),
+                groove.id.hasPrefix("custom-") && !groove.name.isEmpty && (40...200).contains(groove.defaultBpm) &&
+                [4, 8, 12, 16, 20].contains(groove.subdivision) && groove.totalSteps <= 512 &&
+                groove.hits.allSatisfy({ $0.step >= 0 && $0.step < groove.totalSteps }) else { return nil }
+            return (raw, groove)
+        }
         return MobileProgressTransferReview(
             transfer: self,
             lessons: completedLessons.filter { lessonIDs.contains($0.id) },
@@ -1478,14 +1838,19 @@ private struct MobileProgressTransfer: Codable {
             bestScores: bestScores.filter { patternIDs.contains($0.key) },
             ignoredLessons: completedLessons.filter { !lessonIDs.contains($0.id) }.count,
             ignoredSessions: practiceSessions.filter { !patternIDs.contains($0.patternId) }.count,
-            ignoredBests: bestScores.keys.filter { !patternIDs.contains($0) }.count
+            ignoredBests: bestScores.keys.filter { !patternIDs.contains($0) }.count,
+            personalSongs: validSongs,
+            ignoredSongs: (personalSongs?.count ?? 0) - validSongs.count,
+            customGrooves: validGrooves.map { $0.1 },
+            rawCustomGrooves: validGrooves.map { $0.0 },
+            ignoredGrooves: (customGrooves?.count ?? 0) - validGrooves.count
         )
     }
 }
 
 private enum MobileProgressTransferError: LocalizedError {
     case tooLarge
-    var errorDescription: String? { "This progress transfer is larger than 4 MB." }
+    var errorDescription: String? { "This learning archive is larger than 32 MB." }
 }
 
 private struct MobileProgressTransferReview {
@@ -1496,6 +1861,11 @@ private struct MobileProgressTransferReview {
     var ignoredLessons: Int
     var ignoredSessions: Int
     var ignoredBests: Int
+    var personalSongs: [MobileSong]
+    var ignoredSongs: Int
+    var customGrooves: [PracticePattern]
+    var rawCustomGrooves: [PortableArchiveJSON]
+    var ignoredGrooves: Int
 }
 
 private struct MobileProgressTransferDocument: FileDocument {
@@ -1527,6 +1897,12 @@ struct ProgressViewScreen: View {
     @AppStorage("drumHero.practiceBpm") private var preferredBpm = 80
     @AppStorage("drumHero.guidedPracticeSessionJSON") private var guidedPracticeSessionJSON = ""
     @AppStorage("drumHero.weeklyGoalJSON") private var weeklyGoalJSON = ""
+    @AppStorage("drumHero.portableCustomGroovesJSON") private var portableCustomGroovesJSON = "[]"
+    @AppStorage("drumHero.portableTrainerRoutineJSON") private var portableTrainerRoutineJSON = ""
+    @AppStorage("drumHero.portableTrainerCueSequencesJSON") private var portableTrainerCueSequencesJSON = "[]"
+    @AppStorage("drumHero.portableTrainerCoachFeedbackJSON") private var portableTrainerCoachFeedbackJSON = "[]"
+    @AppStorage("drumHero.portableTrainerTimingJSON") private var portableTrainerTimingJSON = "{}"
+    @AppStorage("drumHero.portableEarTrainingJSON") private var portableEarTrainingJSON = "[]"
     @Query private var lessonProgress: [LessonProgressRecord]
     @Query(sort: \PracticeSessionRecord.playedAt, order: .reverse) private var sessions: [PracticeSessionRecord]
     @Query(sort: \TrainerRoundRecord.playedAt, order: .reverse) private var rounds: [TrainerRoundRecord]
@@ -1558,6 +1934,12 @@ struct ProgressViewScreen: View {
         return goal
     }
 
+    private var decodedPortableTrainerFeedback: [MobileTrainerCoachFeedback] {
+        guard let data = portableTrainerCoachFeedbackJSON.data(using: .utf8),
+              let feedback = try? JSONDecoder().decode([MobileTrainerCoachFeedback].self, from: data) else { return [] }
+        return feedback
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -1586,7 +1968,7 @@ struct ProgressViewScreen: View {
                         Text(session.completedAt == nil ? "Saved guided session · \(session.remainingSteps.count) steps left" : "Last guided session complete")
                             .font(.headline)
                         if let step = session.remainingSteps.first { Text("Next: \(step.patternName) · \(step.minutes) min") }
-                        Text("This session is carried in progress transfers and can be resumed in the web app.").font(.footnote).foregroundStyle(.secondary)
+                        Text("This session is carried in learning archives and can be resumed in the web app.").font(.footnote).foregroundStyle(.secondary)
                     } else {
                         Text("No guided session has been transferred to this device.").foregroundStyle(.secondary)
                     }
@@ -1596,18 +1978,48 @@ struct ProgressViewScreen: View {
                         Text("No weekly goal has been transferred to this device.").foregroundStyle(.secondary)
                     }
                 }
+                if !decodedPortableTrainerFeedback.isEmpty {
+                    Section("Coach notes from another device") {
+                        Text("Feedback text travels between platforms. Audio recordings and device calibration stay with the device where they were created.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        ForEach(decodedPortableTrainerFeedback, id: \.id) { review in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("\(review.patternName) · \(review.bpm) BPM").font(.headline)
+                                if let receivedAt = parsePortableTransferDate(review.receivedAt) {
+                                    Text(receivedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                ForEach(review.comments, id: \.id) { comment in
+                                    Text("\(String(format: "%.1f", comment.timeMs / 1000)) s · \(comment.note)").font(.subheadline)
+                                }
+                            }
+                        }
+                    }
+                }
                 Section("Move learning progress between web and iOS") {
-                    Text("Transfer completed lessons, recent scored sessions, best scores, preferred tempo, a paused guided session, and a weekly goal. Import merges progress and carries the guided settings to the active profile. Song projects use the separate single-song JSON export. These transfer files contain no audio; full backups are platform-specific.")
+                    Text("Move completed lessons, Practice Pad results, Trainer summaries and optional hit timing, ear-training results, personal routines, saved cue sequences, coach notes, personal songs, custom grooves, preferred tempo, a paused guided session, and a weekly goal between web and iOS. Audio recordings and device calibration stay local; inspect exported files before sharing.")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Button("Export learning progress transfer", systemImage: "square.and.arrow.up") {
+                    Button("Export learning archive", systemImage: "square.and.arrow.up") {
                         do {
+                            let portableGrooves = (try? JSONDecoder().decode([PortableArchiveJSON].self, from: Data(portableCustomGroovesJSON.utf8))) ?? []
+                            let portableEarHistory = decodePortableJSONArray(portableEarTrainingJSON) ?? []
                             let transfer = MobileProgressTransfer(lessonProgress: lessonProgress, practiceSessions: sessions, bests: bests, preferredBpm: preferredBpm,
-                                guidedPracticeSession: decodedGuidedPracticeSession, weeklyGoal: decodedWeeklyGoal)
+                                guidedPracticeSession: decodedGuidedPracticeSession, weeklyGoal: decodedWeeklyGoal,
+                                personalSongs: personalSongs.compactMap(\.song), customGrooves: portableGrooves, trainerRounds: rounds,
+                                trainerRoutine: decodePortableJSON(portableTrainerRoutineJSON),
+                                trainerCueSequences: decodePortableJSONArray(portableTrainerCueSequencesJSON),
+                                trainerCoachFeedback: decodedPortableTrainerFeedback,
+                                trainerTiming: decodePortableTimingMap(portableTrainerTimingJSON), earTraining: portableEarHistory)
                             transferDocument = try MobileProgressTransferDocument(transfer: transfer)
                             isTransferExporting = true
-                        } catch { backupMessage = "Could not prepare the progress transfer: \(error.localizedDescription)" }
+                        } catch { backupMessage = "Could not prepare the learning archive: \(error.localizedDescription)" }
                     }
-                    Button("Import learning progress transfer", systemImage: "square.and.arrow.down") { isTransferImporting = true }
+                    Button("Import learning archive", systemImage: "square.and.arrow.down") { isTransferImporting = true }
+                }
+                Section("Sync with your web account") {
+                    NativePracticeCloudSyncView(content: content)
+                }
+                Section("Practice reminders") {
+                    NativePracticeReminderView()
                 }
                 Section("Local backup") {
                     Text("Save lesson checkpoints, practice sessions, Trainer rounds, best scores, and personal song projects as a versioned JSON file. Recordings and cloud data are not included.").font(.footnote).foregroundStyle(.secondary)
@@ -1664,9 +2076,9 @@ struct ProgressViewScreen: View {
                     case .failure(let error): backupMessage = error.localizedDescription
                     }
                 }
-                .fileExporter(isPresented: $isTransferExporting, document: transferDocument, contentType: .json, defaultFilename: "drum-hero-progress-transfer") { result in
+                .fileExporter(isPresented: $isTransferExporting, document: transferDocument, contentType: .json, defaultFilename: "drum-hero-learning-archive") { result in
                     switch result {
-                    case .success: backupMessage = "Learning progress transfer exported. Import it on web or iOS to merge the shared lesson and practice history."
+                    case .success: backupMessage = "Learning archive exported. Import it on web or iOS to merge progress and review personal songs and custom grooves."
                     case .failure(let error): backupMessage = error.localizedDescription
                     }
                 }
@@ -1677,7 +2089,7 @@ struct ProgressViewScreen: View {
                     Button("Cancel", role: .cancel) { pendingTransfer = nil }
                 } message: {
                     if let transfer = pendingTransfer {
-                        Text("Merges up to \(transfer.lessons.count) lesson completions, \(transfer.sessions.count) scored sessions, and \(transfer.bestScores.count) best scores. Existing data stays; matching session IDs are updated. \(transfer.ignoredLessons + transfer.ignoredSessions + transfer.ignoredBests) records use IDs this app version does not recognize and will be skipped. Preferred tempo will be set to \(transfer.transfer.preferredBpm) BPM. \(transfer.transfer.guidedPracticeSession == nil ? "" : "The saved guided session will be replaced.") \(transfer.transfer.weeklyGoal == nil ? "" : "The weekly goal will be replaced.")")
+                        Text("Merges up to \(transfer.lessons.count) lesson completions, \(transfer.sessions.count) scored sessions, and \(transfer.bestScores.count) best scores; adds \(transfer.transfer.trainerPractice?.rounds.count ?? 0) Trainer summaries with \(transfer.transfer.trainerPractice?.rounds.reduce(0) { $0 + ($1.hits?.count ?? 0) } ?? 0) detailed timing records, \(transfer.transfer.earTraining?.count ?? 0) ear-training results, personal routines, cue sequences, and coach notes; adds \(transfer.personalSongs.count) compatible personal songs and \(transfer.customGrooves.count) custom grooves when their IDs are new. Audio recordings and calibration remain local. Imported timing and ear results are retained for export. \(transfer.ignoredSongs) songs with unsupported voices or data and \(transfer.ignoredGrooves) invalid grooves will be skipped. Existing records stay; matching session IDs are updated. \(transfer.ignoredLessons + transfer.ignoredSessions + transfer.ignoredBests) progress records use IDs this app version does not recognize and will be skipped. Preferred tempo will be set to \(transfer.transfer.preferredBpm) BPM. \(transfer.transfer.guidedPracticeSession == nil ? "" : "The saved guided session will be replaced.") \(transfer.transfer.weeklyGoal == nil ? "" : "The weekly goal will be replaced.")")
                     }
                 }
                 .alert("Replace local progress?", isPresented: $confirmingImport) {
@@ -1726,7 +2138,7 @@ struct ProgressViewScreen: View {
             confirmingTransfer = true
             let sessionNote = transfer.guidedPracticeSession == nil ? "" : " A paused guided session is included."
             let goalNote = transfer.weeklyGoal == nil ? "" : " A weekly goal is included."
-            backupMessage = "Progress transfer loaded for review. Your current data has not changed.\(sessionNote)\(goalNote)"
+            backupMessage = "Learning archive loaded for review. Your current data has not changed.\(sessionNote)\(goalNote)"
         } catch { backupMessage = error.localizedDescription }
     }
 
@@ -1794,6 +2206,77 @@ struct ProgressViewScreen: View {
                 }
             }
 
+            let currentTrainerRounds = try modelContext.fetch(FetchDescriptor<TrainerRoundRecord>())
+            let trainerByID = Dictionary(uniqueKeysWithValues: currentTrainerRounds.map { ($0.id, $0) })
+            var addedTrainerRounds = 0
+            for item in transfer.transfer.trainerPractice?.rounds ?? [] {
+                if let record = trainerByID[item.id] {
+                    record.patternID = item.patternId
+                    record.patternName = item.patternName
+                    record.bpm = item.bpm
+                    record.playedAt = parsePortableTransferDate(item.playedAt) ?? record.playedAt
+                    record.mode = item.mode
+                    record.repetitions = item.repetitions ?? record.repetitions
+                    record.ratingsData = (try? JSONEncoder().encode(item.ratings)) ?? record.ratingsData
+                    if let result = item.result { record.score = result.score; record.accuracy = result.accuracy }
+                    record.assessmentAdaptation = item.adaptation
+                } else {
+                    modelContext.insert(item.makeRecord())
+                    addedTrainerRounds += 1
+                }
+            }
+            let allTrainerRounds = try modelContext.fetch(FetchDescriptor<TrainerRoundRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)]))
+            for stale in allTrainerRounds.dropFirst(50) { modelContext.delete(stale) }
+
+            let existingSongIDs = Set(try modelContext.fetch(FetchDescriptor<PersonalSongRecord>()).map(\.id))
+            var songIDs = existingSongIDs
+            var addedSongs = 0
+            for song in transfer.personalSongs where !songIDs.contains(song.id) {
+                guard let data = try? JSONEncoder().encode(song) else { continue }
+                modelContext.insert(PersonalSongRecord(song: song, data: data))
+                songIDs.insert(song.id)
+                addedSongs += 1
+            }
+            if !transfer.customGrooves.isEmpty {
+                let stored = (try? JSONDecoder().decode([PortableArchiveJSON].self, from: Data(portableCustomGroovesJSON.utf8))) ?? []
+                let byID = Dictionary<String, PortableArchiveJSON>((stored + transfer.rawCustomGrooves).compactMap { raw in
+                    guard case .object(let item) = raw, case .string(let id)? = item["id"] else { return nil }
+                    return (id, raw)
+                }, uniquingKeysWith: { first, _ in first })
+                if let data = try? JSONEncoder().encode(Array(byID.values)), let json = String(data: data, encoding: .utf8) { portableCustomGroovesJSON = json }
+            }
+
+            if let routine = transfer.transfer.trainerPractice?.routine,
+               let data = try? JSONEncoder().encode(routine), let json = String(data: data, encoding: .utf8) {
+                portableTrainerRoutineJSON = json
+            }
+            if let cues = transfer.transfer.trainerPractice?.cueSequences,
+               let data = try? JSONEncoder().encode(mergePortableArchiveItems(decodePortableJSONArray(portableTrainerCueSequencesJSON) ?? [], cues)),
+               let json = String(data: data, encoding: .utf8) {
+                portableTrainerCueSequencesJSON = json
+            }
+            if let incoming = transfer.transfer.trainerPractice?.coachFeedback, !incoming.isEmpty {
+                let byID = Dictionary((decodedPortableTrainerFeedback + incoming).map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+                let feedback = byID.values.sorted { $0.receivedAt < $1.receivedAt }.suffix(100)
+                if let data = try? JSONEncoder().encode(Array(feedback)), let json = String(data: data, encoding: .utf8) {
+                    portableTrainerCoachFeedbackJSON = json
+                }
+            }
+            var timingByRound = decodePortableTimingMap(portableTrainerTimingJSON)
+            for round in transfer.transfer.trainerPractice?.rounds ?? [] {
+                if let hits = round.hits { timingByRound[round.id] = hits }
+            }
+            let retainedRoundIDs = Set(allTrainerRounds.prefix(50).map(\.id))
+            timingByRound = timingByRound.filter { retainedRoundIDs.contains($0.key) }
+            if let timingData = try? JSONEncoder().encode(timingByRound), let timingJSON = String(data: timingData, encoding: .utf8) {
+                portableTrainerTimingJSON = timingJSON
+            }
+            if let earTraining = transfer.transfer.earTraining, !earTraining.isEmpty,
+               let earData = try? JSONEncoder().encode(mergePortableArchiveItems(decodePortableJSONArray(portableEarTrainingJSON) ?? [], earTraining, limit: 100)),
+               let earJSON = String(data: earData, encoding: .utf8) {
+                portableEarTrainingJSON = earJSON
+            }
+
             let allSessions = try modelContext.fetch(FetchDescriptor<PracticeSessionRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)]))
             for stale in allSessions.dropFirst(50) { modelContext.delete(stale) }
             try modelContext.save()
@@ -1808,10 +2291,10 @@ struct ProgressViewScreen: View {
             }
             let guidedMessage = transfer.transfer.guidedPracticeSession == nil ? "" : " Guided session saved for web resume."
             let goalMessage = transfer.transfer.weeklyGoal == nil ? "" : " Weekly goal saved."
-            backupMessage = "Merged \(addedLessons) lesson completions and \(addedSessions) new scored sessions, updated best scores, and set preferred tempo to \(preferredBpm) BPM. Existing records were kept.\(guidedMessage)\(goalMessage)"
+            backupMessage = "Merged \(addedLessons) lesson completions, \(addedSessions) scored sessions, and \(addedTrainerRounds) Trainer summaries; added \(addedSongs) personal songs, updated best scores, and set preferred tempo to \(preferredBpm) BPM. Existing records were kept.\(guidedMessage)\(goalMessage)"
         } catch {
             modelContext.rollback()
-            backupMessage = "Could not merge this progress transfer: \(error.localizedDescription)"
+            backupMessage = "Could not merge this learning archive: \(error.localizedDescription)"
         }
         pendingTransfer = nil
     }

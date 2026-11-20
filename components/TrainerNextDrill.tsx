@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { comparableRounds } from "@/lib/trainer-coaching";
 import type { TrainerRound } from "@/lib/trainer";
 import type { Instrument, PracticePattern } from "@/lib/types";
+import { TrainerNotationView } from "@/components/TrainerNotationView";
 
 export function TrainerNextDrill({ round, rounds, pattern, disabled, onIsolateVoice, onChangeTempo }: {
   round: TrainerRound;
@@ -40,6 +41,7 @@ export function TrainerNextDrill({ round, rounds, pattern, disabled, onIsolateVo
     const reliableEvidence = attempts.length >= 3;
     if (reliableEvidence && weakest && weakest.accuracy < 0.85) return {
       title: `Isolate ${weakest.instrument}`,
+      focusVoice: weakest.instrument,
       description: `${Math.round(weakest.accuracy * 100)}% of ${weakest.instrument} targets were on time across ${weakest.rounds} recent comparable rounds. Work on that voice by itself at ${slowTempo} BPM, then bring the full groove back.`,
       evidence: `${weakest.clean} of ${weakest.total} ${weakest.instrument} targets were on time across ${weakest.rounds} rounds.`,
       confidence: reliableEvidence ? "Repeated signal across at least three clean rounds on the same setup." : `Early signal from ${attempts.length} clean comparable round${attempts.length === 1 ? "" : "s"}; repeat the same setup to confirm it.`,
@@ -63,5 +65,8 @@ export function TrainerNextDrill({ round, rounds, pattern, disabled, onIsolateVo
   }, [onChangeTempo, onIsolateVoice, pattern.tempoRange, round, rounds]);
 
   if (!suggestion) return null;
-  return <div className="trainer-next-drill"><span className="eyebrow">Try next</span><strong>{suggestion.title}</strong><p>{suggestion.description}</p>{"evidence" in suggestion && <p className="trainer-next-drill-evidence"><strong>Evidence:</strong> {suggestion.evidence}<br /><small>{suggestion.confidence}</small></p>}<button type="button" className="button-secondary" disabled={disabled} onClick={suggestion.run}>{suggestion.action}</button></div>;
+  const notationPattern = "focusVoice" in suggestion && suggestion.focusVoice
+    ? { ...pattern, name: `${pattern.name} · ${suggestion.focusVoice} focus`, hits: pattern.hits.filter(hit => hit.instrument === suggestion.focusVoice) }
+    : pattern;
+  return <div className="trainer-next-drill"><span className="eyebrow">Try next</span><strong>{suggestion.title}</strong><p>{suggestion.description}</p>{"evidence" in suggestion && <p className="trainer-next-drill-evidence"><strong>Evidence:</strong> {suggestion.evidence}<br /><small>{suggestion.confidence}</small></p>}<TrainerNotationView pattern={notationPattern} compact /><button type="button" className="button-secondary" disabled={disabled} onClick={suggestion.run}>{suggestion.action}</button></div>;
 }

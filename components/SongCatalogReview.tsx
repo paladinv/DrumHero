@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { songArrangementFingerprint, type DrumSong } from "@/lib/song-library";
+import { songArrangementFingerprint, songCatalogReviewStatus, SONG_CATALOG_REVIEW_LABELS, type DrumSong } from "@/lib/song-library";
 
 const checklistItems = [
   ["notation", "Score notation matches the written drum part"],
@@ -16,9 +16,9 @@ export function SongCatalogReview({ song, onSave }: { song: DrumSong; onSave: (s
   const [checks, setChecks] = useState<Record<(typeof checklistItems)[number][0], boolean>>({ notation: false, meter: false, sticking: false, skillMetadata: false });
   const fingerprint = songArrangementFingerprint(song);
   const reviewMatches = song.catalogReview?.arrangementFingerprint === fingerprint;
-  const reviewChecklistComplete = checklistItems.every(([key]) => song.catalogReview?.checklist[key] === true);
-  const current = reviewMatches && reviewChecklistComplete;
-  const reviewStatus = !song.catalogReview ? "review pending" : current ? "review recorded for this arrangement" : !reviewMatches ? "arrangement changed since review" : "review checklist incomplete";
+  const status = songCatalogReviewStatus(song);
+  const current = status === "current";
+  const reviewStatus = SONG_CATALOG_REVIEW_LABELS[status];
   const complete = checklistItems.every(([key]) => checks[key]);
 
   return <details className="song-tool-panel song-catalog-review">

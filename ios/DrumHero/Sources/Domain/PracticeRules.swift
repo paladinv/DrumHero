@@ -9,6 +9,7 @@ struct ExpectedHit: Hashable {
     let instrument: DrumVoice
     let step: Int
     let repetition: Int
+    var midiArticulationTarget: String? = nil
     var matched = false
 }
 
@@ -19,6 +20,8 @@ struct RatedHit: Codable, Hashable, Identifiable {
     var offsetMs: Int?
     var step: Int?
     var repetition: Int?
+    var midiArticulation: String?
+    var midiArticulationTarget: String?
 }
 
 struct PracticeResult: Codable, Identifiable, Hashable {
@@ -57,7 +60,8 @@ enum PracticeRules {
                 let repetitionOffset = Double(repetition) * duration
                 let hitOffset = Double(hit.step) * stepDuration
                 events.append(ExpectedHit(at: startAt + repetitionOffset + hitOffset,
-                                          instrument: hit.instrument, step: hit.step, repetition: repetition))
+                                          instrument: hit.instrument, step: hit.step, repetition: repetition,
+                                          midiArticulationTarget: hit.midiArticulationTarget))
             }
         }
         return events.sorted { left, right in
@@ -66,9 +70,9 @@ enum PracticeRules {
         }
     }
 
-    static func closestUnmatchedIndex(at time: TimeInterval, in expected: [ExpectedHit], instrument: DrumVoice) -> Int? {
+    static func closestUnmatchedIndex(at time: TimeInterval, in expected: [ExpectedHit], instrument: DrumVoice, midiArticulation: String? = nil, respectArticulationTarget: Bool = true) -> Int? {
         expected.indices
-            .filter { !expected[$0].matched && expected[$0].instrument == instrument }
+            .filter { !expected[$0].matched && expected[$0].instrument == instrument && (!respectArticulationTarget || expected[$0].midiArticulationTarget == nil || expected[$0].midiArticulationTarget == midiArticulation) }
             .min { abs(expected[$0].at - time) < abs(expected[$1].at - time) }
     }
 
