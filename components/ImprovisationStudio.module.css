@@ -54,6 +54,8 @@
 .replayLane { background-image: linear-gradient(to right, var(--line) 1px, transparent 1px); }
 .missedTarget { font-weight: 800; text-decoration: underline; }
 .reviewLegend { color: var(--muted); font-size: .85rem; }
+.timingToggle { display: flex; align-items: center; gap: .45rem; width: fit-content; margin-block: .45rem; font-size: .85rem; font-weight: 700; }
+.timingToggle input { width: auto; }
 .liveTransport { display: none; }
 .focusToggle { justify-self: start; }
 .focused > :not(.stage):not(.focusToggle) { display: none; }

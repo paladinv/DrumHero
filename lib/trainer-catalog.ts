@@ -1,4 +1,6 @@
 import { getSongCloudClient, songCloudConfigured } from "./song-cloud";
+import { parseCustomGrooves } from "./custom-grooves";
+import type { Groove } from "./types";
 
 export type TrainerEditorialRole = "reviewer" | "editor" | "admin";
 export type TrainerCatalogDraft = { pattern_id: string; revision_hash: string; status: "draft" | "published"; submitted_by: string; updated_at: string };
@@ -14,6 +16,54 @@ export type TrainerCatalogSnapshot = {
   publication?: TrainerCatalogPublication;
   reviews: TrainerCatalogReview[];
 };
+
+export type PublishedTrainerPattern = {
+  pattern: Groove;
+  title: string;
+  sourceAttribution: string;
+  sourceUrl: string | null;
+  rightsLicense: string;
+  publishedAt: string;
+};
+
+function publishedPatternId(patternId: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < patternId.length; index += 1) hash = Math.imul(hash ^ patternId.charCodeAt(index), 16777619);
+  return `custom-catalog-${(hash >>> 0).toString(16)}`;
+}
+
+/** Load only published rows, then validate each score before exposing it to practice. */
+export async function loadPublishedTrainerPatterns(): Promise<PublishedTrainerPattern[]> {
+  const client = getSongCloudClient();
+  if (!client || !songCloudConfigured()) return [];
+  const { data, error } = await client.from("drum_trainer_catalog")
+    .select("pattern_id,title,pattern_json,source_attribution,source_url,rights_license,published_at")
+    .order("published_at", { ascending: false }).limit(100);
+  if (error) throw error;
+  return (data ?? []).flatMap(row => {
+    const raw = row.pattern_json;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const source = raw as Record<string, unknown>;
+    const candidate = {
+      ...source,
+      id: publishedPatternId(row.pattern_id),
+      name: String(row.title).slice(0, 60),
+      style: "Published catalog",
+      focus: `${String(row.source_attribution).slice(0, 48)} · ${String(row.rights_license).slice(0, 48)}`,
+      tags: ["published catalog", "reviewed score"],
+    };
+    const pattern = parseCustomGrooves(JSON.stringify([candidate]))[0];
+    if (!pattern) return [];
+    return [{
+      pattern,
+      title: String(row.title).slice(0, 200),
+      sourceAttribution: String(row.source_attribution).slice(0, 500),
+      sourceUrl: typeof row.source_url === "string" ? row.source_url : null,
+      rightsLicense: String(row.rights_license).slice(0, 500),
+      publishedAt: String(row.published_at),
+    }];
+  });
+}
 
 function editorialRole(value: unknown): value is TrainerEditorialRole {
   return value === "reviewer" || value === "editor" || value === "admin";

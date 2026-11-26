@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import type { PracticePattern } from "@/lib/types";
-import { readTrainerReviewReminders, TRAINER_REVIEW_REMINDERS_EVENT, trainerReviewRemindersKey, writeTrainerReviewReminders, type TrainerReviewReminder } from "@/lib/trainer-review-reminders";
+import type { TrainerRound } from "@/lib/trainer";
+import { readTrainerReviewReminders, recommendTrainerWeakSpot, TRAINER_REVIEW_REMINDERS_EVENT, trainerReviewRemindersKey, writeTrainerReviewReminders, type TrainerReviewFocus, type TrainerReviewReminder } from "@/lib/trainer-review-reminders";
 
 const dayKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
-export function TrainerReviewReminders({ profileId, patterns, disabled, onPractice }: { profileId: string; patterns: PracticePattern[]; disabled: boolean; onPractice: (patternId: string) => void }) {
+export function TrainerReviewReminders({ profileId, patterns, rounds, disabled, onPractice }: { profileId: string; patterns: PracticePattern[]; rounds: TrainerRound[]; disabled: boolean; onPractice: (patternId: string, focus?: TrainerReviewFocus, sourceRoundId?: string) => void }) {
   const [reminders, setReminders] = useState<TrainerReviewReminder[]>([]);
   const [ready, setReady] = useState(false);
   const [patternId, setPatternId] = useState(patterns[0]?.id ?? "");
@@ -19,6 +20,21 @@ export function TrainerReviewReminders({ profileId, patterns, disabled, onPracti
     const timer = window.setTimeout(() => { setReminders(readTrainerReviewReminders(profileId)); setReady(true); }, 0);
     return () => window.clearTimeout(timer);
   }, [profileId]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const weakSpot = recommendTrainerWeakSpot(rounds, patterns);
+    if (!weakSpot || reminders.some(item => item.sourceRoundId === weakSpot.sourceRoundId)) return;
+    const pattern = patterns.find(item => item.id === weakSpot.patternId);
+    if (!pattern) return;
+    const due = new Date(); due.setDate(due.getDate() + 1); due.setHours(0, 0, 0, 0);
+    const generated: TrainerReviewReminder = {
+      id: crypto.randomUUID(), patternId: pattern.id, patternName: pattern.name, dueAt: due.toISOString(), repeatDays: 0,
+      focus: { instrument: weakSpot.instrument, beat: weakSpot.beat }, sourceRoundId: weakSpot.sourceRoundId,
+    };
+    const next = [generated, ...reminders.filter(item => item.patternId !== pattern.id || !item.focus)].slice(0, 30);
+    if (writeTrainerReviewReminders(profileId, next)) setReminders(next);
+  }, [patterns, profileId, ready, reminders, rounds]);
 
   useEffect(() => {
     const update = () => setReminders(readTrainerReviewReminders(profileId));
@@ -57,8 +73,8 @@ export function TrainerReviewReminders({ profileId, patterns, disabled, onPracti
       const isDue = dayKey(new Date(item.dueAt)) <= today;
       const isAvailable = patterns.some(pattern => pattern.id === item.patternId);
       return <li key={item.id} className={isDue ? "is-due" : ""}>
-        <div><strong>{item.patternName}</strong><span>{isAvailable ? isDue ? "Review is due" : `Review on ${new Date(item.dueAt).toLocaleDateString()}` : "Pattern no longer available"}{item.repeatDays ? ` · repeats every ${item.repeatDays} days` : ""}</span></div>
-        <button type="button" disabled={disabled || !isAvailable} onClick={() => onPractice(item.patternId)}>Practise</button>
+        <div><strong>{item.patternName}</strong><span>{item.focus ? `Weak spot · ${item.focus.instrument} · beat ${item.focus.beat}` : ""}{item.sourceRoundId ? " · suggested from recent accuracy" : ""}{isAvailable ? isDue ? " · Review is due" : ` · Review on ${new Date(item.dueAt).toLocaleDateString()}` : " · Pattern no longer available"}{item.repeatDays ? ` · repeats every ${item.repeatDays} days` : ""}</span></div>
+        <button type="button" disabled={disabled || !isAvailable} onClick={() => onPractice(item.patternId, item.focus, item.sourceRoundId)}>{item.focus ? "Practise weak spot" : "Practise"}</button>
         {isDue && <><button type="button" className="button-secondary" disabled={disabled} onClick={() => snooze(item, 1)}>Snooze 1 day</button><button type="button" className="button-secondary" disabled={disabled} onClick={() => snooze(item, 7)}>Snooze 1 week</button></>}
         <button type="button" className="button-secondary" disabled={disabled} onClick={() => save(reminders.filter(entry => entry.id !== item.id))}>{isDue ? "Done" : "Remove"}</button>
       </li>;

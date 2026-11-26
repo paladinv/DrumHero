@@ -1,7 +1,7 @@
 import { expressionStrikes } from "./song-builder-creative";
 import type { CustomSampleLayers } from "./song-builder-samples";
 import { SONG_INSTRUMENTS, type SongInstrument } from "./types";
-import { DEFAULT_DRUM_MIX, type DrumMixSettings } from "./audio";
+import { createDrumEffectsBus, DEFAULT_DRUM_EFFECTS, DEFAULT_DRUM_MIX, type DrumEffectsSettings, type DrumMixSettings } from "./audio";
 import { arrangementAutomationValue, automationScaleAtHit, type ArrangementBar } from "./song-builder";
 import { notationQuarterScale, paginateNotation, notationSystems, percussionRhythm, DEFAULT_NOTATION_OPTIONS, type NotationOptions } from "./song-builder-notation";
 
@@ -226,7 +226,7 @@ const wavSamplePaths = {
 
 export type AudioRenderOptions = { sampleRate: 44100 | 48000; bitDepth: 16 | 24; normalizeToDbfs?: number };
 export type BackingAudioInput = { id?: string; name?: string; blob: Blob; downbeat: number; volume: number; muted?: boolean; solo?: boolean };
-export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, options: { metronome?: boolean; backing?: BackingAudioInput | BackingAudioInput[]; backingOffsetSeconds?: number; render?: AudioRenderOptions; onProgress?: (progress: { completed: number; total: number; label: string }) => void; shouldCancel?: () => boolean } = {}) {
+export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: DrumMixSettings = DEFAULT_DRUM_MIX, customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, options: { metronome?: boolean; backing?: BackingAudioInput | BackingAudioInput[]; backingOffsetSeconds?: number; effects?: DrumEffectsSettings; render?: AudioRenderOptions; onProgress?: (progress: { completed: number; total: number; label: string }) => void; shouldCancel?: () => boolean } = {}) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
   if (options.shouldCancel?.()) throw new Error("WAV export cancelled.");
   options.onProgress?.({ completed: 0, total: 1, label: "Preparing WAV audio" });
@@ -237,8 +237,9 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
   const Offline = window.OfflineAudioContext;
   if (!Offline) throw new Error("Offline audio export is unavailable in this browser.");
   const context = new Offline(2, Math.ceil(totalSeconds * sampleRate), sampleRate);
+  const effects = createDrumEffectsBus(context, context.destination, options.effects ?? DEFAULT_DRUM_EFFECTS);
   const voices = [...new Set(bars.flatMap((bar) => bar.hits.map((hit) => hit.articulation === "foot-splash" ? "openhat" : hit.instrument)))];
-  const buffers = new Map<string, { primary: AudioBuffer; soft?: AudioBuffer; accent?: AudioBuffer }>();
+  const buffers = new Map<string, { primary: AudioBuffer; soft?: AudioBuffer; accent?: AudioBuffer; alternates?: Partial<Record<"primary" | "soft" | "accent", AudioBuffer[]>> }>();
   const sampleKeys = [...new Set(bars.flatMap(bar => voices.map(voice => `${voice}:${(bar.kitMix ?? mix).sampleIndex[voice] ?? 0}`)))];
   await Promise.all(sampleKeys.map(async (key) => {
     const separator = key.lastIndexOf(":");
@@ -251,7 +252,8 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
       const primary = await context.decodeAudioData(await layers.primary.arrayBuffer());
       const soft = layers.soft ? await context.decodeAudioData(await layers.soft.arrayBuffer()).catch(() => undefined) : undefined;
       const accent = layers.accent ? await context.decodeAudioData(await layers.accent.arrayBuffer()).catch(() => undefined) : undefined;
-      buffers.set(key, { primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}) });
+      const alternates = Object.fromEntries(await Promise.all(Object.entries(layers.alternates ?? {}).map(async ([layer, blobs]) => [layer, await Promise.all((blobs ?? []).map(async blob => context.decodeAudioData(await blob.arrayBuffer()).catch(() => null))).then(items => items.filter((item): item is AudioBuffer => item !== null))]))) as Partial<Record<"primary" | "soft" | "accent", AudioBuffer[]>>;
+      buffers.set(key, { primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}), ...(Object.keys(alternates).length ? { alternates } : {}) });
       return;
     }
     const samplePaths = wavSamplePaths[voice];
@@ -263,6 +265,7 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
   if (options.shouldCancel?.()) throw new Error("WAV export cancelled before rendering.");
   options.onProgress?.({ completed: 0, total: 1, label: "Rendering WAV audio" });
   let startSeconds = 0;
+  const nextSampleTake: Record<SongInstrument, Record<"primary" | "soft" | "accent", number>> = Object.fromEntries(SONG_INSTRUMENTS.map(voice => [voice, { primary: 0, soft: 0, accent: 0 }])) as Record<SongInstrument, Record<"primary" | "soft" | "accent", number>>;
   let activeOpenHat: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
   for (const bar of bars) {
     const quarterSeconds = 60 / bar.bpm;
@@ -302,13 +305,17 @@ export async function arrangementWav(bars: ArrangementBar[], swing = 50, mix: Dr
           activeOpenHat = null;
         }
         const strikeVelocity = hit.velocity * arrangementVelocityScale * articulationVelocityScale;
-        source.buffer = strikeVelocity < 48 && sampleLayers.soft ? sampleLayers.soft : strikeVelocity >= 96 && sampleLayers.accent ? sampleLayers.accent : sampleLayers.primary;
+        const layer = strikeVelocity < 48 ? "soft" : strikeVelocity >= 96 ? "accent" : "primary";
+        const baseSample = layer === "soft" ? sampleLayers.soft ?? sampleLayers.primary : layer === "accent" ? sampleLayers.accent ?? sampleLayers.primary : sampleLayers.primary;
+        const roundRobin = [baseSample, ...(sampleLayers.alternates?.[layer] ?? [])];
+        source.buffer = roundRobin[nextSampleTake[instrument][layer] % roundRobin.length]!;
+        nextSampleTake[instrument][layer] += 1;
         gain.gain.value = Math.max(0, Math.min(1, strikeVelocity / 127)) * Math.max(0, Math.min(1, barMix.levels[instrument] ?? 0.82)) * automationScale;
         const panner = context.createStereoPanner();
         panner.pan.value = Math.max(-1, Math.min(1, panAutomation));
         const playbackRate = Math.pow(2, Math.max(-12, Math.min(12, barMix.pitch?.[instrument] ?? 0)) / 12);
         source.playbackRate.setValueAtTime(playbackRate, eventAt);
-        source.connect(gain).connect(panner).connect(context.destination);
+        source.connect(gain).connect(panner).connect(effects.input);
         const decay = Math.max(0.05, Math.min(1, barMix.decay?.[instrument] ?? 1));
         if (decay < 0.999 && articulation !== 'choke') {
           const audibleDuration = Math.max(0.04, source.buffer.duration / playbackRate * decay);
@@ -423,7 +430,7 @@ export async function arrangementStemsZip(
   swing = 50,
   mix: DrumMixSettings = DEFAULT_DRUM_MIX,
   customSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {},
-  options: { metronome?: boolean; backing?: BackingAudioInput | BackingAudioInput[]; backingOffsetSeconds?: number; render?: AudioRenderOptions; stemPrefix?: string; onProgress?: (progress: { completed: number; total: number; label: string }) => void; shouldCancel?: () => boolean } = {}
+  options: { metronome?: boolean; backing?: BackingAudioInput | BackingAudioInput[]; backingOffsetSeconds?: number; effects?: DrumEffectsSettings; render?: AudioRenderOptions; stemPrefix?: string; onProgress?: (progress: { completed: number; total: number; label: string }) => void; shouldCancel?: () => boolean } = {}
 ) {
   if (!bars.length) throw new Error("There is no arrangement to export yet.");
   const durationSeconds = bars.reduce((sum, bar) => sum + bar.beats * 60 / bar.bpm, 0);
@@ -442,7 +449,7 @@ export async function arrangementStemsZip(
     const soloMix = (source: DrumMixSettings): DrumMixSettings => ({ ...source, solo: "", muted: Object.fromEntries(Object.keys(source.muted).map(key => [key, key === voice ? source.muted[voice] : true])) as DrumMixSettings["muted"] });
     const stemMix = soloMix(mix);
     const stemBars = bars.map(bar => bar.kitMix ? { ...bar, kitMix: soloMix(bar.kitMix) } : bar);
-    files.push({ name: `${options.stemPrefix || "drums"}-${voice}.wav`, blob: await arrangementWav(stemBars, swing, stemMix, customSamples, { render: options.render }) });
+    files.push({ name: `${options.stemPrefix || "drums"}-${voice}.wav`, blob: await arrangementWav(stemBars, swing, stemMix, customSamples, { effects: options.effects, render: options.render }) });
     progress(`${voice} stem ready`);
   }
   checkCancelled();

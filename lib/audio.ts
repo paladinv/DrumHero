@@ -1,6 +1,9 @@
 import { SONG_INSTRUMENTS, type SongInstrument } from "./types";
 import type { CustomSampleLayers } from "./song-builder-samples";
 
+export type DrumEffectsSettings = { room: number; low: number; high: number; compression: number };
+export const DEFAULT_DRUM_EFFECTS: DrumEffectsSettings = { room: 0, low: 0, high: 0, compression: 0 };
+
 export type DrumAudio = {
   click: (accent?: boolean) => void;
   scheduleHit: (instrument: SongInstrument, atMs: number, accent?: boolean, velocity?: number, choke?: boolean, pan?: number) => void;
@@ -8,11 +11,13 @@ export type DrumAudio = {
   scheduleClick: (atMs: number, accent?: boolean) => void;
   hit: (instrument: SongInstrument, accent?: boolean, velocity?: number, choke?: boolean) => void;
   setMix: (settings: DrumMixSettings) => void;
+  setEffects: (settings: DrumEffectsSettings) => void;
   setMasterLevel: (level: number) => void;
   setTargetLevel: (level: number) => void;
   setClickLevel: (level: number) => void;
   setClickSound: (sound: TrainerClickSound) => void;
   setCustomSample: (instrument: SongInstrument, blob: Blob | null, layer?: "soft" | "primary" | "accent") => Promise<boolean>;
+  setCustomSampleAlternates: (instrument: SongInstrument, layer: "soft" | "primary" | "accent", blobs: Blob[]) => Promise<boolean>;
   ready: Promise<boolean>;
   silence: () => void;
   close: () => void;
@@ -61,20 +66,58 @@ export function drumSampleUrl(instrument: SongInstrument, sampleIndex: number) {
   return paths[Math.max(0, Math.min(paths.length - 1, Math.round(sampleIndex)))] ?? paths[0] ?? "";
 }
 
-export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, initialCustomSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, onInterrupted?: () => void): DrumAudio | null {
+export function createDrumEffectsBus(context: BaseAudioContext, destination: AudioNode, initial: DrumEffectsSettings = DEFAULT_DRUM_EFFECTS) {
+  const input = context.createGain();
+  const low = context.createBiquadFilter(); low.type = "lowshelf"; low.frequency.value = 120;
+  const high = context.createBiquadFilter(); high.type = "highshelf"; high.frequency.value = 8000;
+  const compressor = context.createDynamicsCompressor(); compressor.knee.value = 18; compressor.attack.value = 0.008; compressor.release.value = 0.22;
+  const dry = context.createGain();
+  const convolver = context.createConvolver();
+  const impulse = context.createBuffer(2, Math.round(context.sampleRate * 1.8), context.sampleRate);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+    const samples = impulse.getChannelData(channel);
+    let seed = 0x19a4 + channel * 7919;
+    for (let index = 0; index < samples.length; index += 1) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      const noise = seed / 0xffffffff * 2 - 1;
+      samples[index] = noise * Math.pow(1 - index / samples.length, 4.2) * 0.6;
+    }
+  }
+  convolver.buffer = impulse;
+  const wet = context.createGain();
+  input.connect(low).connect(high).connect(compressor);
+  compressor.connect(dry).connect(destination);
+  compressor.connect(convolver).connect(wet).connect(destination);
+  const set = (settings: DrumEffectsSettings) => {
+    const room = Math.max(0, Math.min(100, settings.room));
+    const compression = Math.max(0, Math.min(100, settings.compression));
+    low.gain.setTargetAtTime(Math.max(-12, Math.min(12, settings.low)), context.currentTime, 0.025);
+    high.gain.setTargetAtTime(Math.max(-12, Math.min(12, settings.high)), context.currentTime, 0.025);
+    compressor.threshold.setTargetAtTime(-18 - compression * 0.18, context.currentTime, 0.025);
+    compressor.ratio.setTargetAtTime(1 + compression * 0.11, context.currentTime, 0.025);
+    compressor.knee.setTargetAtTime(18 - compression * 0.12, context.currentTime, 0.025);
+    wet.gain.setTargetAtTime(room * 0.0035, context.currentTime, 0.025);
+  };
+  set(initial);
+  return { input, set };
+}
+
+export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, initialCustomSamples: Partial<Record<SongInstrument, Blob | CustomSampleLayers>> = {}, onInterrupted?: () => void, initialEffects: DrumEffectsSettings = DEFAULT_DRUM_EFFECTS): DrumAudio | null {
   if (typeof window === "undefined" || !(window.AudioContext || window.webkitAudioContext)) return null;
   const Context = window.AudioContext || window.webkitAudioContext;
   const context = new Context();
   const abort = new AbortController();
   const instruments = Object.keys(samplePaths) as SongInstrument[];
   const samples: Record<SongInstrument, AudioBuffer[]> = voiceValues([]);
-  const customSamples: Partial<Record<SongInstrument, { primary: AudioBuffer; soft?: AudioBuffer; accent?: AudioBuffer }>> = {};
+  const customSamples: Partial<Record<SongInstrument, { primary: AudioBuffer; soft?: AudioBuffer; accent?: AudioBuffer; alternates?: Partial<Record<"primary" | "soft" | "accent", AudioBuffer[]>> }>> = {};
   const nextTake: Record<SongInstrument, number> = voiceValues(0);
+  const nextCustomTake: Record<SongInstrument, Record<"primary" | "soft" | "accent", number>> = Object.fromEntries(SONG_INSTRUMENTS.map(voice => [voice, { primary: 0, soft: 0, accent: 0 }])) as Record<SongInstrument, Record<"primary" | "soft" | "accent", number>>;
   let mix = initialMix;
   let masterLevel = 1;
   let targetLevel = 0.55;
   let clickLevel = 1;
   let clickSound: TrainerClickSound = "hat";
+  const effects = createDrumEffectsBus(context, context.destination, initialEffects);
   let closed = false;
   let hasRun = context.state === "running";
   const stateChanged = () => {
@@ -103,7 +146,12 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
       }
     }
     const chosenTake = metronomeClick ? 0 : Math.max(0, Math.min(takes.length - 1, Math.round(mix.sampleIndex[instrument] ?? 0)));
-    const take = (custom ? velocityValue < 48 && custom.soft ? custom.soft : velocityValue >= 96 && custom.accent ? custom.accent : custom.primary : undefined) ?? takes[chosenTake] ?? takes[nextTake[instrument] % Math.max(1, takes.length)];
+    const layer = velocityValue < 48 ? "soft" : velocityValue >= 96 ? "accent" : "primary";
+    const baseCustom = custom ? layer === "soft" ? custom.soft ?? custom.primary : layer === "accent" ? custom.accent ?? custom.primary : custom.primary : undefined;
+    const alternates = custom?.alternates?.[layer] ?? [];
+    const customTakes = baseCustom ? [baseCustom, ...alternates] : [];
+    const take = customTakes.length ? customTakes[nextCustomTake[instrument][layer] % customTakes.length] : takes[chosenTake] ?? takes[nextTake[instrument] % Math.max(1, takes.length)];
+    if (customTakes.length) nextCustomTake[instrument][layer] += 1;
     nextTake[instrument] += 1;
     const source = context.createBufferSource();
     const gain = context.createGain();
@@ -117,8 +165,8 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
     const panner = context.createStereoPanner?.();
     if (panner) {
       panner.pan.setValueAtTime(metronomeClick ? 0 : Math.max(-1, Math.min(1, panOverride ?? mix.pan[instrument] ?? 0)), now);
-      source.connect(gain).connect(panner).connect(context.destination);
-    } else source.connect(gain).connect(context.destination);
+      source.connect(gain).connect(panner).connect(metronomeClick ? context.destination : effects.input);
+    } else source.connect(gain).connect(metronomeClick ? context.destination : effects.input);
     activeSources.add(source);
     if (duration === undefined) {
       const decay = Math.max(0.05, Math.min(1, mix.decay?.[instrument] ?? 1));
@@ -175,7 +223,8 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
         const primary = await context.decodeAudioData(await layers.primary.arrayBuffer());
         const soft = layers.soft ? await context.decodeAudioData(await layers.soft.arrayBuffer()).catch(() => undefined) : undefined;
         const accent = layers.accent ? await context.decodeAudioData(await layers.accent.arrayBuffer()).catch(() => undefined) : undefined;
-        customSamples[voice as SongInstrument] = { primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}) };
+        const alternates = Object.fromEntries(await Promise.all(Object.entries(layers.alternates ?? {}).map(async ([layer, blobs]) => [layer, await Promise.all((blobs ?? []).map(async blob => context.decodeAudioData(await blob.arrayBuffer()).catch(() => null))).then(items => items.filter((item): item is AudioBuffer => item !== null))]))) as Partial<Record<"primary" | "soft" | "accent", AudioBuffer[]>>;
+        customSamples[voice as SongInstrument] = { primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}), ...(Object.keys(alternates).length ? { alternates } : {}) };
       }
       catch { /* A bad custom sample should not disable the built-in kit. */ }
     }));
@@ -190,6 +239,7 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
     scheduleTargetHit: (instrument,atMs,accent=false,velocity) => playSample(instrument,velocity?Math.max(.025,Math.min(.95,velocity/127)):accent?.82:.55,undefined,false,atMs,undefined,velocity??(accent?118:86),true),
     scheduleClick: (atMs,accent=false) => playClick(accent, atMs),
     setMix: (settings) => { mix = settings; },
+    setEffects: (settings) => effects.set(settings),
     setMasterLevel: (level) => { masterLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 1)); },
     setTargetLevel: (level) => { targetLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 0.55)); },
     setClickLevel: (level) => { clickLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 1)); },
@@ -198,14 +248,26 @@ export function createDrumAudio(initialMix: DrumMixSettings = DEFAULT_DRUM_MIX, 
       try {
         if (!blob) {
           if (layer === "primary") delete customSamples[instrument];
-          else if (customSamples[instrument]) delete customSamples[instrument]![layer];
+          else if (customSamples[instrument]) {
+            delete customSamples[instrument]![layer];
+            if (customSamples[instrument]!.alternates) delete customSamples[instrument]!.alternates![layer];
+          }
           return true;
         }
         const decoded = await context.decodeAudioData(await blob.arrayBuffer());
         if (layer !== "primary") {
           if (!customSamples[instrument]?.primary) return false;
           customSamples[instrument] = { ...customSamples[instrument]!, [layer]: decoded };
-        } else customSamples[instrument] = { primary: decoded, ...(customSamples[instrument]?.soft ? { soft: customSamples[instrument]!.soft } : {}), ...(customSamples[instrument]?.accent ? { accent: customSamples[instrument]!.accent } : {}) };
+        } else customSamples[instrument] = { primary: decoded, ...(customSamples[instrument]?.soft ? { soft: customSamples[instrument]!.soft } : {}), ...(customSamples[instrument]?.accent ? { accent: customSamples[instrument]!.accent } : {}), ...(customSamples[instrument]?.alternates ? { alternates: customSamples[instrument]!.alternates } : {}) };
+        return true;
+      } catch { return false; }
+    },
+    setCustomSampleAlternates: async (instrument, layer, blobs) => {
+      if (!customSamples[instrument]) return blobs.length === 0;
+      if (blobs.length && !customSamples[instrument]![layer]) return false;
+      try {
+        const decoded = await Promise.all(blobs.slice(0, 4).map(async blob => context.decodeAudioData(await blob.arrayBuffer())));
+        customSamples[instrument] = { ...customSamples[instrument]!, alternates: { ...customSamples[instrument]!.alternates, [layer]: decoded } };
         return true;
       } catch { return false; }
     },

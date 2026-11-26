@@ -1,5 +1,5 @@
 import { parseProgress } from "@/lib/progress";
-import { parseTrainerState, trainerStateForCloud } from "@/lib/trainer";
+import { parseTrainerState, retainTrainerRoundHistory, trainerStateForCloud } from "@/lib/trainer";
 import type { ProgressState } from "@/lib/types";
 import type { TrainerState } from "@/lib/trainer";
 import { parseEarChallengePacks, parseEarHistory, parseEarReviewSchedule, type EarChallengePack, type EarResult, type EarReviewItem } from "@/lib/ear-training";
@@ -73,7 +73,7 @@ export function mergePracticeCloudData(device: PracticeCloudData, cloud: Practic
     },
     trainer: {
       ...device.trainer,
-      rounds: [...rounds.values()].sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, 50),
+      rounds: retainTrainerRoundHistory([...rounds.values()]),
       deviceProfiles: { ...cloud.trainer.deviceProfiles, ...device.trainer.deviceProfiles },
       ...(device.trainer.routine || cloud.trainer.routine ? { routine: device.trainer.routine ?? cloud.trainer.routine } : {}),
       ...(cueSequences.size ? { cueSequences: [...cueSequences.values()].slice(0, 30) } : {}),

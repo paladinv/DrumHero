@@ -1,4 +1,4 @@
-import type { Groove, Instrument, PracticePattern } from "./types";
+import type { Groove, Instrument, MidiArticulation, PracticePattern } from "./types";
 import { parseCustomGrooves } from "./custom-grooves";
 import type { TrainerFeel, TrainerLimbFocus } from "./trainer";
 import type { TrainerClickSound } from "./audio";
@@ -82,12 +82,40 @@ export type TrainerSetupTransfer = {
   trainerDrumLevel: number;
   trainerClickLevel: number;
   clickSound: TrainerClickSound;
+  midiMap?: Record<number, Instrument | null>;
+  midiArticulations?: Record<number, MidiArticulation | null>;
+  midiVelocityRanges?: Record<number, { soft: number; hard: number }>;
 };
 
 const repetitions = [4, 8, 10, 16];
 const countIns = [1, 2, 4];
 const sources = ["keyboard", "touch", "midi", "audio-timing", "audio-voices"];
 const voices = ["kick", "snare", "hihat", "tom", "crash"];
+const midiArticulations: MidiArticulation[] = ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot", "side-stick"];
+
+function parseMidiTransferMap(value: unknown, allowed: readonly string[]) {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const parsed: Record<number, string | null> = {};
+  for (const [note, target] of Object.entries(value)) {
+    if (!/^\d+$/.test(note) || Number(note) > 127 || (target !== null && (typeof target !== "string" || !allowed.includes(target)))) return null;
+    parsed[Number(note)] = target as string | null;
+  }
+  return parsed;
+}
+
+function parseMidiVelocityRanges(value: unknown) {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const parsed: Record<number, { soft: number; hard: number }> = {};
+  for (const [note, range] of Object.entries(value)) {
+    if (!/^\d+$/.test(note) || Number(note) > 127 || !range || typeof range !== "object" || !Number.isInteger((range as { soft?: unknown }).soft) || !Number.isInteger((range as { hard?: unknown }).hard)) return null;
+    const { soft, hard } = range as { soft: number; hard: number };
+    if (soft < 1 || hard > 127 || hard < soft + 4) return null;
+    parsed[Number(note)] = { soft, hard };
+  }
+  return parsed;
+}
 
 export function createTrainerLoopPattern(pattern: PracticePattern, startBeat: number, endBeat: number): PracticePattern {
   const stepsPerBeat = pattern.subdivision / 4;
@@ -148,6 +176,9 @@ export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<stri
     clickSound: value.clickSound ?? "hat",
   };
   const rawCustomPatterns = Array.isArray(normalized.customPatterns) ? normalized.customPatterns : [];
+  const midiMap = parseMidiTransferMap(value.midiMap, voices);
+  const midiArticulationMap = parseMidiTransferMap(value.midiArticulations, midiArticulations);
+  const midiVelocityRanges = parseMidiVelocityRanges(value.midiVelocityRanges);
   const customPatterns = parseCustomGrooves(JSON.stringify(rawCustomPatterns));
   const validIds = new Set([...validPatternIds, ...customPatterns.map((pattern) => pattern.id)]);
   const routineValue = normalized.customRoutine;
@@ -186,8 +217,8 @@ export function parseTrainerSetupTransfer(raw: string, validPatternIds: Set<stri
     Number.isFinite(normalized.trainerClickLevel) && Number(normalized.trainerClickLevel) >= 0 && Number(normalized.trainerClickLevel) <= 100 &&
     ["hat", "woodblock", "beep"].includes(String(normalized.clickSound));
   const coachingValid = (value.swingRatio === undefined || (Number.isFinite(value.swingRatio) && value.swingRatio >= 0.5 && value.swingRatio <= 0.75)) && (value.pocketMs === undefined || (Number.isFinite(value.pocketMs) && value.pocketMs >= 0 && value.pocketMs <= 80)) && (value.learningMode === undefined || ['normal', 'listen-copy-solo', 'build-limbs'].includes(value.learningMode)) && (value.phraseBars === undefined || [0, 4, 8, 16].includes(value.phraseBars)) && (value.variationId === undefined || (typeof value.variationId === "string" && ["base", "kick-pickups", "displaced-backbeat", "hat-space"].includes(value.variationId))) && (value.dynamicsExercise === undefined || ["contrast", "crescendo", "evenness"].includes(value.dynamicsExercise));
-  if (!extendedValid || !coachingValid) throw new Error("This Trainer setup is incomplete, unsupported, or refers to patterns that are not in your library.");
-  return { ...normalized, feel: normalized.feel ?? "straight", clickMode: normalized.clickMode ?? "all", limbFocus: normalized.limbFocus ?? "all", cueEveryBars: normalized.cueEveryBars as TrainerCueDensity, cueLeadBeats: normalized.cueLeadBeats as TrainerCueLead, customPatterns } as TrainerSetupTransfer;
+  if (!extendedValid || !coachingValid || midiMap === null || midiArticulationMap === null || midiVelocityRanges === null) throw new Error("This Trainer setup is incomplete, unsupported, or refers to patterns that are not in your library.");
+  return { ...normalized, feel: normalized.feel ?? "straight", clickMode: normalized.clickMode ?? "all", limbFocus: normalized.limbFocus ?? "all", cueEveryBars: normalized.cueEveryBars as TrainerCueDensity, cueLeadBeats: normalized.cueLeadBeats as TrainerCueLead, customPatterns, ...(midiMap ? { midiMap: midiMap as Record<number, Instrument | null> } : {}), ...(midiArticulationMap ? { midiArticulations: midiArticulationMap as Record<number, MidiArticulation | null> } : {}), ...(midiVelocityRanges ? { midiVelocityRanges } : {}) } as TrainerSetupTransfer;
 }
 
 export const TRAINER_PRACTICE_PATHS = [

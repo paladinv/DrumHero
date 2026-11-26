@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TrainerNotationView } from "@/components/TrainerNotationView";
 import { EAR_METERS, earMeterGroupings, type EarChallengeItem, type EarMeter } from "@/lib/ear-training";
 import type { Instrument, PracticePattern } from "@/lib/types";
@@ -9,6 +9,7 @@ import styles from "@/components/RhythmEarTraining.module.css";
 
 type Candidate = { pattern: PracticePattern; meter: EarMeter; bars: 1 | 2; grouping?: number[] };
 type ClipEstimate = { bpm: number; tempoConfidence: number; meter: EarMeter | null; meterConfidence: number };
+type AudioOnset = { id: string; timeMs: number };
 const VOICES: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
 
 function detectTransients(samples: Float32Array, sampleRate: number) {
@@ -91,12 +92,33 @@ export function EarAudioImportPanel({ disabled, onSave }: { disabled?: boolean; 
   const [voice, setVoice] = useState<Instrument>("snare");
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [audioUrl, setAudioUrl] = useState("");
-  const [audioOnsets, setAudioOnsets] = useState<number[]>([]);
+  const [audioOnsets, setAudioOnsets] = useState<AudioOnset[]>([]);
+  const [waveform, setWaveform] = useState<number[]>([]);
+  const [clipDurationMs, setClipDurationMs] = useState(0);
+  const [draggingOnsetId, setDraggingOnsetId] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingStarted, setRecordingStarted] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
   const [error, setError] = useState("");
   const [sourceName, setSourceName] = useState("");
   const [estimate, setEstimate] = useState<ClipEstimate | null>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const recordingStream = useRef<MediaStream | null>(null);
+  const recordingTicker = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingLimit = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mounted = useRef(false);
 
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (recordingTicker.current) clearInterval(recordingTicker.current);
+      if (recordingLimit.current) clearTimeout(recordingLimit.current);
+      if (recorder.current && recorder.current.state !== "inactive") { recorder.current.onstop = null; recorder.current.onerror = null; recorder.current.ondataavailable = null; recorder.current.stop(); }
+      recordingStream.current?.getTracks().forEach(track => track.stop());
+    };
+  }, []);
 
   function makeCandidate(onsets: number[], name: string, targetBpm: number, targetMeter: EarMeter, targetBars: 1 | 2, targetSubdivision: 8 | 12 | 16 | 20, targetVoice: Instrument) {
     const [numerator, denominator] = targetMeter.split("/").map(Number);
@@ -120,7 +142,7 @@ export function EarAudioImportPanel({ disabled, onSave }: { disabled?: boolean; 
 
   const readAudio = async (file?: File) => {
     if (!file) return;
-    setCandidate(null); setError(""); setSourceName(""); setAudioOnsets([]); setAudioUrl(""); setEstimate(null);
+    setCandidate(null); setError(""); setSourceName(""); setAudioOnsets([]); setWaveform([]); setClipDurationMs(0); setAudioUrl(""); setEstimate(null);
     if (file.size > 24 * 1024 * 1024) { setError("Choose an audio clip smaller than 24 MB."); return; }
     if (!file.type.startsWith("audio/") && !/\.(wav|mp3|m4a|aac|ogg|webm|flac)$/i.test(file.name)) { setError("Choose a supported audio file such as WAV, MP3, M4A, OGG, or WebM."); return; }
     if (!window.AudioContext) { setError("Audio analysis is not available in this browser."); return; }
@@ -136,9 +158,20 @@ export function EarAudioImportPanel({ disabled, onSave }: { disabled?: boolean; 
       }
       const onsets = detectTransients(mono, decoded.sampleRate);
       if (onsets.length < 2) throw new Error("Fewer than two clear onsets were found. Try a louder, cleaner drum clip.");
+      let peak = 0.001;
+      for (const sample of mono) peak = Math.max(peak, Math.abs(sample));
+      const bucketCount = 240;
+      const envelope = Array.from({ length: bucketCount }, (_, bucket) => {
+        const start = Math.floor(bucket * mono.length / bucketCount);
+        const end = Math.max(start + 1, Math.floor((bucket + 1) * mono.length / bucketCount));
+        let bucketPeak = 0;
+        for (let index = start; index < Math.min(end, mono.length); index += 1) bucketPeak = Math.max(bucketPeak, Math.abs(mono[index]!));
+        return bucketPeak / peak;
+      });
       const detected = estimateTempoAndMeter(onsets);
       const detectedMeter = detected.meter ?? meter;
-      setAudioOnsets(onsets);
+      const onsetMarkers = onsets.map(timeMs => ({ id: crypto.randomUUID(), timeMs }));
+      setAudioOnsets(onsetMarkers); setWaveform(envelope); setClipDurationMs(decoded.duration * 1000);
       setEstimate(detected);
       setSourceName(file.name);
       setAudioUrl(URL.createObjectURL(file));
@@ -156,7 +189,58 @@ export function EarAudioImportPanel({ disabled, onSave }: { disabled?: boolean; 
   const updateSettings = (patch: Partial<{ bpm: number; meter: EarMeter; bars: 1 | 2; subdivision: 8 | 12 | 16 | 20; voice: Instrument }>) => {
     const next = { bpm, meter, bars, subdivision, voice, ...patch };
     setBpm(next.bpm); setMeter(next.meter); setBars(next.bars); setSubdivision(next.subdivision); setVoice(next.voice);
-    if (candidate && audioOnsets.length) makeCandidate(audioOnsets, sourceName, next.bpm, next.meter, next.bars, next.subdivision, next.voice);
+    if (candidate && audioOnsets.length) makeCandidate(audioOnsets.map(onset => onset.timeMs), sourceName, next.bpm, next.meter, next.bars, next.subdivision, next.voice);
+  };
+
+  const moveOnset = (id: string, timeMs: number) => {
+    if (disabled) return;
+    const next = audioOnsets.map(onset => onset.id === id ? { ...onset, timeMs: Math.max(0, Math.min(clipDurationMs, timeMs)) } : onset).sort((a, b) => a.timeMs - b.timeMs);
+    setAudioOnsets(next);
+    if (candidate && next.length) makeCandidate(next.map(onset => onset.timeMs), sourceName, bpm, meter, bars, subdivision, voice);
+  };
+
+  const stopRecording = () => {
+    if (recordingTicker.current) clearInterval(recordingTicker.current);
+    recordingTicker.current = null;
+    if (recordingLimit.current) clearTimeout(recordingLimit.current);
+    recordingLimit.current = null;
+    if (recorder.current && recorder.current.state !== "inactive") recorder.current.stop();
+  };
+
+  const startRecording = async () => {
+    setError("");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") { setError("Direct microphone recording is not available in this browser."); return; }
+    setRecording(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mounted.current) { stream.getTracks().forEach(track => track.stop()); return; }
+      recordingStream.current = stream;
+      setCandidate(null); setSourceName(""); setAudioOnsets([]); setWaveform([]); setClipDurationMs(0); setAudioUrl(""); setEstimate(null);
+      const mimeType = typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : undefined;
+      const activeRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      const chunks: BlobPart[] = [];
+      recorder.current = activeRecorder;
+      activeRecorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+      activeRecorder.onerror = () => { setError("The microphone recording stopped unexpectedly."); activeRecorder.onstop = null; stream.getTracks().forEach(track => track.stop()); recordingStream.current = null; recorder.current = null; if (recordingTicker.current) clearInterval(recordingTicker.current); recordingTicker.current = null; if (recordingLimit.current) clearTimeout(recordingLimit.current); recordingLimit.current = null; setRecording(false); setRecordingStarted(false); };
+      activeRecorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop()); recordingStream.current = null; recorder.current = null;
+        if (recordingTicker.current) clearInterval(recordingTicker.current);
+        recordingTicker.current = null;
+        if (recordingLimit.current) clearTimeout(recordingLimit.current);
+        recordingLimit.current = null;
+        setRecording(false); setRecordingStarted(false);
+        if (!chunks.length) { setError("No microphone audio was captured. Try recording again."); return; }
+        const file = new File(chunks, `microphone-rhythm-${Date.now()}.webm`, { type: activeRecorder.mimeType || chunks[0]?.type || "audio/webm" });
+        void readAudio(file);
+      };
+      setRecordSeconds(0); activeRecorder.start(); setRecordingStarted(true);
+      recordingTicker.current = setInterval(() => setRecordSeconds(seconds => Math.min(30, seconds + 1)), 1000);
+      recordingLimit.current = setTimeout(() => activeRecorder.stop(), 30_000);
+    } catch (cause) {
+      recordingStream.current?.getTracks().forEach(track => track.stop()); recordingStream.current = null;
+      setRecording(false); setRecordingStarted(false);
+      setError(cause instanceof Error && cause.name === "NotAllowedError" ? "Microphone permission was denied. Allow microphone access and try again." : "The microphone could not be opened. Check that it is connected and try again.");
+    }
   };
 
   const toggleStep = (step: number) => {
@@ -170,18 +254,24 @@ export function EarAudioImportPanel({ disabled, onSave }: { disabled?: boolean; 
 
   return <section className={`card ${styles.builder}`} aria-label={t("Import a rhythm from an audio clip")}>
     <span className="eyebrow">{t("Local audio analysis")}</span><h3>{t("Turn an audio clip into a rhythm")}</h3>
-    <p>{t("Choose a short local recording. The browser finds likely drum transients, snaps them to a musical grid, and lets you correct the result on the drum staff before saving it.")}</p>
-    <label className={styles.packFile}>{t("Choose audio · maximum 24 MB and 30 seconds")}<input type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.webm,.flac" disabled={disabled} onChange={event => { void readAudio(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} /></label>
+    <p>{t("Upload a short local clip or record directly from your microphone. The browser finds likely drum transients, lets you adjust them against the waveform, then snaps them to a musical grid for notation review.")}</p>
+    <label className={styles.packFile}>{t("Choose audio · maximum 24 MB and 30 seconds")}<input type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.webm,.flac" disabled={disabled || recording} onChange={event => { void readAudio(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} /></label>
+    <div className={styles.builderControls}><button type="button" className={recording ? "button" : "button-secondary"} disabled={disabled || recording} onClick={() => void startRecording()}>{t("Record with microphone · 30 second limit")}</button>{recordingStarted ? <button type="button" className="button" onClick={stopRecording}>{t("Stop and analyze")} · {recordSeconds}s</button> : recording ? <small role="status">{t("Waiting for microphone permission…")}</small> : null}<small>{t("Microphone access starts only when you press record. The captured audio stays in this browser.")}</small></div>
     {sourceName ? <><p><strong>{sourceName}</strong> · {t("Audio is analyzed locally and is not uploaded.")}</p>{audioUrl ? <audio controls preload="metadata" src={audioUrl} /> : null}</> : null}
+    {waveform.length > 0 && clipDurationMs > 0 ? <section className={styles.waveformEditor} aria-label={t("Audio waveform and onset correction")}><strong>{t("Correct detected onsets")}</strong><p>{t("Drag an onset marker to the sound, or focus it and use the arrow keys. The notation preview updates as you adjust the waveform.")}</p><svg viewBox="0 0 1000 140" role="group" aria-label={t("Waveform with draggable detected onset markers")} onPointerMove={event => { if (!draggingOnsetId || disabled) return; const bounds = event.currentTarget.getBoundingClientRect(); const position = Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))); moveOnset(draggingOnsetId, position * clipDurationMs); }} onPointerUp={() => setDraggingOnsetId(null)} onPointerCancel={() => setDraggingOnsetId(null)}>
+      <line x1="0" x2="1000" y1="70" y2="70" className={styles.waveformCenter} />
+      {waveform.map((amplitude, index) => { const x = index * 1000 / waveform.length; const height = Math.max(2, amplitude * 62); return <rect key={index} x={x} y={70 - height / 2} width={Math.max(1, 1000 / waveform.length - 1)} height={height} rx="1" className={styles.waveformBar} />; })}
+      {audioOnsets.map((onset, index) => <circle key={onset.id} cx={onset.timeMs / clipDurationMs * 1000} cy="70" r={draggingOnsetId === onset.id ? 9 : 7} className={styles.onsetMarker} role="slider" tabIndex={disabled ? -1 : 0} aria-disabled={disabled} aria-orientation="horizontal" aria-label={t("Onset {number} at {time} seconds", { number: index + 1, time: (onset.timeMs / 1000).toFixed(2) })} aria-valuemin={0} aria-valuemax={Math.round(clipDurationMs)} aria-valuenow={Math.round(onset.timeMs)} aria-valuetext={`${(onset.timeMs / 1000).toFixed(2)} seconds`} onPointerDown={event => { if (disabled) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setDraggingOnsetId(onset.id); }} onKeyDown={event => { if (disabled) return; const amount = event.shiftKey ? 50 : 10; if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); moveOnset(onset.id, onset.timeMs + (event.key === "ArrowRight" ? amount : -amount)); } }} />)}
+      </svg><small>{audioOnsets.length} {t("onsets detected")} · {t("Clip length")}: {(clipDurationMs / 1000).toFixed(1)}s</small></section> : null}
     {estimate ? <div className={styles.settingNote}><strong>{t("Automatic clip estimate")}</strong><span>{t("Tempo: {bpm} BPM · {confidence}", { bpm: estimate.bpm, confidence: t(confidenceLabel(estimate.tempoConfidence)) })}<br />{estimate.meter ? t("Meter: {meter} · {confidence}", { meter: t(estimate.meter), confidence: t(confidenceLabel(estimate.meterConfidence)) }) : t("Meter: no clear repeating bar detected. Choose the meter manually.")}</span><button type="button" className="button-secondary" disabled={disabled} onClick={() => updateSettings({ bpm: estimate.bpm, ...(estimate.meter ? { meter: estimate.meter } : {}) })}>{t("Use detected tempo and meter")}</button><small>{t("These are starting estimates. Review the notation and adjust the tempo or meter if needed.")}</small></div> : null}
     <div className={styles.builderControls}>
-      <label>{t("Tempo")} · {bpm} BPM<input type="range" min={40} max={200} step={1} value={bpm} disabled={disabled} onChange={event => updateSettings({ bpm: Number(event.target.value) })} /></label>
-      <label>{t("Meter")}<select value={meter} disabled={disabled} onChange={event => updateSettings({ meter: event.target.value as EarMeter })}>{EAR_METERS.map(value => <option value={value} key={value}>{t(value)}</option>)}</select></label>
-      <label>{t("Bars to import")}<select value={bars} disabled={disabled} onChange={event => updateSettings({ bars: Number(event.target.value) as 1 | 2 })}><option value={1}>{t("1 bar")}</option><option value={2}>{t("2 bars")}</option></select></label>
-      <label>{t("Grid spacing")}<select value={subdivision} disabled={disabled} onChange={event => updateSettings({ subdivision: Number(event.target.value) as 8 | 12 | 16 | 20 })}><option value={8}>{t("Eighth notes")}</option><option value={12}>{t("Triplets")}</option><option value={16}>{t("Sixteenth notes")}</option><option value={20}>{t("Quintuplets")}</option></select></label>
-      <label>{t("Voice for detected hits")}<select value={voice} disabled={disabled} onChange={event => updateSettings({ voice: event.target.value as Instrument })}>{VOICES.map(value => <option value={value} key={value}>{t(value)}</option>)}</select></label>
+      <label>{t("Tempo")} · {bpm} BPM<input type="range" min={40} max={200} step={1} value={bpm} disabled={disabled || recording} onChange={event => updateSettings({ bpm: Number(event.target.value) })} /></label>
+      <label>{t("Meter")}<select value={meter} disabled={disabled || recording} onChange={event => updateSettings({ meter: event.target.value as EarMeter })}>{EAR_METERS.map(value => <option value={value} key={value}>{t(value)}</option>)}</select></label>
+      <label>{t("Bars to import")}<select value={bars} disabled={disabled || recording} onChange={event => updateSettings({ bars: Number(event.target.value) as 1 | 2 })}><option value={1}>{t("1 bar")}</option><option value={2}>{t("2 bars")}</option></select></label>
+      <label>{t("Grid spacing")}<select value={subdivision} disabled={disabled || recording} onChange={event => updateSettings({ subdivision: Number(event.target.value) as 8 | 12 | 16 | 20 })}><option value={8}>{t("Eighth notes")}</option><option value={12}>{t("Triplets")}</option><option value={16}>{t("Sixteenth notes")}</option><option value={20}>{t("Quintuplets")}</option></select></label>
+      <label>{t("Voice for detected hits")}<select value={voice} disabled={disabled || recording} onChange={event => updateSettings({ voice: event.target.value as Instrument })}>{VOICES.map(value => <option value={value} key={value}>{t(value)}</option>)}</select></label>
     </div>
-    {candidate ? <section className={styles.packPreview}><h4>{t("Correct the imported rhythm in notation")}</h4><p>{t(candidate.meter)} · {candidate.bars} {t(candidate.bars === 1 ? "bar" : "bars")} · {candidate.pattern.hits.length} {t("snapped hits")}</p><p>{t("Click a staff position to add or remove a hit. Detected onsets are anchored to the first clear transient.")}</p><TrainerNotationView pattern={candidate.pattern} meter={candidate.meter} grouping={candidate.grouping} showRhythmStems editor={{ instrument: voice, onToggle: toggleStep, isActive: step => candidate.pattern.hits.some(hit => hit.instrument === voice && hit.step === step), isEnabled: () => true }} /><button className="button" type="button" disabled={disabled} onClick={() => onSave({ id: crypto.randomUUID(), level: "groove", meter: candidate.meter, feel: "straight", ...(candidate.grouping ? { grouping: candidate.grouping } : {}), bars: candidate.bars, style: "free", complexity: 2, pattern: candidate.pattern })}>{t("Save notation to a challenge pack")}</button></section> : null}
+    {candidate ? <section className={styles.packPreview}><h4>{t("Correct the imported rhythm in notation")}</h4><p>{t(candidate.meter)} · {candidate.bars} {t(candidate.bars === 1 ? "bar" : "bars")} · {candidate.pattern.hits.length} {t("snapped hits")}</p><p>{t("Detected onsets are anchored to the first clear transient. Drag markers on the waveform to correct timing; you can also click a staff position to add or remove a hit.")}</p><TrainerNotationView pattern={candidate.pattern} meter={candidate.meter} grouping={candidate.grouping} showRhythmStems editor={{ instrument: voice, onToggle: toggleStep, isActive: step => candidate.pattern.hits.some(hit => hit.instrument === voice && hit.step === step), isEnabled: () => true }} /><button className="button" type="button" disabled={disabled} onClick={() => onSave({ id: crypto.randomUUID(), level: "groove", meter: candidate.meter, feel: "straight", ...(candidate.grouping ? { grouping: candidate.grouping } : {}), bars: candidate.bars, style: "free", complexity: 2, pattern: candidate.pattern })}>{t("Save notation to a challenge pack")}</button></section> : null}
     {error ? <p role="status" aria-live="polite">{t(error)}</p> : null}
   </section>;
 }

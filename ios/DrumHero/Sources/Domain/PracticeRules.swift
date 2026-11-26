@@ -10,6 +10,7 @@ struct ExpectedHit: Hashable {
     let step: Int
     let repetition: Int
     var midiArticulationTarget: String? = nil
+    var velocityTarget: Int? = nil
     var matched = false
 }
 
@@ -22,6 +23,8 @@ struct RatedHit: Codable, Hashable, Identifiable {
     var repetition: Int?
     var midiArticulation: String?
     var midiArticulationTarget: String?
+    var velocity: Int? = nil
+    var velocityTarget: Int? = nil
 }
 
 struct PracticeResult: Codable, Identifiable, Hashable {
@@ -61,7 +64,8 @@ enum PracticeRules {
                 let hitOffset = Double(hit.step) * stepDuration
                 events.append(ExpectedHit(at: startAt + repetitionOffset + hitOffset,
                                           instrument: hit.instrument, step: hit.step, repetition: repetition,
-                                          midiArticulationTarget: hit.midiArticulationTarget))
+                                          midiArticulationTarget: hit.midiArticulationTarget,
+                                          velocityTarget: hit.velocityTarget))
             }
         }
         return events.sorted { left, right in

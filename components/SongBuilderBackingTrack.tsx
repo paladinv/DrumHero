@@ -6,7 +6,7 @@ import type { TempoAnchor } from "@/lib/song-builder-tools";
 import type { ArrangementBar } from "@/lib/song-builder";
 import { mappedSeconds } from "@/lib/song-builder-tools";
 import { deleteBuilderBackingFile, readBuilderBackings, saveBuilderBacking, type BuilderBacking } from "@/lib/song-builder-storage";
-import { analyzeBackingAudio, backingSuggestionsForArrangement, backingSuggestionsForPart, type ArrangementHitSuggestion, type BackingAudioAnalysis } from "@/lib/song-builder-audio-analysis";
+import { analyzeBackingAudio, backingSuggestionsForArrangement, backingSuggestionsForPart, suggestReferenceStructure, suggestStemAlignments, type ArrangementHitSuggestion, type BackingAudioAnalysis, type ReferenceStructureSegment, type StemAlignmentSuggestion } from "@/lib/song-builder-audio-analysis";
 import { useLocalization } from "./LocalizationProvider";
 
 export type BackingTrackHandle = {
@@ -24,13 +24,15 @@ type Props = {
   onApplyHits: (hits: DrumPart["hits"]) => void;
   onApplyArrangementHits: (groups: ArrangementHitSuggestion[]) => void;
   onAnchorsChange: (anchors: TempoAnchor[]) => void;
+  onApplyStructure: (segments: ReferenceStructureSegment[]) => void;
   songBpm: number;
+  songMeter: string;
 };
 
 const candidateKey = (hit: BackingAudioAnalysis["hits"][number]) => `${hit.timeSeconds.toFixed(3)}:${hit.voice}`;
 
 export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(function SongBuilderBackingTrack(
-  { songId, targetPart, bars, anchors, onApplyTempo, onApplyHits, onApplyArrangementHits, onAnchorsChange, songBpm },
+  { songId, targetPart, bars, anchors, onApplyTempo, onApplyHits, onApplyArrangementHits, onAnchorsChange, onApplyStructure, songBpm, songMeter },
   ref,
 ) {
   const { t } = useLocalization();
@@ -57,6 +59,11 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
   const [confidenceFloor, setConfidenceFloor] = useState(45);
   const [excludedCandidates, setExcludedCandidates] = useState<string[]>([]);
   const [candidateVoiceOverrides, setCandidateVoiceOverrides] = useState<Record<string, BackingAudioAnalysis["hits"][number]["voice"]>>({});
+  const [alignmentSuggestions, setAlignmentSuggestions] = useState<StemAlignmentSuggestion[]>([]);
+  const [selectedAlignmentIds, setSelectedAlignmentIds] = useState<string[]>([]);
+  const [aligning, setAligning] = useState(false);
+  const [structureSuggestions, setStructureSuggestions] = useState<ReferenceStructureSegment[]>([]);
+  const [detectingStructure, setDetectingStructure] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -314,6 +321,29 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
     }
   };
 
+  const analyzeStemAlignment = async () => {
+    if (!track || !tracks.some(item => item.id !== track.id)) return;
+    setAligning(true); setMessage(t("Comparing transient patterns across imported stems…"));
+    try {
+      const suggestions = await suggestStemAlignments(track.blob, tracks.filter(item => item.id !== track.id).map(item => ({ id: item.id, name: item.name, blob: item.blob, downbeat: item.downbeat })));
+      setAlignmentSuggestions(suggestions);
+      setSelectedAlignmentIds(suggestions.filter(item => item.confidence >= 0.12).map(item => item.id));
+      setMessage(t("Alignment suggestions are ready. Listen and review before applying offsets."));
+    } catch (error) { setMessage(error instanceof Error ? error.message : t("Could not compare these stems.")); }
+    finally { setAligning(false); }
+  };
+
+  const analyzeStructure = async () => {
+    if (!track) return;
+    setDetectingStructure(true);
+    try {
+      const bpm = track.bpm ?? analysis?.bpm ?? songBpm;
+      const segments = await suggestReferenceStructure(track.blob, bpm, songMeter, analysis?.firstBeatSeconds ?? track.downbeat);
+      setStructureSuggestions(segments);
+    } catch (error) { setAnalysisMessage(error instanceof Error ? error.message : t("Could not suggest the song form.")); }
+    finally { setDetectingStructure(false); }
+  };
+
   const excludedCandidateSet = useMemo(() => new Set(excludedCandidates), [excludedCandidates]);
   const reviewedAnalysis = useMemo(() => analysis ? ({ ...analysis, hits: analysis.hits.filter(hit => hit.confidence * 100 >= confidenceFloor && !excludedCandidateSet.has(candidateKey(hit))).map(hit => ({ ...hit, voice: candidateVoiceOverrides[candidateKey(hit)] ?? hit.voice })) }) : null, [analysis, confidenceFloor, excludedCandidateSet, candidateVoiceOverrides]);
   const suggestions = reviewedAnalysis && targetPart ? backingSuggestionsForPart(reviewedAnalysis, targetPart) : [];
@@ -351,6 +381,7 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
           <button type="button" onClick={()=>void removeTrack(item.id)}>{t("Remove track")}</button>
         </div>)}
       </div>
+      {tracks.length > 1 && <section className="song-builder-stem-alignment"><h3>Stem alignment assistant</h3><p>Compare transient timing against “{track.name}”. Each offset is a local proposal; the source files stay unchanged.</p><button type="button" disabled={aligning} onClick={()=>void analyzeStemAlignment()}>{aligning ? "Analyzing stems…" : "Suggest stem alignment"}</button>{alignmentSuggestions.length > 0 && <><div className="song-builder-analysis-measures">{alignmentSuggestions.map(item=><label key={item.id}><input type="checkbox" checked={selectedAlignmentIds.includes(item.id)} onChange={event=>setSelectedAlignmentIds(current=>event.target.checked?[...new Set([...current,item.id])]:current.filter(id=>id!==item.id))}/><span><strong>{item.name} · {Math.round(item.confidence*100)}% match</strong><small>Offset {item.offsetSeconds>=0?"+":""}{item.offsetSeconds.toFixed(2)} s · {item.currentDownbeat.toFixed(2)} → {item.suggestedDownbeat.toFixed(2)} s</small><small>{Math.abs(item.driftMsPerMinute)>20?`Possible drift · ${item.driftMsPerMinute>0?"+":""}${item.driftMsPerMinute} ms/min`:"No clear long-term drift detected"}</small></span></label>)}</div><button type="button" disabled={!selectedAlignmentIds.length} onClick={()=>{void Promise.all(alignmentSuggestions.filter(item=>selectedAlignmentIds.includes(item.id)).map(item=>{const source=tracks.find(candidate=>candidate.id===item.id);return source?changeReference({...source,downbeat:item.suggestedDownbeat}):Promise.resolve();})).then(()=>setMessage("Selected stem offsets applied. Recheck playback and adjust the downbeats manually if needed."));}}>Apply selected offsets ({selectedAlignmentIds.length})</button></>}</section>}
       <div className="song-builder-tool-fields">
         <label>{t("Backing track tempo · BPM")}<input type="number" min={40} max={200} step={1} value={track.bpm ?? ""} placeholder={analysis ? String(analysis.bpm) : t("Set or analyze")} onChange={(event) => {
           const raw = event.target.value;
@@ -385,6 +416,7 @@ export const SongBuilderBackingTrack = forwardRef<BackingTrackHandle, Props>(fun
         </>}
         <p role="status">{analysisMessage}</p>
       </details>
+      <details className="song-builder-extra song-builder-form-analysis"><summary>Suggest song form from reference audio</summary><p>Estimate broad section changes and likely repeated passages from energy and transient density. The labels are local audio heuristics; review them before replacing the arrangement.</p><button type="button" disabled={detectingStructure} onClick={()=>void analyzeStructure()}>{detectingStructure?"Analyzing form…":"Analyze section changes"}</button>{structureSuggestions.length>0&&<><ol className="song-builder-form-segments">{structureSuggestions.map(segment=><li key={`${segment.startMeasure}:${segment.endMeasure}`}><strong>{segment.name}</strong><span>Measures {segment.startMeasure}–{segment.endMeasure}</span><small>{Math.round(segment.confidence*100)}% confidence · energy {Math.round(segment.energy*100)}% · activity {Math.round(segment.density*100)}%{segment.repeatOf?` · possible repeat of ${segment.repeatOf} (${Math.round((segment.repeatConfidence??0)*100)}%)`:""}</small></li>)}</ol><button type="button" onClick={()=>onApplyStructure(structureSuggestions)}>Replace arrangement with this editable section draft</button></>}</details>
     </>}
     <p role="status">{message || t("Backing audio stays on this device and follows playback, seeking, and loops.")}</p>
   </section>;

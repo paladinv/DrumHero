@@ -26,13 +26,15 @@ export function parseCustomGrooves(raw: string | null): Groove[] {
       if (typeof candidate.id !== "string" || !candidate.id.startsWith("custom-") || seen.has(candidate.id) ||
           typeof candidate.name !== "string" || !candidate.name.trim() || candidate.name.length > 60 ||
           typeof candidate.description !== "string" || typeof candidate.style !== "string" ||
-          typeof candidate.focus !== "string" || ![4, 8, 12, 16, 20].includes(candidate.subdivision ?? 0) ||
-          !Number.isFinite(candidate.beats) || candidate.beats! <= 0 || (!Number.isInteger(cells) && !(candidate.subdivision === 20 && Number.isInteger(candidate.beats! * 2))) || cells > 512 ||
+          typeof candidate.focus !== "string" || !Number.isInteger(candidate.subdivision) || candidate.subdivision! < 4 || candidate.subdivision! > 240 || candidate.subdivision! % 4 !== 0 ||
+          !Number.isFinite(candidate.beats) || candidate.beats! <= 0 || !Number.isInteger(cells) || cells > 2048 ||
           !["Beginner", "Intermediate", "Advanced"].includes(candidate.level ?? "") ||
           !Number.isFinite(candidate.defaultBpm) || candidate.defaultBpm! < 40 || candidate.defaultBpm! > 200 ||
-          !Array.isArray(candidate.hits) || candidate.hits.length > 256 || !validFillRanges) return [];
-      const hits = candidate.hits.filter((hit) => Boolean(hit && Number.isInteger(hit.step) && hit.step >= 0 && hit.step < cells && voices.includes(hit.instrument) && (hit.sticking === undefined || hit.sticking === "R" || hit.sticking === "L") && (hit.articulation === undefined || ["flam", "drag", "buzz"].includes(hit.articulation)) && (hit.velocityTarget === undefined || Number.isFinite(hit.velocityTarget) && hit.velocityTarget >= 1 && hit.velocityTarget <= 127)))
-        .map((hit) => ({ step: hit.step, instrument: hit.instrument, accent: Boolean(hit.accent), ...(hit.sticking ? { sticking: hit.sticking } : {}), ...(hit.articulation ? { articulation: hit.articulation } : {}), ...(typeof hit.velocityTarget === "number" ? { velocityTarget: Math.round(hit.velocityTarget) } : {}) }));
+          !Array.isArray(candidate.hits) || candidate.hits.length > 2048 || !validFillRanges ||
+          (candidate.tupletLabel !== undefined && (typeof candidate.tupletLabel !== "string" || candidate.tupletLabel.length > 20)) ||
+          (candidate.tupletGroupSteps !== undefined && (!Number.isInteger(candidate.tupletGroupSteps) || candidate.tupletGroupSteps! < 1 || candidate.tupletGroupSteps! > cells))) return [];
+      const hits = candidate.hits.filter((hit) => Boolean(hit && Number.isInteger(hit.step) && hit.step >= 0 && hit.step < cells && voices.includes(hit.instrument) && (hit.sticking === undefined || hit.sticking === "R" || hit.sticking === "L") && (hit.articulation === undefined || ["flam", "drag", "buzz"].includes(hit.articulation)) && (hit.grace === undefined || hit.grace === true) && (hit.velocityTarget === undefined || Number.isFinite(hit.velocityTarget) && hit.velocityTarget >= 1 && hit.velocityTarget <= 127) && (hit.tuplet === undefined || hit.tuplet && Number.isInteger(hit.tuplet.actualNotes) && hit.tuplet.actualNotes >= 2 && hit.tuplet.actualNotes <= 32 && Number.isInteger(hit.tuplet.normalNotes) && hit.tuplet.normalNotes >= 1 && hit.tuplet.normalNotes <= 32 && hit.tuplet.actualNotes !== hit.tuplet.normalNotes)))
+        .map((hit) => ({ step: hit.step, instrument: hit.instrument, accent: Boolean(hit.accent), ...(hit.sticking ? { sticking: hit.sticking } : {}), ...(hit.articulation ? { articulation: hit.articulation } : {}), ...(typeof hit.velocityTarget === "number" ? { velocityTarget: Math.round(hit.velocityTarget) } : {}), ...(hit.tuplet ? { tuplet: { actualNotes: hit.tuplet.actualNotes, normalNotes: hit.tuplet.normalNotes } } : {}), ...(hit.grace ? { grace: true as const } : {}) }));
       if (hits.length !== candidate.hits.length) return [];
       seen.add(candidate.id);
       const low = Math.max(40, Math.min(200, candidate.tempoRange?.[0] ?? candidate.defaultBpm! - 25));
@@ -52,6 +54,8 @@ export function parseCustomGrooves(raw: string | null): Groove[] {
         feel: candidate.feel === "triplet" ? "triplet" : "straight",
         tags: Array.isArray(candidate.tags) ? candidate.tags.filter((tag): tag is string => typeof tag === "string").slice(0,12).map(tag=>tag.slice(0,40)) : [],
         ...(Array.isArray(trainerFillStepRanges) ? { trainerFillStepRanges: trainerFillStepRanges.map(range => [range[0], range[1]] as [number, number]) } : {}),
+        ...(candidate.tupletLabel ? { tupletLabel: candidate.tupletLabel } : {}),
+        ...(candidate.tupletGroupSteps ? { tupletGroupSteps: candidate.tupletGroupSteps } : {}),
         songPattern: candidate.songPattern && Array.isArray(candidate.songPattern.hits) && candidate.songPattern.hits.length <= 256 && candidate.songPattern.hits.every(hit => hit && Number.isInteger(hit.step) && hit.step >= 0 && hit.step < cells && ["kick","snare","hihat","openhat","ride","rimshot","tom","crash","cowbell","shaker","tambourine"].includes(hit.instrument)) ? { hits: candidate.songPattern.hits.map((hit): SongPartHit => ({ step:hit.step,instrument:hit.instrument,accent:hit.accent===true, velocity: typeof hit.velocity === "number" && Number.isFinite(hit.velocity) ? Math.max(1,Math.min(127,Math.round(hit.velocity))) : undefined,ghost:hit.ghost===true,sticking:hit.sticking==="R"||hit.sticking==="L"?hit.sticking:undefined,articulation:["normal","flam","drag","buzz","roll","choke","foot-splash"].includes(hit.articulation??"")?hit.articulation:undefined,timingOffsetMs:typeof hit.timingOffsetMs==="number"&&Number.isFinite(hit.timingOffsetMs)?Math.max(-1000,Math.min(1000,hit.timingOffsetMs)):undefined })) } : undefined,
         hits
       }];

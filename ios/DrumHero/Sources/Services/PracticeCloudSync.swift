@@ -453,7 +453,7 @@ struct NativePracticeCloudSyncView: View {
         let all = (try? modelContext.fetch(FetchDescriptor<PracticeSessionRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)]))) ?? []
         for stale in all.dropFirst(50) { modelContext.delete(stale) }
         let allTrainerRounds = (try? modelContext.fetch(FetchDescriptor<TrainerRoundRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)]))) ?? []
-        for stale in allTrainerRounds.dropFirst(50) { modelContext.delete(stale) }
+        for stale in allTrainerRounds.dropFirst(1_000) { modelContext.delete(stale) }
         do {
             try modelContext.save()
             try SightHistory.write(mergedSight)
@@ -500,7 +500,7 @@ struct NativePracticeCloudSyncView: View {
             guard let item = portableTrainerRound(raw), let id = item["id"] as? String else { return nil }
             return (id, item)
         })
-        for record in trainerRounds.prefix(50) {
+        for record in trainerRounds.prefix(1_000) {
             let playedAt = formatter.string(from: record.playedAt)
             let profile = record.inputProfile?.lowercased() ?? ""
             let source = profile.contains("midi") ? "midi" : profile.contains("audio") || profile.contains("microphone") ? "audio-voices" : "touch"
@@ -517,7 +517,7 @@ struct NativePracticeCloudSyncView: View {
             else if record.assessmentAdaptation == "standard" { item["adaptation"] = "standard" }
             trainerRoundsByID[record.id] = item
         }
-        let mergedTrainerRounds = trainerRoundsByID.values.sorted { ($0["playedAt"] as? String ?? "") > ($1["playedAt"] as? String ?? "") }.prefix(50)
+        let mergedTrainerRounds = trainerRoundsByID.values.sorted { ($0["playedAt"] as? String ?? "") > ($1["playedAt"] as? String ?? "") }.prefix(1_000)
         var trainer: [String: Any] = ["version": 2, "rounds": Array(mergedTrainerRounds), "latencyMs": 0,
             "midiMap": ["35": "kick", "36": "kick", "38": "snare", "40": "snare", "42": "hihat", "44": "hihat", "46": "hihat", "41": "tom", "43": "tom", "45": "tom", "47": "tom", "48": "tom", "49": "crash", "55": "crash", "57": "crash"], "deviceProfiles": [:]]
         if let routine = jsonObject(from: portableTrainerRoutineJSON) ?? cloudTrainer["routine"] { trainer["routine"] = routine }

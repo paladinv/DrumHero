@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { createDrumAudio, DEFAULT_DRUM_MIX, type DrumAudio, type DrumMixSettings } from "@/lib/audio";
+import { createDrumAudio, DEFAULT_DRUM_EFFECTS, DEFAULT_DRUM_MIX, type DrumAudio, type DrumEffectsSettings, type DrumMixSettings } from "@/lib/audio";
 import { CUSTOM_GROOVES_EVENT, readCustomGrooves, writeCustomGrooves } from "@/lib/custom-grooves";
 import { grooves } from "@/lib/curriculum";
 import { assertArrangementChangesAllowed, allSongs, emptySongLibrary, newSong, normalizeSong, readSongLibrary, songPartEvidenceFingerprint, writeSongLibrary, type ArrangementSaveOptions, type DrumPart, type DrumSong, type SongClip, type SongLibraryState, type SongSection } from "@/lib/song-library";
@@ -16,22 +16,24 @@ import { SongRightsChecklist } from "./SongRightsChecklist";
 import { makeSongRightsReview, songRightsReviewCurrent, songRightsSourceSignature } from "@/lib/song-library-rights";
 import { ARRANGEMENT_TEMPLATES, createArrangementTemplate, instantiateSavedArrangementTemplate, makeArrangementTemplateBackup, parseArrangementTemplateBackup, readSavedArrangementTemplates, writeSavedArrangementTemplates, type ArrangementTemplateId, type SavedArrangementTemplate } from "@/lib/song-builder-templates";
 import { makeSongProjectFile, MAX_PROJECT_SAMPLE_BYTES, readSongProjectFile, type SongBuilderProjectFile } from "@/lib/song-builder-project";
-import { deleteCustomSample, readCustomSampleRecords, readCustomSamples, replaceCustomSampleRecords, saveCustomSample, saveCustomSampleBlob, saveCustomSampleLayerBlob, type CustomSampleLayer, type CustomSampleRecord } from "@/lib/song-builder-samples";
+import { deleteCustomSample, deleteCustomSampleAlternate, readCustomSampleRecords, readCustomSamples, replaceCustomSampleAlternates, replaceCustomSampleRecords, saveCustomSample, saveCustomSampleAlternateBlob, saveCustomSampleBlob, saveCustomSampleLayerBlob, type CustomSampleLayer, type CustomSampleRecord } from "@/lib/song-builder-samples";
 import { deleteKitSampleSnapshot, readKitSampleSnapshot, saveKitSampleSnapshot } from "@/lib/song-builder-kit-presets";
 import { applyBuilderTake, arrangementStartTimes, builderTakeMeasureIndex, builderTakeMeasureKey, contextualFillMatch, fitGrooveToMeter, makeClipIndependent, mergeBuilderTakes, moveClipToSection, partToSavedGroove, previewGridChange, quantizeRecordedHit, splitClipAtRepeat, transformPhrase, type BuilderTake, type PhraseOperation, type RecordedBuilderHit } from "@/lib/song-builder-editing";
 import { deleteBuilderTake, readBuilderTakes, saveBuilderTake, readBuilderBacking, readBuilderBackings, saveBuilderBacking } from "@/lib/song-builder-storage";
 import { SongBuilderBackingTrack, type BackingTrackHandle } from "./SongBuilderBackingTrack";
+import type { ReferenceStructureSegment } from "@/lib/song-builder-audio-analysis";
 import { SongProgressHistory } from "./SongProgressHistory";
 import { SongBuilderMicRecorder } from "./SongBuilderMicRecorder";
 import { SongBuilderSampleEditor } from "./SongBuilderSampleEditor";
 import { SongBuilderReviewThreads } from "./SongBuilderReviewThreads";
 import { SongBuilderConstraintAssistant } from "./SongBuilderConstraintAssistant";
 import { SongBuilderRoundTripCheck } from "./SongBuilderRoundTripCheck";
-import { SongBuilderCollaboration } from "./SongBuilderCollaboration";
+import { SongBuilderCollaboration, type SharedTransportMessage } from "./SongBuilderCollaboration";
 import { SongCloudPanel } from "./SongCloudPanel";
 import { SongBuilderNotationNavigator, SongBuilderPatternCompare, SongBuilderTimeline, SongBuilderVersions } from "./SongBuilderWorkspace";
 import { packBuilderWorkspace, unpackBuilderWorkspace } from "@/lib/song-builder-backup";
 import { createSongShareUrl } from "@/lib/song-builder-share";
+import { IMPROVISATION_SONG_TRANSFER_KEY } from "@/lib/improvisation-song-builder";
 import { boundaryTransition, contextualizeFill, creativeVariation, expressionStrikes, morphDrumParts, phraseAwareEnding } from "@/lib/song-builder-creative";
 import { playbackTimeAtBeat, playbackTrack, scalePlaybackTrack, trimPlaybackTrack, type PlaybackTrack } from "@/lib/song-builder-playback";
 import { readSongBuilderPracticeSessions, saveSongBuilderPracticeSession, suggestPracticeTargets, type SongBuilderPracticeSession } from "@/lib/song-builder-practice-report";
@@ -95,7 +97,10 @@ async function applyCustomSamplesToAudio(audio: DrumAudio | null, records: Custo
     const primary = await audio.setCustomSample(voice, record?.blob ?? null);
     const soft = await audio.setCustomSample(voice, record?.softBlob ?? null, "soft");
     const accent = await audio.setCustomSample(voice, record?.accentBlob ?? null, "accent");
-    if (!primary || !soft || !accent) return false;
+    const primaryAlternates = await audio.setCustomSampleAlternates(voice, "primary", record?.alternates?.primary?.map(item => item.blob) ?? []);
+    const softAlternates = await audio.setCustomSampleAlternates(voice, "soft", record?.alternates?.soft?.map(item => item.blob) ?? []);
+    const accentAlternates = await audio.setCustomSampleAlternates(voice, "accent", record?.alternates?.accent?.map(item => item.blob) ?? []);
+    if (!primary || !soft || !accent || !primaryAlternates || !softAlternates || !accentAlternates) return false;
   }
   return true;
 }
@@ -252,6 +257,8 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const trackRef = useRef<PlaybackTrack | null>(null);
   const startAtRef = useRef(0);
   const countInStartRef = useRef(0);
+  const countInTotalBeatsRef = useRef(0);
+  const sharedTransportRef = useRef<SharedTransportMessage | null>(null);
   const lastCountRef = useRef(-1);
   const cueIndexRef = useRef(0);
   const previousPositionRef = useRef("");
@@ -568,7 +575,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   const fullSongBars=useMemo(()=>{const source=songs.find(song=>song.id===selectedSongId);return source?buildArrangementBars(source):[];},[songs,selectedSongId]);
   const songBarTimes=useMemo(()=>{const source=songs.find(item=>item.id===selectedSongId);const offset=(source?.referenceTempoMap?.length??0)>=2?mappedSeconds(0,source!.referenceTempoMap!,source!.bpm)*1000:0;return arrangementStartTimes(fullSongBars).map(ms=>ms+offset);},[fullSongBars,songs,selectedSongId]);
 
-  useEffect(() => { songRef.current = song ?? null; }, [song]);
+  useEffect(() => { songRef.current = song ?? null; audioRef.current?.setEffects(song?.effects ?? DEFAULT_DRUM_EFFECTS); }, [song]);
   useEffect(() => { setPracticeReports(song ? readSongBuilderPracticeSessions(song.id) : []); }, [song?.id]);
   useEffect(()=>{if(!selectedSongId)return;let active=true;
     try { localStorage.setItem("drum-hero:builder-last-song",selectedSongId); } catch { /* The library still saves independently. */ }
@@ -1028,6 +1035,37 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     setMessage(`${added} audio suggestions added to ${part.name}; existing notes at matching cells were preserved. Edit or undo them in the pattern grid.`);
   };
 
+  const applyAudioStructure = (segments: ReferenceStructureSegment[]) => {
+    if (!song || !segments.length || segments.length > 32) { setMessage("The detected form needs between one and 32 sections."); return; }
+    const beatPerMeasure = meterBeats(song.meter);
+    if (!Number.isFinite(beatPerMeasure) || beatPerMeasure <= 0 || beatPerMeasure > 32) { setMessage("This meter cannot be used to create an editable form draft."); return; }
+    let sections: SongSection[];
+    try { sections = segments.map(segment => {
+      const sectionBars = Math.max(1, segment.endMeasure - segment.startMeasure + 1);
+      const patternBars = Number.isInteger(beatPerMeasure * 2) ? 1 : 2;
+      const partBeats = beatPerMeasure * patternBars;
+      if (partBeats > 32 || !Number.isInteger(partBeats * 2)) throw new Error("This meter needs an unsupported pattern length for an editable form draft.");
+      const partId = uid();
+      const part: DrumPart = { id: partId, name: "Blank groove", bpm: song.bpm, beats: partBeats, subdivision: 16, meter: song.meter, hits: [] };
+      const clips: SongClip[] = [];
+      let repeats = Math.floor(sectionBars / patternBars);
+      while (repeats > 0) { const chunk = Math.min(64, repeats); clips.push({ id: uid(), partId, repeats: chunk }); repeats -= chunk; }
+      const tailBars = sectionBars % patternBars;
+      const parts = [part];
+      if (tailBars > 0) {
+        const tailBeats = beatPerMeasure * tailBars;
+        if (!Number.isInteger(tailBeats * 2)) throw new Error("This meter has a fractional measure that cannot be represented on the current editor grid.");
+        const tail: DrumPart = { id: uid(), name: "Short blank groove", bpm: song.bpm, beats: tailBeats, subdivision: 16, meter: song.meter, hits: [] };
+        parts.push(tail); clips.push({ id: uid(), partId: tail.id, repeats: 1 });
+      }
+      return { id: uid(), name: segment.name, kind: segment.kind, notes: `Section length and role suggested from the reference audio. ${segment.repeatOf ? `It may repeat ${segment.repeatOf}; verify the arrangement.` : ""} Add or insert drum grooves to complete this editable draft.`, parts, clips, repeats: 1, bpm: song.bpm, meter: song.meter };
+    }); } catch (error) { setMessage(error instanceof Error ? error.message : "This detected form cannot fit the current meter grid."); return; }
+    updateSong(current => ({ ...current, sections }));
+    const first = sections[0], clip = first?.clips?.[0];
+    setActiveSectionId(first?.id ?? ""); setActiveClipId(clip?.id ?? ""); setActivePartId(clip?.partId ?? "");
+    setMessage("Added the detected form as blank, editable sections. Undo restores the previous arrangement; add grooves to fill the draft.");
+  };
+
   const createSong = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!titleDraft.trim() || !artistDraft.trim()) return;
@@ -1226,7 +1264,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     if (!audioSetupRef.current) {
       audioSetupRef.current = (async () => {
         const customSamples = await readCustomSamples().catch(() => ({}));
-        return createDrumAudio(builderSettingsRef.current.mix, customSamples);
+        return createDrumAudio(builderSettingsRef.current.mix, customSamples, undefined, songRef.current?.effects ?? DEFAULT_DRUM_EFFECTS);
       })();
     }
     const audio = await audioSetupRef.current;
@@ -1724,7 +1762,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         const customSamples = await readCustomSamples().catch(() => ({}));
         const backing = includeExportBacking ? await readBuilderBackings(song.id) : [];
         if (includeExportBacking && !backing.length) throw new Error('Attach a backing track in Rehearse before including it in the WAV.');
-        downloadBlob(await arrangementWav(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed, builderSettings.humanizeVelocityAmount), swing, builderSettings.mix, customSamples, { metronome: includeExportClick, backing, backingOffsetSeconds: previewScope === 'song' ? (songBarTimes[0]??0)/1000 : (songBarTimes[fullSongBars.findIndex(bar=>bar.sectionId===previewScope)]??0)/1000, render: { sampleRate: builderSettings.audioExport.sampleRate, bitDepth: builderSettings.audioExport.bitDepth, normalizeToDbfs: builderSettings.audioExport.normalize ? builderSettings.audioExport.targetDbfs : undefined }, onProgress:setAudioExportProgress, shouldCancel:()=>cancelAudioExportRef.current }), `${name}.wav`);
+        downloadBlob(await arrangementWav(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed, builderSettings.humanizeVelocityAmount), swing, builderSettings.mix, customSamples, { metronome: includeExportClick, backing, effects: song.effects, backingOffsetSeconds: previewScope === 'song' ? (songBarTimes[0]??0)/1000 : (songBarTimes[fullSongBars.findIndex(bar=>bar.sectionId===previewScope)]??0)/1000, render: { sampleRate: builderSettings.audioExport.sampleRate, bitDepth: builderSettings.audioExport.bitDepth, normalizeToDbfs: builderSettings.audioExport.normalize ? builderSettings.audioExport.targetDbfs : undefined }, onProgress:setAudioExportProgress, shouldCancel:()=>cancelAudioExportRef.current }), `${name}.wav`);
       } else if (format === "stems") {
         cancelAudioExportRef.current = false;
         setAudioExportProgress({ completed: 0, total: 1, label: "Preparing stems…" });
@@ -1732,7 +1770,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         const customSamples = await readCustomSamples().catch(() => ({}));
         const backing = includeExportBacking ? await readBuilderBackings(song.id) : [];
         if (includeExportBacking && !backing.length) throw new Error('Attach a backing track in Rehearse before including it as a stem.');
-        const archive = await arrangementStemsZip(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed, builderSettings.humanizeVelocityAmount), swing, builderSettings.mix, customSamples, { metronome: includeExportClick, backing, backingOffsetSeconds: previewScope === 'song' ? (songBarTimes[0]??0)/1000 : (songBarTimes[fullSongBars.findIndex(bar=>bar.sectionId===previewScope)]??0)/1000, render: { sampleRate: builderSettings.audioExport.sampleRate, bitDepth: builderSettings.audioExport.bitDepth, normalizeToDbfs: builderSettings.audioExport.normalize ? builderSettings.audioExport.targetDbfs : undefined }, stemPrefix: builderSettings.audioExport.stemPrefix, onProgress: setAudioExportProgress, shouldCancel: () => cancelAudioExportRef.current });
+        const archive = await arrangementStemsZip(humanizeArrangementBars(bars, builderSettings.humanizeAmount, builderSettings.humanizeSeed, builderSettings.humanizeVelocityAmount), swing, builderSettings.mix, customSamples, { metronome: includeExportClick, backing, effects: song.effects, backingOffsetSeconds: previewScope === 'song' ? (songBarTimes[0]??0)/1000 : (songBarTimes[fullSongBars.findIndex(bar=>bar.sectionId===previewScope)]??0)/1000, render: { sampleRate: builderSettings.audioExport.sampleRate, bitDepth: builderSettings.audioExport.bitDepth, normalizeToDbfs: builderSettings.audioExport.normalize ? builderSettings.audioExport.targetDbfs : undefined }, stemPrefix: builderSettings.audioExport.stemPrefix, onProgress: setAudioExportProgress, shouldCancel: () => cancelAudioExportRef.current });
         downloadBlob(archive, `${name}-stems.zip`);
       } else {
         const pages = paginateNotation(bars,notation).length;
@@ -1817,8 +1855,9 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     const beatMs = 60_000 / firstBarBpm;
     if (now < startAt) {
       setPlaybackMode("count-in");
-      const beat = Math.max(0, Math.min(optionsRef.current.countInBeats - 1, Math.floor((now - countInStartRef.current) / beatMs)));
-      setCountIn(optionsRef.current.countInBeats - beat);
+      const totalBeats = countInTotalBeatsRef.current || optionsRef.current.countInBeats;
+      const beat = Math.max(0, Math.min(totalBeats - 1, Math.floor((now - countInStartRef.current) / beatMs)));
+      setCountIn(totalBeats - beat);
       const clickDuration=beatMs/Math.max(1,optionsRef.current.metronomeSubdivision);
       while(countInStartRef.current+(lastCountRef.current+1)*clickDuration<startAt && countInStartRef.current+(lastCountRef.current+1)*clickDuration<=now+120){
         lastCountRef.current++;const at=countInStartRef.current+lastCountRef.current*clickDuration;
@@ -1906,7 +1945,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     }
   };
 
-  const startPlayback = async (externalStart = false) => {
+  const startPlayback = async (externalStart = false, transportOffsetMs = 0, transportCountInEndsAt = 0, sharedTransportStart = false) => {
     if (!song) return;
     clearPreview();
     const scope = playScope === "song" ? undefined : playScope;
@@ -1945,9 +1984,15 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     const countBeatMs = 60_000 / (track.bars[0]?.bpm ?? song.bpm);
     const readyAt=monotonicNow();
     const externalClock=externalStart&&externalClockRef.current.startedAt!==null?externalClockRef.current:null;
-    const activeCountIn=externalStart?0:countInBeats;
-    countInStartRef.current = externalClock?.startedAt ?? readyAt;
-    startAtRef.current = externalClock ? externalClock.startedAt! + playbackTimeAtBeat(track,externalClock.pulseCount/24) : readyAt + countBeatMs * activeCountIn;
+    const sharedTransport = externalStart && sharedTransportStart ? sharedTransportRef.current : null;
+    const sharedTarget = sharedTransport ? fullSongBars[Math.max(0, Math.min(fullSongBars.length - 1, sharedTransport.barIndex))] : undefined;
+    const countInEndsAt = sharedTransport?.mode === "count-in" ? sharedTransport.sentAt + Math.max(0, sharedTransport.countInRemainingMs ?? 0) : transportCountInEndsAt;
+    const sharedOffset = sharedTransport?.mode === "playing" && sharedTarget ? Math.max(0, Date.now() - sharedTransport.sentAt) + sharedTransport.fraction * sharedTarget.beats * 60_000 / sharedTarget.bpm : transportOffsetMs;
+    const externalCountInMs = externalStart && countInEndsAt ? Math.max(0, countInEndsAt - Date.now()) : 0;
+    const activeCountIn=externalStart?Math.ceil(externalCountInMs/countBeatMs):countInBeats;
+    countInTotalBeatsRef.current=activeCountIn;
+    countInStartRef.current = externalClock?.startedAt ?? readyAt - (countBeatMs * activeCountIn - externalCountInMs);
+    startAtRef.current = externalClock ? externalClock.startedAt! + playbackTimeAtBeat(track,externalClock.pulseCount/24) : readyAt + (externalStart ? externalCountInMs : countBeatMs * activeCountIn) - Math.max(0, sharedOffset);
     pausedAtRef.current = 0;
     setCountIn(activeCountIn);
     setPlaybackMode(readyAt < startAtRef.current ? "count-in" : "playing");
@@ -2095,6 +2140,76 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
   }
 
   useEffect(()=>{seekToBarActionRef.current=seekToBar;});
+
+  const applyRemoteTransport = (remote: SharedTransportMessage) => {
+    sharedTransportRef.current = remote;
+    if (!fullSongBars.length) return;
+    const targetIndex = Math.max(0, Math.min(fullSongBars.length - 1, remote.barIndex));
+    const target = fullSongBars[targetIndex];
+    if (!target) return;
+    setLoop(remote.loop);
+    const mode = playbackModeRef.current;
+    if (remote.mode === "count-in") {
+      const countInEndsAt = remote.sentAt + Math.max(0, remote.countInRemainingMs ?? 0);
+      if (mode === "idle" || mode === "finished" || mode === "playing" || mode === "paused") {
+        if (mode === "playing" || mode === "paused") stopPlayback();
+        seekToBar(targetIndex);
+        window.setTimeout(() => { void startPlayback(true, 0, countInEndsAt, true); }, 0);
+      } else if (mode === "count-in") {
+        const remaining = Math.max(0, countInEndsAt - Date.now());
+        const beatMs = 60_000 / target.bpm;
+        const totalBeats = Math.ceil(remaining / beatMs);
+        const now = monotonicNow();
+        startAtRef.current = now + remaining;
+        countInTotalBeatsRef.current = totalBeats;
+        countInStartRef.current = startAtRef.current - totalBeats * beatMs;
+        lastCountRef.current = Math.floor((now - countInStartRef.current) / (beatMs / Math.max(1, optionsRef.current.metronomeSubdivision)));
+      }
+      return;
+    }
+    if (remote.mode === "loading") {
+      if (mode !== "idle" && mode !== "finished" && mode !== "loading") { stopPlayback(); seekToBar(targetIndex); }
+      else if ((position?.barIndex ?? seekBar ?? 0) !== targetIndex) seekToBar(targetIndex);
+      return;
+    }
+    if (remote.mode === "playing") {
+      const messageAge = Math.max(0, Date.now() - remote.sentAt);
+      const expectedOffset = messageAge + remote.fraction * target.beats * 60_000 / target.bpm;
+      if (mode === "idle" || mode === "finished") {
+        seekToBar(targetIndex);
+        window.setTimeout(() => { void startPlayback(true, expectedOffset, 0, true); }, 0);
+      } else {
+        if ((position?.barIndex ?? seekBar ?? 0) !== targetIndex) seekToBar(targetIndex);
+        if (playbackModeRef.current === "paused") resumePlayback();
+        else if (playbackModeRef.current === "playing") {
+          const currentTrack = trackRef.current;
+          const targetBar = currentTrack?.bars.find(bar => bar.index === targetIndex);
+          if (currentTrack && targetBar) {
+            const expected = targetBar.startsAt + remote.fraction * targetBar.duration + messageAge;
+            const actual = monotonicNow() - startAtRef.current;
+            const correction = Math.max(-60, Math.min(60, (expected - actual) * 0.4));
+            if (Math.abs(correction) > 2) startAtRef.current -= correction;
+          }
+        }
+      }
+      return;
+    }
+    if (remote.mode === "paused") {
+      if (playbackModeRef.current === "loading") { stopPlayback(); seekToBar(targetIndex); return; }
+      if ((position?.barIndex ?? seekBar ?? 0) !== targetIndex) seekToBar(targetIndex);
+      if (playbackModeRef.current === "playing") {
+        const currentTrack = trackRef.current;
+        const targetBar = currentTrack?.bars.find(bar => bar.index === targetIndex);
+        if (currentTrack && targetBar) startAtRef.current = monotonicNow() - targetBar.startsAt - remote.fraction * targetBar.duration;
+        pausePlayback();
+      } else if (playbackModeRef.current === "count-in") pausePlayback();
+      return;
+    }
+    if (remote.mode === "idle" || remote.mode === "finished") {
+      stopPlayback();
+      seekToBar(targetIndex);
+    }
+  };
 
   const focusPracticeMeasure=(index:number,reason:string)=>{
     if(index<0||index>=fullSongBars.length)return;
@@ -2417,15 +2532,22 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
     try {
       const records = await readCustomSampleRecords();
       const selectedCustom = records.filter((record) => builderSettings.mix.sampleIndex[record.instrument] < 0);
-      const sampleBytes = selectedCustom.reduce((sum, record) => sum + record.blob.size + (record.softBlob?.size ?? 0) + (record.accentBlob?.size ?? 0), 0);
+      const sampleBytes = selectedCustom.reduce((sum, record) => sum + record.blob.size + (record.softBlob?.size ?? 0) + (record.accentBlob?.size ?? 0) + Object.values(record.alternates ?? {}).flatMap(items => items ?? []).reduce((total, item) => total + item.blob.size, 0), 0);
       if (sampleBytes > MAX_PROJECT_SAMPLE_BYTES) throw new Error("The selected custom samples exceed the 24 MB project-file limit. Choose a smaller set of custom samples, then export again.");
-      const customSamples = Object.fromEntries(await Promise.all(selectedCustom.map(async (record) => [record.instrument, {
-        name: record.name,
-        type: record.blob.type || "audio/wav",
-        base64: await encodeSample(record.blob),
-        ...(record.softBlob ? { soft: { name: record.softName ?? "Soft layer", type: record.softBlob.type || "audio/wav", base64: await encodeSample(record.softBlob) } } : {}),
-        ...(record.accentBlob ? { accent: { name: record.accentName ?? "Accent layer", type: record.accentBlob.type || "audio/wav", base64: await encodeSample(record.accentBlob) } } : {})
-      }] as const))) as NonNullable<SongBuilderProjectFile["customSamples"]>;
+      const customSamples = Object.fromEntries(await Promise.all(selectedCustom.map(async (record) => {
+        const alternates = record.alternates ? Object.fromEntries(await Promise.all(Object.entries(record.alternates).map(async ([layer, samples]) => [
+          layer,
+          await Promise.all((samples ?? []).map(async item => ({ name: item.name, type: item.blob.type || "audio/wav", base64: await encodeSample(item.blob) })))
+        ]))) : undefined;
+        return [record.instrument, {
+          name: record.name,
+          type: record.blob.type || "audio/wav",
+          base64: await encodeSample(record.blob),
+          ...(record.softBlob ? { soft: { name: record.softName ?? "Soft layer", type: record.softBlob.type || "audio/wav", base64: await encodeSample(record.softBlob) } } : {}),
+          ...(record.accentBlob ? { accent: { name: record.accentName ?? "Accent layer", type: record.accentBlob.type || "audio/wav", base64: await encodeSample(record.accentBlob) } } : {}),
+          ...(alternates ? { alternates } : {})
+        }] as const;
+      }))) as NonNullable<SongBuilderProjectFile["customSamples"]>;
       const settings = structuredClone(builderSettings);
       for (const voice of SONG_INSTRUMENTS) {
         if (settings.mix.sampleIndex[voice] < 0 && !customSamples[voice]) settings.mix.sampleIndex[voice] = 0;
@@ -2484,6 +2606,10 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         const accentBlob = sample.accent ? decodeSample(sample.accent.base64, sample.accent.type) : undefined;
         if (accentBlob && sample.accent) record = await saveCustomSampleLayerBlob(voice, "accent", sample.accent.name, accentBlob);
         else if (record.accentBlob) { await deleteCustomSample(voice, "accent"); record = { ...record, accentName: undefined, accentBlob: undefined }; }
+        for (const layer of ["primary", "soft", "accent"] as const) {
+          const incoming = sample.alternates?.[layer]?.map(item => ({ name: item.name, blob: decodeSample(item.base64, item.type) })) ?? [];
+          record = await replaceCustomSampleAlternates(voice, layer, incoming);
+        }
         availableCustomSamples.add(voice);
         nextSampleNames[voice] = record.name;
         if (record.softName) nextSoftSampleNames[voice] = record.softName;
@@ -2491,7 +2617,8 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
         const primaryLoaded = audioRef.current ? await audioRef.current.setCustomSample(voice, record.blob) : true;
         const softLoaded = audioRef.current && record.softBlob ? await audioRef.current.setCustomSample(voice, record.softBlob, "soft") : true;
         const accentLoaded = audioRef.current && record.accentBlob ? await audioRef.current.setCustomSample(voice, record.accentBlob, "accent") : true;
-        if (!primaryLoaded || !softLoaded || !accentLoaded) {
+        const roundRobinLoaded = audioRef.current ? await Promise.all((["primary", "soft", "accent"] as const).map(layer => audioRef.current!.setCustomSampleAlternates(voice, layer, record.alternates?.[layer]?.map(item => item.blob) ?? []))).then(results => results.every(Boolean)) : true;
+        if (!primaryLoaded || !softLoaded || !accentLoaded || !roundRobinLoaded) {
           if (previousRecord) {
             await saveCustomSampleBlob(voice, previousRecord.name, previousRecord.blob);
             if (previousRecord.softBlob && previousRecord.softName) await saveCustomSampleLayerBlob(voice, "soft", previousRecord.softName, previousRecord.softBlob);
@@ -2501,6 +2628,10 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
             await audioRef.current?.setCustomSample(voice, previousRecord.blob);
             await audioRef.current?.setCustomSample(voice, previousRecord.softBlob ?? null, "soft");
             await audioRef.current?.setCustomSample(voice, previousRecord.accentBlob ?? null, "accent");
+            for (const layer of ["primary", "soft", "accent"] as const) {
+              await replaceCustomSampleAlternates(voice, layer, previousRecord.alternates?.[layer] ?? []);
+              await audioRef.current?.setCustomSampleAlternates(voice, layer, previousRecord.alternates?.[layer]?.map(item => item.blob) ?? []);
+            }
           } else {
             await deleteCustomSample(voice);
             await audioRef.current?.setCustomSample(voice, null);
@@ -2533,6 +2664,29 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
       setMessage(error instanceof Error ? error.message : "Could not import that song project.");
     }
   };
+
+  useEffect(() => {
+    if (!ready) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("fromImprovisation")) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const raw = sessionStorage.getItem(IMPROVISATION_SONG_TRANSFER_KEY);
+        if (!raw) { setMessage("There is no pending improvisation take to import."); return; }
+        sessionStorage.removeItem(IMPROVISATION_SONG_TRANSFER_KEY);
+        const project = readSongProjectFile(JSON.parse(raw));
+        if (!project) throw new Error("That improvisation take could not be prepared as an editable Song Builder project.");
+        const warnings = buildArrangementBars(project.song).length ? [] : ["This take has no playable measures yet."];
+        setProjectImportReview({ project, fileName: "Improvisation take", warnings });
+        setMessage(`Review “${project.song.title}” before importing it into Song Builder.`);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Could not receive that improvisation take.");
+      }
+    }, 0);
+    url.searchParams.delete("fromImprovisation");
+    window.history.replaceState(null, "", url);
+    return () => window.clearTimeout(timer);
+  }, [ready]);
 
   const importCustomSample = async (file?: File, layer: CustomSampleLayer = "primary") => {
     if (!file) return;
@@ -2591,6 +2745,23 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
       if (previous && audioRef.current) await audioRef.current.setCustomSample(kitSampleVoice, layer === "primary" ? previous.blob : layer === "soft" ? previous.softBlob ?? null : previous.accentBlob ?? null, layer);
       throw error;
     }
+  };
+
+  const saveCustomRoundRobinSample = async (layer: CustomSampleLayer, file: File) => {
+    const record = await saveCustomSampleAlternateBlob(kitSampleVoice, layer, file.name, file);
+    const loaded = await audioRef.current?.setCustomSampleAlternates(kitSampleVoice, layer, record.alternates?.[layer]?.map(item => item.blob) ?? []) ?? true;
+    if (!loaded) {
+      await deleteCustomSampleAlternate(kitSampleVoice, layer, (record.alternates?.[layer]?.length ?? 1) - 1);
+      throw new Error("The browser could not decode that alternate audio sample.");
+    }
+    changeBuilderSettings(current => ({ ...current, mix: { ...current.mix, sampleIndex: { ...current.mix.sampleIndex, [kitSampleVoice]: -1 } } }));
+  };
+
+  const removeCustomRoundRobinSample = async (layer: CustomSampleLayer, index: number) => {
+    await deleteCustomSampleAlternate(kitSampleVoice, layer, index);
+    const records = await readCustomSampleRecords();
+    const items = records.find(record => record.instrument === kitSampleVoice)?.alternates?.[layer]?.map(item => item.blob) ?? [];
+    if (audioRef.current && !await audioRef.current.setCustomSampleAlternates(kitSampleVoice, layer, items)) throw new Error("The remaining alternate samples could not be loaded.");
   };
 
   if (!ready) return <p>Loading Song Builder…</p>;
@@ -2711,8 +2882,8 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
       {song ? <div className="song-builder-main" role="region" aria-label="Song editor">
         <SongBuilderNotationNavigator key={song.id} song={song} bars={fullSongBars} view={notationView} onViewChange={setNotationView} options={builderSettings.notation} onOptionsChange={notation=>changeBuilderSettings(current=>({...current,notation}))} onScoreEdit={(barIndex,step,voice)=>toggleNotationNote(fullSongBars,barIndex,step,voice)} activeBar={scoreActiveBar} activeFraction={position?.fraction??0} range={[scoreRangeStart,scoreRangeEnd]} onRangeChange={(start,end)=>{stopPlayback();setPlayScope("song");setPracticeRangeStart(start+1);setPracticeRangeEnd(end+1);setLoop(true);}} onSeek={index=>{const bar=fullSongBars[index];seekToBar(index);if(bar){setActiveSectionId(bar.sectionId);setActiveClipId(bar.clipId??"");setActivePartId(bar.partId);}}} onPractice={()=>{stopPlayback();setPlayScope("song");setPracticeRangeStart(scoreRangeStart+1);setPracticeRangeEnd(scoreRangeEnd+1);setLoop(true);setSeekBar(scoreRangeStart);setWorkspace("rehearse");setMessage(`Practice measures ${scoreRangeStart+1}–${scoreRangeEnd+1}. Press Play to rehearse this score range.`);}} follow={followPlayhead}/>
         <SongBuilderTimeline song={song} bars={fullSongBars} loopBounds={fractionalLoop?loopBounds:[0,fullSongBars.length]} loopDisabled={!['idle','finished'].includes(playbackMode)} onLoopChange={bounds=>{setLoopBounds(bounds);setFractionalLoop(true);setLoop(true);setPlayScope('song');}} activeBar={position?.barIndex??seekBar??0} onSeek={seekToBar} onSelect={(id,clipId)=>{setActiveSectionId(id);setActiveClipId(clipId??'');const selected=song.sections.find(s=>s.id===id);setActivePartId(clipId?sectionClips(selected!).find(c=>c.id===clipId)?.partId??'':'');setSelectedCells([]);}} onMove={(sourceId,clipId,targetId)=>{updateSong(current=>moveClipToSection(current,sourceId,clipId,targetId));setMessage('Clip moved to the selected section as an independent pattern.');}} follow={followPlayhead} onFollow={setFollowPlayhead}/><SongBuilderProjectChecklist items={builderSettings.projectChecklist} onChange={items=>changeBuilderSettings(current=>({...current,projectChecklist:items}))}/><SongBuilderHealthCheck song={song} bars={fullSongBars} mix={builderSettings.mix} sampleNames={customSampleNames} notation={builderSettings.notation} onNavigate={(targetWorkspace,selector)=>{setWorkspace(targetWorkspace);window.setTimeout(()=>document.querySelector(selector)?.scrollIntoView({behavior:"smooth",block:"center"}),80);}}/><SongBuilderArrangementAutomation points={song.arrangementAutomation} bars={fullSongBars} voices={BUILDER_VOICES} labels={VOICE_LABEL} onChange={points=>updateSong(current=>({...current,arrangementAutomation:points.length?points:undefined}))}/><SongBuilderPatternCompare key={song.id} song={song} mix={builderSettings.mix} swing={swing}/><SongBuilderArrangementFeedback song={song} bars={fullSongBars}/><SongBuilderArrangementSuggestions song={song} previewing={previewSourceId==='arrangement-form-preview'} onPreview={sections=>void previewArrangementForm(sections)} onApply={next=>{persistSong(next);setMessage('Arrangement form added as independent, editable sections.');}}/><SongBuilderConstraintAssistant song={song} previewing={previewSourceId==='arrangement-form-preview'} onPreview={sections=>void previewArrangementForm(sections)} onApply={next=>{persistSong(next);setMessage('Arrangement draft added as independent, editable sections.');}}/>
-        <SongBuilderCueList bars={fullSongBars} onSeek={seekToBar}/><details className="card song-builder-cloud-tools"><summary>Cloud sync and live collaboration</summary><SongCloudPanel state={library} apply={applyCloudLibrary}/><SongBuilderCollaboration song={song} sectionId={section?.id??""} partId={part?.id??""} cursor={selectedCell} onRemoteSong={incoming=>{const current=songRef.current;if(!current||current.id!==incoming.id)return;persistSong(incoming,false,true,true);setSavedMessage("Live collaborator edits received. Review and save them through cloud sync when ready.");}}/></details>
-        {song.bundled?<section className="card song-builder-backing"><h2>Backing track</h2><p>Create a personal copy to attach local audio to this example.</p><button type="button" onClick={()=>persistSong(copyAsPersonalSong(song),false)}>Create personal copy</button></section>:<SongBuilderBackingTrack ref={backingRef} key={`backing-${song.id}-${assetRevision}`} songId={song.id} targetPart={part??null} bars={fullSongBars} anchors={song.referenceTempoMap??[]} songBpm={song.bpm} onAnchorsChange={anchors=>{const normalized=normalizeTempoAnchors(anchors);if(normalized.length!==anchors.length){setMessage("Tempo anchors must increase in time and stay between 40 and 200 BPM.");return;}updateSong(current=>({...current,referenceTempoMap:normalized}));}} onApplyTempo={bpm=>{updateSong(current=>({...current,bpm}));setMessage(`Song default tempo set to ${bpm} BPM. Explicit section tempos remain unchanged.`);}} onApplyHits={applyBackingHits} onApplyArrangementHits={groups=>{try{const byPattern=new Map<string,typeof groups>();for(const group of groups){const key=`${group.sectionId}:${group.partId}`;byPattern.set(key,[...(byPattern.get(key)??[]),group]);}updateSong(current=>{let sections=current.sections;for(const grouped of byPattern.values()){const first=grouped[0];if(!first)continue;const index=sections.findIndex(item=>item.id===first.sectionId),target=sections[index];if(!target)continue;const hits=grouped.flatMap(item=>item.hits);const next=editLinkedPart(target,first.partId,source=>{const merged=new Map(source.hits.map(hit=>[`${hit.instrument}:${hit.step}`,hit]));for(const hit of hits)if(!merged.has(`${hit.instrument}:${hit.step}`))merged.set(`${hit.instrument}:${hit.step}`,hit);if(merged.size>256)throw new Error(`Suggestions exceed the 256-note limit for ${source.name}.`);return {...source,hits:[...merged.values()].sort((a,b)=>a.step-b.step||a.instrument.localeCompare(b.instrument))};});sections=sections.map((item,itemIndex)=>itemIndex===index?next:item);}return {...current,sections};});setMessage(`Added backing-track suggestions across ${groups.length} measures. Repeated uses of the same pattern share its inserted notes; undo to reverse the import.`);}catch(error){setMessage(error instanceof Error?error.message:"Could not add the full-song suggestions.");}}}/>}
+        <SongBuilderCueList bars={fullSongBars} onSeek={seekToBar}/><details className="card song-builder-cloud-tools"><summary>Cloud sync and live collaboration</summary><SongCloudPanel state={library} apply={applyCloudLibrary}/><SongBuilderCollaboration song={song} sectionId={section?.id??""} partId={part?.id??""} cursor={selectedCell} transport={{mode:playbackMode,barIndex:position?.barIndex??seekBar??0,fraction:position?.fraction??0,loop,countInRemainingMs:playbackMode==="count-in"?Math.max(0,startAtRef.current-monotonicNow()):undefined}} onRemoteTransport={applyRemoteTransport} onStopFollowing={()=>{sharedTransportRef.current=null;}} onRemoteSong={incoming=>{const current=songRef.current;if(!current||current.id!==incoming.id)return;persistSong(incoming,false,true,true);setSavedMessage("Live collaborator edits received. Review and save them through cloud sync when ready.");}}/></details>
+        {song.bundled?<section className="card song-builder-backing"><h2>Backing track</h2><p>Create a personal copy to attach local audio to this example.</p><button type="button" onClick={()=>persistSong(copyAsPersonalSong(song),false)}>Create personal copy</button></section>:<SongBuilderBackingTrack ref={backingRef} key={`backing-${song.id}-${assetRevision}`} songId={song.id} targetPart={part??null} bars={fullSongBars} anchors={song.referenceTempoMap??[]} songBpm={song.bpm} songMeter={song.meter} onApplyStructure={applyAudioStructure} onAnchorsChange={anchors=>{const normalized=normalizeTempoAnchors(anchors);if(normalized.length!==anchors.length){setMessage("Tempo anchors must increase in time and stay between 40 and 200 BPM.");return;}updateSong(current=>({...current,referenceTempoMap:normalized}));}} onApplyTempo={bpm=>{updateSong(current=>({...current,bpm}));setMessage(`Song default tempo set to ${bpm} BPM. Explicit section tempos remain unchanged.`);}} onApplyHits={applyBackingHits} onApplyArrangementHits={groups=>{try{const byPattern=new Map<string,typeof groups>();for(const group of groups){const key=`${group.sectionId}:${group.partId}`;byPattern.set(key,[...(byPattern.get(key)??[]),group]);}updateSong(current=>{let sections=current.sections;for(const grouped of byPattern.values()){const first=grouped[0];if(!first)continue;const index=sections.findIndex(item=>item.id===first.sectionId),target=sections[index];if(!target)continue;const hits=grouped.flatMap(item=>item.hits);const next=editLinkedPart(target,first.partId,source=>{const merged=new Map(source.hits.map(hit=>[`${hit.instrument}:${hit.step}`,hit]));for(const hit of hits)if(!merged.has(`${hit.instrument}:${hit.step}`))merged.set(`${hit.instrument}:${hit.step}`,hit);if(merged.size>256)throw new Error(`Suggestions exceed the 256-note limit for ${source.name}.`);return {...source,hits:[...merged.values()].sort((a,b)=>a.step-b.step||a.instrument.localeCompare(b.instrument))};});sections=sections.map((item,itemIndex)=>itemIndex===index?next:item);}return {...current,sections};});setMessage(`Added backing-track suggestions across ${groups.length} measures. Repeated uses of the same pattern share its inserted notes; undo to reverse the import.`);}catch(error){setMessage(error instanceof Error?error.message:"Could not add the full-song suggestions.");}}}/>}
       {song && <><SongBuilderClipboard song={song} section={section} onChange={next=>updateSong(current=>({...current,sections:next.sections,referenceTempoMap:next.referenceTempoMap}))} onMessage={setMessage}/><SongBuilderTempoMap song={song} bars={fullSongBars} onChange={next=>updateSong(current=>({...current,sections:next.sections,referenceTempoMap:next.referenceTempoMap}))}/><SongBuilderTempoAutomation key={section?.id??'no-section'} section={section??null} baseBpm={song.bpm} measureCount={Math.max(1,fullSongBars.filter(bar=>bar.sectionId===section?.id&&bar.sectionRepeat===1).length)} onChange={next=>updateSection(next.id,current=>({...current,tempoRamp:next.tempoRamp,tempoPoints:next.tempoPoints}))}/><SongBuilderStorage key={`storage-${song.id}-${assetRevision}`} songId={song.id} onBackup={()=>void exportProjectFile()} onCleanup={()=>{setAssetRevision(n=>n+1);void readBuilderTakes(song.id).then(setTakes).catch(()=>setMessage('Could not refresh takes.'));}}/></>}
       {song && <details className="song-builder-more-tools card" open={workspace==="rehearse"}>
         <summary>Recording, practice, mixer, and export settings</summary>
@@ -2737,6 +2908,17 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
           <section className="song-builder-practice-report" aria-label="Local rehearsal report"><h3>Rehearsal report</h3><p>Practice sessions are stored on this device. Each run records time spent playing, measures reached, tempo range, and manual seeks.</p>{practiceReports.length ? <><p><strong>{practiceReports.length}</strong> recent sessions · {Math.round(practiceReports.reduce((sum,item)=>sum+item.durationMs,0)/60000)} active minutes · {practiceReports.filter(item=>item.completed).length} completed runs</p><div className="song-builder-practice-targets"><strong>Suggested focus targets</strong><p>Ranking blends measures you have revisited with density, offbeat notes, and ornamentation.</p>{practiceTargets.map(target=><button type="button" key={target.measure} onClick={()=>focusPracticeMeasure(target.index,target.reason)}>Measure {target.measure} · {target.reason}</button>)}</div>{(()=>{const totals=new Map<string,number>();for(const report of practiceReports)for(const [measure,count] of Object.entries(report.measureVisits))totals.set(measure,(totals.get(measure)??0)+count);const focus=[...totals.entries()].sort((a,b)=>b[1]-a[1]).slice(0,3);return focus.length>0&&<div className="song-builder-actions"><strong>Most rehearsed measures:</strong>{focus.map(([measure,count])=><button type="button" key={measure} onClick={()=>{const index=Math.max(0,Math.min(fullSongBars.length-1,Number(measure)-1));stopPlayback();setPracticeRangeStart(index+1);setPracticeRangeEnd(index+1);setPlayScope("song");setLoop(true);setSeekBar(index);setMessage(`Practice range set to measure ${index+1}. Press Play to rehearse it.`);}}>Measure {measure} · {count} passes</button>)}</div>;})()}<ul>{practiceReports.slice(0,5).map(report=><li key={report.id}><strong>{new Date(report.startedAt).toLocaleString()}</strong><span>{Math.floor(report.durationMs/60000)}:{String(Math.floor(report.durationMs/1000)%60).padStart(2,"0")} active · {Object.keys(report.measureVisits).length} measures · {report.startBpm}→{report.endBpm} BPM · {report.manualSeeks} seeks · {report.completed?"completed":"stopped"}</span></li>)}</ul></> : <p>No rehearsal sessions yet. Start playback to build a report.</p>}<Link className="button-secondary" href={section&&part?`/trainer?pattern=${encodeURIComponent(`song:${song.id}:${section.id}:${part.id}`)}`:"/trainer"}>Open active pattern in Trainer</Link></section>
           <section className="song-builder-mixer">
             <h3>Drum kit mixer</h3>
+            <section className="song-builder-effects" aria-label="Master drum effects">
+              <h4>Drum bus effects</h4>
+              <p>These song-level effects shape the live drum preview and carry through to WAV and drum stem exports.</p>
+              <div className="song-builder-tool-fields">
+                <label>Room reverb · {song.effects?.room ?? 0}%<input type="range" min={0} max={100} step={1} value={song.effects?.room ?? 0} onChange={event=>{const room=Number(event.target.value);updateSong(current=>({...current,effects:{...(current.effects??DEFAULT_DRUM_EFFECTS),room}}));}}/></label>
+                <label>Low shelf · {song.effects?.low ?? 0} dB<input type="range" min={-12} max={12} step={1} value={song.effects?.low ?? 0} onChange={event=>{const low=Number(event.target.value);updateSong(current=>({...current,effects:{...(current.effects??DEFAULT_DRUM_EFFECTS),low}}));}}/></label>
+                <label>High shelf · {song.effects?.high ?? 0} dB<input type="range" min={-12} max={12} step={1} value={song.effects?.high ?? 0} onChange={event=>{const high=Number(event.target.value);updateSong(current=>({...current,effects:{...(current.effects??DEFAULT_DRUM_EFFECTS),high}}));}}/></label>
+                <label>Compression · {song.effects?.compression ?? 0}%<input type="range" min={0} max={100} step={1} value={song.effects?.compression ?? 0} onChange={event=>{const compression=Number(event.target.value);updateSong(current=>({...current,effects:{...(current.effects??DEFAULT_DRUM_EFFECTS),compression}}));}}/></label>
+              </div>
+              <button type="button" className="button-secondary" disabled={!song.effects} onClick={()=>updateSong(current=>({...current,effects:undefined}))}>Reset drum effects</button>
+            </section>
             <div className="song-builder-tool-fields"><label>Load saved kit<select value={kitPresetChoice} onChange={(event) => void applyKitPreset(event.target.value)}><option value="">Choose a kit preset…</option>{builderSettings.kitPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name} · samples and mix</option>)}</select></label><button type="button" disabled={!kitPresetChoice} onClick={()=>void applyKitPreset(kitPresetChoice)}>Apply saved kit</button><button type="button" disabled={!kitPresetChoice} onClick={()=>void removeKitPreset(kitPresetChoice)}>Delete kit preset</button></div><details className="song-builder-kit-ab"><summary>A/B compare kit presets</summary><p>The selected pattern plays twice with each preset, including its saved primary, soft, and accent samples.</p><div className="song-builder-tool-fields"><label>Kit A<select value={kitCompareA} onChange={event=>setKitCompareA(event.target.value)}><option value="">Choose preset A</option>{builderSettings.kitPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label><label>Kit B<select value={kitCompareB} onChange={event=>setKitCompareB(event.target.value)}><option value="">Choose preset B</option>{builderSettings.kitPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label></div><div className="song-builder-actions"><button type="button" disabled={!part||!kitCompareA||!['idle','finished'].includes(playbackMode)} aria-pressed={previewSourceId===`kit-a:${kitCompareA}`} onClick={()=>void auditionKitPreset(kitCompareA,"a")}>{previewSourceId===`kit-a:${kitCompareA}`?"Stop kit A":"Audition kit A"}</button><button type="button" disabled={!part||!kitCompareB||!['idle','finished'].includes(playbackMode)} aria-pressed={previewSourceId===`kit-b:${kitCompareB}`} onClick={()=>void auditionKitPreset(kitCompareB,"b")}>{previewSourceId===`kit-b:${kitCompareB}`?"Stop kit B":"Audition kit B"}</button></div></details>
             <div className="song-builder-mix-head"><span>Voice</span><span>Level</span><span>Pan</span><span>Sample</span><span>Mute</span><span>Solo</span></div>
             {SONG_INSTRUMENTS.map((voice) => <div className="song-builder-mix-row" key={voice}>
@@ -2749,7 +2931,7 @@ export function SongBuilder({ initialSongId = "" }: { initialSongId?: string }) 
             </div>)}
             <div className="song-builder-tool-actions"><label>Sample voice<select value={kitSampleVoice} onChange={(event) => setKitSampleVoice(event.target.value as SongInstrument)}>{SONG_INSTRUMENTS.map((voice) => <option key={voice} value={voice}>{VOICE_LABEL[voice]}</option>)}</select></label><label>Import primary sample<input type="file" accept="audio/*" onChange={(event) => void importCustomSample(event.target.files?.[0], "primary")} /></label><label>Soft velocity layer · below 48<input type="file" accept="audio/*" disabled={!customSampleNames[kitSampleVoice]} onChange={(event) => void importCustomSample(event.target.files?.[0], "soft")} /></label><label>Accent velocity layer · 96+<input type="file" accept="audio/*" disabled={!customSampleNames[kitSampleVoice]} onChange={(event) => void importCustomSample(event.target.files?.[0], "accent")} /></label><button type="button" disabled={!customSoftSampleNames[kitSampleVoice]} onClick={() => { void deleteCustomSample(kitSampleVoice, "soft").then(() => audioRef.current?.setCustomSample(kitSampleVoice, null, "soft")).then(() => { setCustomSoftSampleNames(current => { const next = { ...current }; delete next[kitSampleVoice]; return next; }); setMessage(`${VOICE_LABEL[kitSampleVoice]} soft layer removed.`); }).catch(() => setMessage("Could not remove that soft layer.")); }}>Remove soft layer{customSoftSampleNames[kitSampleVoice] ? ` · ${customSoftSampleNames[kitSampleVoice]}` : ""}</button><button type="button" disabled={!customAccentSampleNames[kitSampleVoice]} onClick={() => { void deleteCustomSample(kitSampleVoice, "accent").then(() => audioRef.current?.setCustomSample(kitSampleVoice, null, "accent")).then(() => { setCustomAccentSampleNames(current => { const next = { ...current }; delete next[kitSampleVoice]; return next; }); setMessage(`${VOICE_LABEL[kitSampleVoice]} accent layer removed.`); }).catch(() => setMessage("Could not remove that accent layer.")); }}>Remove accent layer{customAccentSampleNames[kitSampleVoice] ? ` · ${customAccentSampleNames[kitSampleVoice]}` : ""}</button><button type="button" onClick={() => void removeCustomSample()} disabled={!customSampleNames[kitSampleVoice]}>Remove custom sample and layers</button></div>
             <div className="song-builder-tool-fields song-builder-sound-shaping"><label>{VOICE_LABEL[kitSampleVoice]} pitch · {builderSettings.mix.pitch[kitSampleVoice]} semitones<input type="range" min={-12} max={12} step={1} value={builderSettings.mix.pitch[kitSampleVoice]} disabled={!['idle','finished'].includes(playbackMode)} onChange={event=>changeBuilderSettings(current=>({...current,mix:{...current.mix,pitch:{...current.mix.pitch,[kitSampleVoice]:Number(event.target.value)}}}))}/></label><label>{VOICE_LABEL[kitSampleVoice]} decay · {Math.round(builderSettings.mix.decay[kitSampleVoice]*100)}%<input type="range" min={5} max={100} step={5} value={Math.round(builderSettings.mix.decay[kitSampleVoice]*100)} disabled={!['idle','finished'].includes(playbackMode)} onChange={event=>changeBuilderSettings(current=>({...current,mix:{...current.mix,decay:{...current.mix.decay,[kitSampleVoice]:Number(event.target.value)/100}}}))}/></label></div>
-            <SongBuilderSampleEditor key={`${kitSampleVoice}:${builderSettings.mix.sampleIndex[kitSampleVoice]}`} voice={kitSampleVoice} sampleIndex={builderSettings.mix.sampleIndex[kitSampleVoice]} names={{primary:customSampleNames[kitSampleVoice],soft:customSoftSampleNames[kitSampleVoice],accent:customAccentSampleNames[kitSampleVoice]}} onSave={saveEditedCustomSample}/>
+            <SongBuilderSampleEditor key={`${kitSampleVoice}:${builderSettings.mix.sampleIndex[kitSampleVoice]}`} voice={kitSampleVoice} sampleIndex={builderSettings.mix.sampleIndex[kitSampleVoice]} names={{primary:customSampleNames[kitSampleVoice],soft:customSoftSampleNames[kitSampleVoice],accent:customAccentSampleNames[kitSampleVoice]}} onSave={saveEditedCustomSample} onSaveAlternate={saveCustomRoundRobinSample} onDeleteAlternate={removeCustomRoundRobinSample}/>
             <p>Import up to 12 MB per layer. Soft samples play below velocity 48, the primary sample from 48–95, and the accent layer at 96+. Pitch and decay affect playback and WAV/stem renders. Open hi-hats are choked when another hi-hat voice plays.</p>
             <details className="song-builder-custom-voices"><summary>Custom and extra percussion lanes</summary><p>Add up to eight independent custom lanes. Each lane appears in the grid, staff, mixer, MIDI map, playback and exports. Choose its sample, MIDI note and staff position below.</p><div className="song-builder-tool-actions"><button type="button" disabled={activeCustomVoiceIds.length>=customVoiceIds.length} onClick={addCustomVoice}>Add custom lane</button><span>{activeCustomVoiceIds.length} of {customVoiceIds.length} custom lanes in use</span></div>{(["cowbell", "shaker", "tambourine", ...activeCustomVoiceIds] as SongInstrument[]).map(voice=><div className="song-builder-custom-lane" key={voice}><label>{BASE_VOICE_LABEL[voice]} lane name<input maxLength={40} value={song.voiceLabels?.[voice]??""} placeholder={BASE_VOICE_LABEL[voice]} onChange={event=>{const value=event.target.value.trim().slice(0,40);updateSong(current=>{const voiceLabels={...current.voiceLabels};if(value)voiceLabels[voice]=value;else delete voiceLabels[voice];return {...current,voiceLabels:Object.keys(voiceLabels).length?voiceLabels:undefined};});}}/></label>{customVoiceIds.indexOf(voice)>=4&&<button type="button" onClick={()=>removeCustomVoice(voice)}>Remove lane</button>}</div>)}</details>
             <div className="song-builder-tool-actions"><label>Save kit preset<input maxLength={40} value={kitPresetName} onChange={(event) => setKitPresetName(event.target.value)} placeholder="Warm club kit" /></label><button type="button" onClick={()=>void saveKitPreset()} disabled={!kitPresetName.trim()}>Save samples and mixer as preset</button></div>

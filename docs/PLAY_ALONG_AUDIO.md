@@ -6,7 +6,7 @@ The form builder includes six original starting arrangements: a 24-bar rock vers
 
 Import limits are 60 MiB per audio file and 120 MiB for the complete Play-Along stem set. The global **Manage local audio storage** panel lists these files alongside Song Library and Trainer recordings, shows their byte sizes, and offers individual export and confirmed deletion. Removing the offline page download leaves imported audio alone.
 
-For each stem, users can add a source and rights note. Drum Hero asks the user to confirm that they own or have permission to use imported audio, but it does not verify ownership, the license, or the notes. **Export rights note** creates a small JSON sidecar; **Export original** saves the audio file separately. Review both files before sharing them.
+For each stem, users can add a source and rights note. Drum Hero asks the user to confirm that they own or have permission to use imported audio, but it does not verify ownership, the license, or the notes. **Export rights note** creates a small JSON sidecar; **Export original** saves the audio file separately. Review both files before sharing them. Exporting a package with imported audio is blocked until every stem has both a source or attribution and a license or permission note; this is a completeness check, not independent rights verification.
 
 **Export full Play-Along package** creates one .drumhero file containing the active style, form, section, tempo, synthesized mix settings, audio stems, downbeat offsets, stem volumes, and source and rights notes. **Import full Play-Along package** restores those settings and stems on this device after a confirmation. Importing audio requires confirming permission again. The package is a portable, uncompressed Drum Hero format; it does not transcode audio or verify rights. Inspect its attribution and permission notes before sharing or using its audio.
 
@@ -18,7 +18,7 @@ Imported audio and its notes remain in this browser's IndexedDB; active Play-Alo
 - Align two stems with different leading silence, preview each, and check synchronization over a full form with section tempo changes and loop wraparound.
 - Confirm the browser storage limit rejects files above the per-file or combined limit without leaving partial records.
 - Export an original and its rights note, then verify the notes identify the matching filename and retain the source and permission text.
-- Export a package with multiple stems and per-section tempos; import it on a clean browser profile and compare the form, mix, audio, offsets, volumes, and attribution.
+- Confirm package export stays blocked while any imported stem is missing source or rights notes, then add notes and export a package with multiple stems and per-section tempos; import it on a clean browser profile and compare the form, mix, audio, offsets, volumes, and attribution.
 - Confirm a package import requires permission confirmation, warns that current settings and stems will be replaced, and leaves the existing project untouched if the user cancels.
 - Reject a malformed, truncated, unsupported-version, oversized, or non-audio package without replacing saved stems.
 - Delete one stem from the mixer and multiple stems from **Manage local audio storage**; verify other stems, songs, and recordings remain available.

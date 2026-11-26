@@ -44,6 +44,25 @@ enum NativeMIDICalibration {
     }
 }
 
+enum NativeMIDIVelocityCalibration {
+    private static func key(for sourceID: String, voice: DrumVoice) -> String { "drumHero.midiVelocity.(sourceID).(voice.rawValue)" }
+    static func range(for sourceID: String, voice: DrumVoice) -> (soft: Int, accent: Int)? {
+        guard let values = UserDefaults.standard.dictionary(forKey: key(for: sourceID, voice: voice)) as? [String: Int],
+              let soft = values["soft"], let accent = values["accent"], (1...127).contains(soft), (1...127).contains(accent), accent >= soft + 10 else { return nil }
+        return (soft, accent)
+    }
+    @discardableResult static func save(_ soft: Int, accent: Int, for sourceID: String, voice: DrumVoice) -> Bool {
+        guard !sourceID.isEmpty, (1...127).contains(soft), (1...127).contains(accent), accent >= soft + 10 else { return false }
+        UserDefaults.standard.set(["soft": soft, "accent": accent], forKey: key(for: sourceID, voice: voice))
+        return true
+    }
+    static func normalized(_ velocity: Int, for sourceID: String, voice: DrumVoice) -> Int? {
+        guard let range = range(for: sourceID, voice: voice) else { return nil }
+        let fraction = min(1, max(0, Double(velocity - range.soft) / Double(range.accent - range.soft)))
+        return Int((45 + fraction * 60).rounded())
+    }
+}
+
 private func decodeMIDIInputEvents(_ eventList: UnsafePointer<MIDIEventList>) -> [MIDIInputEvent] {
     guard eventList.pointee.numPackets > 0,
           let packetOffset = MemoryLayout<MIDIEventList>.offset(of: \.packet) else { return [] }

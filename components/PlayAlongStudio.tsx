@@ -278,6 +278,11 @@ export function PlayAlongStudio() {
 
   const exportPackage = () => {
     try {
+      const mixer = backingTrackRef.current;
+      const stems = mixer?.getStems() ?? [];
+      if (stems.length && !mixer?.isRightsConfirmed()) throw new Error(t('Confirm that you own or have permission to use these audio files.'));
+      const rightsReview = mixer?.shareReadiness() ?? { ready: true, unreviewed: 0 };
+      if (!rightsReview.ready) throw new Error(t('Add a source or attribution plus a license or permission note to every imported stem before exporting a shareable package.'));
       const blob = createPlayAlongPackage({
         name: arrangementName,
         style,

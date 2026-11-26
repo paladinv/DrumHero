@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { changeTrainerTake, type SavedTrainerTake } from "@/lib/trainer-take-library";
-import { parseCoachFeedback, parseCoachTakePackage, TRAINER_COACH_MAX_BYTES, type CoachComment, type CoachFeedback, type CoachTakePackage } from "@/lib/trainer-coach-review";
+import { parseCoachFeedback, parseCoachTakePackage, trainerCoachLocation, TRAINER_COACH_MAX_BYTES, type CoachComment, type CoachFeedback, type CoachTakePackage } from "@/lib/trainer-coach-review";
+import type { Instrument } from "@/lib/types";
+import { TrainerNotationView } from "./TrainerNotationView";
 
 type ReviewPackage = Omit<CoachTakePackage, "audioBase64"> & { blob: Blob };
 
@@ -14,6 +16,7 @@ export function TrainerCoachReview({ takes, onFeedbackApplied }: { takes: SavedT
   const [audioUrl, setAudioUrl] = useState("");
   const [playheadMs, setPlayheadMs] = useState(0);
   const [note, setNote] = useState("");
+  const [noteVoice, setNoteVoice] = useState<Instrument | "">("");
   const [comments, setComments] = useState<CoachComment[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -30,6 +33,7 @@ export function TrainerCoachReview({ takes, onFeedbackApplied }: { takes: SavedT
       ...sample(review.actualMarkersMs).map(timeMs => ({ timeMs, kind: "Played hit" as const }))
     ];
   }, [review]);
+  const location = useMemo(() => review ? trainerCoachLocation(playheadMs, review, noteVoice || undefined) : null, [noteVoice, playheadMs, review]);
 
   useEffect(() => {
     if (!review) { setAudioUrl(""); return; }
@@ -39,7 +43,7 @@ export function TrainerCoachReview({ takes, onFeedbackApplied }: { takes: SavedT
   }, [review]);
 
   const openPackage = async (file?: File) => {
-    setReview(null); setComments([]); setNote(""); setPlayheadMs(0); setMessage("");
+    setReview(null); setComments([]); setNote(""); setNoteVoice(""); setPlayheadMs(0); setMessage("");
     if (!file) return;
     if (file.size > TRAINER_COACH_MAX_BYTES) { setMessage("This coach package is larger than 24 MB."); return; }
     try { setReview(parseCoachTakePackage(await file.text())); setMessage("Coach package opened on this device. Add timestamped notes, then export a response file for the learner."); }
@@ -49,7 +53,7 @@ export function TrainerCoachReview({ takes, onFeedbackApplied }: { takes: SavedT
 
   const addComment = () => {
     if (!review || !note.trim() || comments.length >= 100) return;
-    setComments(items => [...items, { id: crypto.randomUUID(), timeMs: Math.round(playheadMs), note: note.trim().slice(0, 600), createdAt: new Date().toISOString() }].sort((a, b) => a.timeMs - b.timeMs));
+    setComments(items => [...items, { id: crypto.randomUUID(), timeMs: Math.round(playheadMs), note: note.trim().slice(0, 600), createdAt: new Date().toISOString(), ...(location ? { location } : {}) }].sort((a, b) => a.timeMs - b.timeMs));
     setNote("");
   };
 
@@ -91,13 +95,16 @@ export function TrainerCoachReview({ takes, onFeedbackApplied }: { takes: SavedT
     <button type="button" className="button-secondary" disabled={busy} onClick={() => responseInput.current?.click()}>Import coach response</button>
     {review && <div className="trainer-coach-review-card">
       <h3>{review.takeName}</h3><p>{review.patternName} · {review.bpm} BPM · {review.expectedMarkersMs.length} score targets · {review.actualMarkersMs.length} recorded hits</p>
+      {review.pattern && <section className="trainer-coach-notation"><h4>Score reference</h4><TrainerNotationView pattern={review.pattern} compact /><p>Comments include the score bar and beat, with the selected voice when available.</p></section>}
       {audioUrl && <audio ref={audioRef} controls preload="metadata" src={audioUrl} aria-label={`Coach review audio: ${review.takeName}`} onTimeUpdate={event => setPlayheadMs(event.currentTarget.currentTime * 1000)} />}
       <div className="trainer-coach-marker-track" aria-label="Score target and played-hit timeline">
         {visibleMarkers.map((marker, index) => <span key={`${marker.kind}-${index}`} title={`${marker.kind} at ${(marker.timeMs / 1000).toFixed(2)} seconds`} aria-label={`${marker.kind} at ${(marker.timeMs / 1000).toFixed(2)} seconds`} className={marker.kind === "Target" ? "is-target" : "is-played"} style={{ left: `${Math.max(0, Math.min(100, marker.timeMs / markerDurationMs * 100))}%` }} />)}
       </div>
+      <div className="trainer-coach-position"><strong>Current score position</strong><span>{location ? `Bar ${location.bar} · beat ${location.beat}${location.voice ? ` · ${location.voice}` : ""}` : "Position unavailable"}</span></div>
+      {review.pattern && <label>Voice focus<select value={noteVoice} onChange={event => setNoteVoice(event.target.value as Instrument | "")}><option value="">All voices</option>{[...new Set(review.pattern.hits.map(hit => hit.instrument))].map(voice => <option key={voice} value={voice}>{voice}</option>)}</select></label>}
       <label>Feedback at { (playheadMs / 1000).toFixed(1) } s<textarea rows={2} maxLength={600} value={note} onChange={event => setNote(event.target.value)} placeholder="Add one clear observation or next step." /></label>
-      <button type="button" disabled={!note.trim() || comments.length >= 100} onClick={addComment}>Add comment at current audio time</button>
-      {comments.length > 0 && <ol>{comments.map(comment => <li key={comment.id}><strong>{(comment.timeMs / 1000).toFixed(1)} s</strong> · {comment.note} <button type="button" onClick={() => setComments(items => items.filter(item => item.id !== comment.id))}>Remove</button></li>)}</ol>}
+      <button type="button" disabled={!note.trim() || comments.length >= 100} onClick={addComment}>Add comment at current audio time and score position</button>
+      {comments.length > 0 && <ol>{comments.map(comment => <li key={comment.id}><strong>{(comment.timeMs / 1000).toFixed(1)} s{comment.location ? ` · bar ${comment.location.bar}, beat ${comment.location.beat}${comment.location.voice ? ` · ${comment.location.voice}` : ""}` : ""}</strong> · {comment.note} <button type="button" onClick={() => setComments(items => items.filter(item => item.id !== comment.id))}>Remove</button></li>)}</ol>}
       <button type="button" className="button" disabled={!comments.length} onClick={exportFeedback}>Download feedback for learner</button>
     </div>}
     {message && <p role="status">{message}</p>}

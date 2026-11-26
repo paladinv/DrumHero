@@ -12,16 +12,44 @@ export type SightRhythmFocus = 'mixed' | 'quarters' | 'eighths' | 'sixteenths' |
 export type SightDensity = 'light' | 'balanced' | 'dense';
 export type SightCountSubdivision = 'quarter' | 'eighth' | 'sixteenth';
 export type SightMeter = '4/4' | '3/4' | '5/4' | '7/8';
-export type SightSettings = { level: Level; bpm: number; bars: number; meter: SightMeter; mixedMeters?: boolean; articulationFocus?: MidiArticulation | null; triplets: boolean; snareOnly: boolean; focusVoice: Instrument | 'mixed'; focusRhythm: SightRhythmFocus; style: SightStyle; density: SightDensity };
-export const DEFAULT_SIGHT_SETTINGS: SightSettings = { level: 'Beginner', bpm: 80, bars: 10, meter: '4/4', mixedMeters: false, articulationFocus: null, triplets: false, snareOnly: false, focusVoice: 'mixed', focusRhythm: 'mixed', style: 'varied', density: 'balanced' };
-export type SightExercise = { version: 1 | 2 | 3; seed: number; settings: SightSettings; subdivision: 4 | 8 | 12 | 16; beatsPerBar: number; stepsPerBar: number; barMeters?: SightMeter[]; hits: PatternHit[]; sourceLabel?: string };
+export type SightSettings = { level: Level; bpm: number; bars: number; meter: SightMeter; mixedMeters?: boolean; articulationFocus?: MidiArticulation | null; dynamicsFocus?: boolean; triplets: boolean; snareOnly: boolean; focusVoice: Instrument | 'mixed'; focusRhythm: SightRhythmFocus; style: SightStyle; density: SightDensity };
+export const DEFAULT_SIGHT_SETTINGS: SightSettings = { level: 'Beginner', bpm: 80, bars: 10, meter: '4/4', mixedMeters: false, articulationFocus: null, dynamicsFocus: false, triplets: false, snareOnly: false, focusVoice: 'mixed', focusRhythm: 'mixed', style: 'varied', density: 'balanced' };
+export type SightExercise = { version: 1 | 2 | 3 | 4; seed: number; settings: SightSettings; subdivision: 4 | 8 | 12 | 16; beatsPerBar: number; stepsPerBar: number; barMeters?: SightMeter[]; hits: PatternHit[]; sourceLabel?: string };
 export type SightPhase = 'setup' | 'preview' | 'count-in' | 'playing' | 'results';
 export type SightInput = 'keyboard' | 'touch' | 'midi' | 'audio-voices';
-export type SightHit = { instrument: Instrument; atMs: number; midiArticulation?: MidiArticulation };
+export type SightHit = { instrument: Instrument; atMs: number; midiArticulation?: MidiArticulation; velocity?: number };
 export type SightFluency = Partial<Record<'quarters' | 'eighths' | 'sixteenths' | 'triplets' | 'syncopation' | 'rests', number>>;
-export type SightAttempt = { id: string; playedAt: string; version: 1 | 2 | 3; seed: number; settings: SightSettings; source: SightInput; inputProfile: string; classification: 'reading' | 'practice' | 'assisted'; targetPlayback?: boolean; score: number; accuracy: number; meanOffsetMs: number | null; timingSpreadMs?: number | null; pulseRecovery?: number | null; confidence?: number | null; inputCalibrated?: boolean; inputCalibrationSpreadMs?: number | null; inputCalibrationAt?: string | null; inputTimingCorrectionMs?: number; earlyHits?: number; lateHits?: number; fingerprint?: string; misses: number; extras: number; fluency?: SightFluency; voiceScores?: Partial<Record<Instrument, number>>; sourceLabel?: string; previewSeconds?: 0 | 5 | 10; countInBars?: 0 | 1 | 2; assignmentTitle?: string; assignmentDueDate?: string; assignmentMinimumAccuracy?: number };
+export type SightContextError = { context: 'after-rest' | 'barline-entry' | 'group-entry' | 'offbeat' | 'voice-change'; count: number };
+export type SightAttempt = { id: string; playedAt: string; version: 1 | 2 | 3 | 4; seed: number; settings: SightSettings; source: SightInput; inputProfile: string; classification: 'reading' | 'practice' | 'assisted'; targetPlayback?: boolean; score: number; accuracy: number; dynamicAccuracy?: number | null; contextErrors?: SightContextError[]; meanOffsetMs: number | null; timingSpreadMs?: number | null; pulseRecovery?: number | null; confidence?: number | null; inputCalibrated?: boolean; inputCalibrationSpreadMs?: number | null; inputCalibrationAt?: string | null; inputTimingCorrectionMs?: number; earlyHits?: number; lateHits?: number; fingerprint?: string; misses: number; extras: number; fluency?: SightFluency; voiceScores?: Partial<Record<Instrument, number>>; sourceLabel?: string; previewSeconds?: 0 | 5 | 10; countInBars?: 0 | 1 | 2; assignmentTitle?: string; assignmentDueDate?: string; assignmentMinimumAccuracy?: number };
 export type SightSourcePattern = { id: string; label: string; level: Level; meter: string; subdivision: number; beats: number; bpm: number; hits: PatternHit[] };
+export type SightCustomTemplate = { id: string; name: string; level: Level; meter: SightMeter; subdivision: 4 | 8 | 12 | 16; beats: number; hits: PatternHit[]; createdAt: string };
+export const SIGHT_TEMPLATES_KEY = 'drum-hero:sight-reading-templates:v1';
+
+export function parseSightTemplates(raw: string | null): SightCustomTemplate[] {
+  try {
+    const value = JSON.parse(raw ?? '[]');
+    if (!Array.isArray(value)) return [];
+    const ids = new Set<string>();
+    const rows = value.slice(-40).filter((item): item is SightCustomTemplate => {
+      if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !/^[a-z0-9-]{1,100}$/i.test(item.id) || ids.has(item.id) ||
+          typeof item.name !== 'string' || !item.name.trim() || item.name.length > 80 || !['Beginner','Intermediate','Advanced'].includes(item.level) ||
+          !['4/4','3/4','5/4','7/8'].includes(item.meter) || !sightMeters(item.level).includes(item.meter) || ![4,8,12,16].includes(item.subdivision) ||
+          !Number.isFinite(item.beats) || item.beats !== sightMeterBeats(item.meter) || !Array.isArray(item.hits) || item.hits.length < 1 || item.hits.length > 120 ||
+          typeof item.createdAt !== 'string' || !Number.isFinite(Date.parse(item.createdAt))) return false;
+      if ((item.level !== 'Advanced' && (item.subdivision === 12 || item.subdivision === 16)) || (item.meter === '7/8' && item.subdivision % 8 !== 0)) return false;
+      const steps = Math.round(item.beats * item.subdivision / 4);
+      if (!item.hits.every((hit: PatternHit) => hit && Number.isInteger(hit.step) && hit.step >= 0 && hit.step < steps && SIGHT_VOICES.includes(hit.instrument) &&
+          (hit.accent === undefined || typeof hit.accent === 'boolean') && (hit.midiArticulationTarget === undefined || ['closed-hat','open-hat','pedal-hat','foot-splash','ride','crash','rimshot','side-stick'].includes(hit.midiArticulationTarget)))) return false;
+      const unique = new Set(item.hits.map((hit: PatternHit) => `${hit.step}/${hit.instrument}`));
+      if (unique.size !== item.hits.length || [...new Set(item.hits.map((hit: PatternHit) => hit.step))].some(step => item.hits.filter((hit: PatternHit) => hit.step === step).length > 3)) return false;
+      ids.add(item.id);
+      return true;
+    });
+    return rows.map(item => ({ ...item, name: item.name.trim(), hits: item.hits.map(hit => ({ ...hit })) }));
+  } catch { return []; }
+}
 export function sightMeterBeats(meter: SightMeter) { return meter === '7/8' ? 3.5 : Number(meter[0]); }
+function sightExerciseVersion(settings: SightSettings): SightExercise['version'] { return settings.dynamicsFocus ? 4 : settings.articulationFocus ? 3 : settings.mixedMeters ? 2 : 1; }
 export function sightExerciseMeters(exercise: SightExercise): SightMeter[] { return exercise.barMeters?.length === exercise.settings.bars ? exercise.barMeters : Array.from({ length: exercise.settings.bars }, () => exercise.settings.meter); }
 export function sightBarStarts(exercise: SightExercise): number[] {
   const starts: number[] = []; let step = 0;
@@ -70,7 +98,16 @@ export function createSightExerciseFromPattern(settings: SightSettings, pattern:
     .map(hit => ({ ...hit, step: hit.step - offset }))
     .sort((a, b) => a.step - b.step || SIGHT_VOICES.indexOf(a.instrument) - SIGHT_VOICES.indexOf(b.instrument));
   if (!hits.length) return null;
-  return { version: 1, seed: seed >>> 0, settings: finalSettings, subdivision: subdivision as SightExercise['subdivision'], beatsPerBar, stepsPerBar, hits, sourceLabel: pattern.label.slice(0, 160) };
+  applyDynamicsTargets(hits, finalSettings);
+  return { version: finalSettings.dynamicsFocus ? 4 : 1, seed: seed >>> 0, settings: finalSettings, subdivision: subdivision as SightExercise['subdivision'], beatsPerBar, stepsPerBar, hits, sourceLabel: pattern.label.slice(0, 160) };
+}
+export function createSightExerciseFromTemplate(settings: SightSettings, template: SightCustomTemplate, seed: number): SightExercise {
+  const normalized = normalizeSightSettings({ ...settings, level: template.level, meter: template.meter, mixedMeters: false, articulationFocus: null, bars: settings.bars });
+  const stepsPerBar = Math.round(template.beats * template.subdivision / 4);
+  const hits = Array.from({ length: normalized.bars }, (_, bar) => template.hits.map(hit => ({ ...hit, step: hit.step + bar * stepsPerBar }))).flat();
+  applyDynamicsTargets(hits, normalized);
+  const exercise: SightExercise = { version: normalized.dynamicsFocus ? 4 : 1, seed: seed >>> 0, settings: normalized, subdivision: template.subdivision, beatsPerBar: template.beats, stepsPerBar, hits: hits.sort((a, b) => a.step - b.step || SIGHT_VOICES.indexOf(a.instrument) - SIGHT_VOICES.indexOf(b.instrument)), sourceLabel: template.name };
+  return exercise;
 }
 export function sightVoiceScores(exercise: SightExercise, rated: RatedHit[]): Partial<Record<Instrument, number>> {
   const scores: Partial<Record<Instrument, number>> = {};
@@ -81,6 +118,34 @@ export function sightVoiceScores(exercise: SightExercise, rated: RatedHit[]): Pa
     scores[voice] = Math.round(matched * 100 / targets.length);
   }
   return scores;
+}
+export function sightDynamicAccuracy(exercise: SightExercise, rated: RatedHit[]): number | null {
+  if (!exercise.settings.dynamicsFocus) return null;
+  const targets = exercise.hits.filter(hit => hit.velocityTarget !== undefined);
+  if (!targets.length) return null;
+  const correct = targets.filter(target => rated.some(hit => hit.step === target.step && hit.instrument === target.instrument &&
+    hit.rating !== 'miss' && hit.rating !== 'extra' && hit.velocity !== undefined && Math.abs(hit.velocity - target.velocityTarget!) <= 18));
+  return Math.round(correct.length * 100 / targets.length);
+}
+export function analyzeSightContextErrors(exercise: SightExercise, rated: RatedHit[]): SightContextError[] {
+  const counts = new Map<SightContextError['context'], number>();
+  const barStarts = sightBarStarts(exercise), meters = sightExerciseMeters(exercise), perBeat = exercise.subdivision / 4;
+  const events = rated.filter(hit => hit.rating === 'miss' || hit.rating === 'extra');
+  for (const error of events) {
+    const step = Math.max(0, Math.min(sightTotalSteps(exercise) - 1, error.step ?? 0));
+    const bar = sightStepBar(exercise, step), local = step - barStarts[bar], meter = meters[bar];
+    const beat = local * 4 / exercise.subdivision;
+    const previous = exercise.hits.filter(hit => hit.step < step).at(-1);
+    const following = exercise.hits.find(hit => hit.step > step);
+    const contexts: SightContextError['context'][] = [];
+    if (local === 0) contexts.push('barline-entry');
+    if (sightMeterGroupStarts(meter).some(start => Math.abs(start - beat) < 0.001)) contexts.push('group-entry');
+    if (Math.abs(beat - Math.round(beat)) > 0.001) contexts.push('offbeat');
+    if (error.rating === 'miss' && previous && step - previous.step > perBeat) contexts.push('after-rest');
+    if ((previous && previous.instrument !== error.instrument) || (following && following.instrument !== error.instrument)) contexts.push('voice-change');
+    for (const context of new Set(contexts)) counts.set(context, (counts.get(context) ?? 0) + 1);
+  }
+  return [...counts].map(([context, count]) => ({ context, count })).sort((a, b) => b.count - a.count || a.context.localeCompare(b.context));
 }
 export function assignSightSticking(hits: PatternHit[]): PatternHit[] {
   let handIndex = 0;
@@ -112,6 +177,15 @@ function applyArticulationTargets(hits: PatternHit[], settings: SightSettings, s
     if (step !== undefined) hits.push({ step, instrument: voice, accent: false, midiArticulationTarget: articulation });
   }
   return hits.sort((a, b) => a.step - b.step || SIGHT_VOICES.indexOf(a.instrument) - SIGHT_VOICES.indexOf(b.instrument));
+}
+function applyDynamicsTargets(hits: PatternHit[], settings: SightSettings) {
+  if (!settings.dynamicsFocus) return hits;
+  for (const hit of hits) {
+    if (hit.accent) hit.velocityTarget = 105;
+    else if ((hit.step * 11 + SIGHT_VOICES.indexOf(hit.instrument) * 7) % 7 === 0) hit.velocityTarget = 45;
+    else hit.velocityTarget = 70;
+  }
+  return hits;
 }
 /** Suggests one small next step; retries and assisted attempts are filtered by the caller. */
 export function adaptiveSightSettings(settings: SightSettings, accuracy: number, timingSpreadMs: number | null): SightSettings | null {
@@ -171,11 +245,11 @@ export function normalizeSightSettings(value: SightSettings): SightSettings {
   const density: SightDensity = ['light','balanced','dense'].includes(value.density) ? value.density : 'balanced';
   const articulations: MidiArticulation[] = ['closed-hat','open-hat','pedal-hat','foot-splash','ride','crash','rimshot','side-stick'];
   const articulationFocus = level !== 'Beginner' && articulations.includes(value.articulationFocus as MidiArticulation) ? value.articulationFocus as MidiArticulation : null;
-  return { level, bpm: Math.max(40, Math.min(200, Math.round(Number(value.bpm) || 80))), bars, meter, mixedMeters, articulationFocus, triplets: level === 'Advanced' && value.triplets === true && meter !== '7/8' && !mixedMeters, snareOnly: level === 'Beginner' && value.snareOnly === true, focusVoice, focusRhythm: style === 'shuffle' && !['mixed','triplets'].includes(normalizedRhythm) || mixedMeters && normalizedRhythm === 'triplets' ? 'mixed' : normalizedRhythm, style, density };
+  return { level, bpm: Math.max(40, Math.min(200, Math.round(Number(value.bpm) || 80))), bars, meter, mixedMeters, articulationFocus, dynamicsFocus: level === 'Advanced' && value.dynamicsFocus === true, triplets: level === 'Advanced' && value.triplets === true && meter !== '7/8' && !mixedMeters, snareOnly: level === 'Beginner' && value.snareOnly === true, focusVoice, focusRhythm: style === 'shuffle' && !['mixed','triplets'].includes(normalizedRhythm) || mixedMeters && normalizedRhythm === 'triplets' ? 'mixed' : normalizedRhythm, style, density };
 }
 export function sightFingerprint(exercise: SightExercise) {
   const meters = sightExerciseMeters(exercise), meterSignature = meters.every(meter => meter === meters[0]) ? meters[0] : meters.join('-');
-  return `${meterSignature}:${exercise.subdivision}:${exercise.hits.map(h => `${h.step}/${h.instrument}/${Number(h.accent ?? false)}${h.midiArticulationTarget ? `/${h.midiArticulationTarget}` : ''}`).join(',')}`;
+  return `${meterSignature}:${exercise.subdivision}:${exercise.hits.map(h => `${h.step}/${h.instrument}/${Number(h.accent ?? false)}${h.midiArticulationTarget ? `/${h.midiArticulationTarget}` : ''}${h.velocityTarget === undefined ? '' : `/v${h.velocityTarget}`}`).join(',')}`;
 }
 /** v1 LCG and integer template choices are mirrored in Swift; fixtures pin the wire-independent musical output. */
 export function generateSightExercise(settings: SightSettings, seed: number, previous?: string): SightExercise {
@@ -264,7 +338,8 @@ export function generateSightExercise(settings: SightSettings, seed: number, pre
     }
     hits.sort((a, b) => a.step - b.step || SIGHT_VOICES.indexOf(a.instrument) - SIGHT_VOICES.indexOf(b.instrument));
     applyArticulationTargets(hits, config, Array.from({ length: config.bars }, (_, bar) => bar * stepsPerBar), Array.from({ length: config.bars }, () => stepsPerBar));
-    const exercise: SightExercise = { version: config.articulationFocus ? 3 : 1, seed: actualSeed, settings: config, subdivision, beatsPerBar, stepsPerBar, hits };
+    applyDynamicsTargets(hits, config);
+    const exercise: SightExercise = { version: config.dynamicsFocus ? 4 : config.articulationFocus ? 3 : 1, seed: actualSeed, settings: config, subdivision, beatsPerBar, stepsPerBar, hits };
     if (!previous || sightFingerprint(exercise) !== previous || attempt >= 100) return exercise;
   }
 }
@@ -291,8 +366,9 @@ function generateMixedSightExercise(config: SightSettings, seed: number, previou
       startStep += lengths.at(-1)!;
     }
     applyArticulationTargets(hits, config, starts, lengths);
+    applyDynamicsTargets(hits, config);
     const first = generateSightExercise(normalizeSightSettings({ ...config, mixedMeters: false, bars: 1 }), actualSeed);
-    const exercise: SightExercise = { version: config.articulationFocus ? 3 : 2, seed: actualSeed, settings: config, subdivision: first.subdivision, beatsPerBar: sightMeterBeats(barMeters[0]), stepsPerBar: Math.round(sightMeterBeats(barMeters[0]) * first.subdivision / 4), barMeters, hits: hits.sort((a, b) => a.step - b.step || SIGHT_VOICES.indexOf(a.instrument) - SIGHT_VOICES.indexOf(b.instrument)) };
+    const exercise: SightExercise = { version: config.dynamicsFocus ? 4 : config.articulationFocus ? 3 : 2, seed: actualSeed, settings: config, subdivision: first.subdivision, beatsPerBar: sightMeterBeats(barMeters[0]), stepsPerBar: Math.round(sightMeterBeats(barMeters[0]) * first.subdivision / 4), barMeters, hits: hits.sort((a, b) => a.step - b.step || SIGHT_VOICES.indexOf(a.instrument) - SIGHT_VOICES.indexOf(b.instrument)) };
     if (!previous || sightFingerprint(exercise) !== previous || retry === 99) return exercise;
   }
   throw new Error('Could not generate a mixed-meter exercise.');
@@ -333,7 +409,7 @@ export function describeSightExercise(exercise: SightExercise): string {
     const events = Array.from({ length: sightBarSteps(exercise, bar) }, (_, localStep) => {
       const step = starts[bar] + localStep;
       const hits = exercise.hits.filter(hit => hit.step === step);
-      const content = hits.length ? hits.map(hit => `${hit.instrument}${hit.accent ? ', accent' : ''}${hit.midiArticulationTarget ? `, ${hit.midiArticulationTarget.replaceAll('-', ' ')}` : ''}`).join(' and ') : 'rest';
+      const content = hits.length ? hits.map(hit => `${hit.instrument}${hit.velocityTarget !== undefined ? hit.velocityTarget <= 50 ? ', ghost stroke' : hit.velocityTarget >= 100 ? ', accented stroke' : ', normal stroke' : hit.accent ? ', accent' : ''}${hit.midiArticulationTarget ? `, ${hit.midiArticulationTarget.replaceAll('-', ' ')}` : ''}`).join(' and ') : 'rest';
       return `${labelAt(localStep)}: ${content}`;
     });
     return `Bar ${bar + 1}, ${meters[bar]}: ${events.join('; ')}.`;
@@ -353,7 +429,7 @@ export function scoreSightAttempt(exercise: SightExercise, attempts: SightHit[])
         continue;
       }
       target.matched = true;
-      rated.push({ instrument: hit.instrument, rating: classifyOffset(closest.offset), offsetMs: Math.round(closest.offset), atMs: hit.atMs, step: target.step, midiArticulation: hit.midiArticulation, midiArticulationTarget: target.midiArticulationTarget });
+      rated.push({ instrument: hit.instrument, rating: classifyOffset(closest.offset), offsetMs: Math.round(closest.offset), atMs: hit.atMs, step: target.step, velocity: hit.velocity, velocityTarget: target.velocityTarget, accentTarget: target.accent, midiArticulation: hit.midiArticulation, midiArticulationTarget: target.midiArticulationTarget });
     } else rated.push({ instrument: hit.instrument, rating: 'extra', offsetMs: null, atMs: hit.atMs, step: Math.max(0, Math.min(sightTotalSteps(exercise) - 1, Math.floor(hit.atMs / stepMs))), midiArticulation: hit.midiArticulation });
   }
   for (const target of expected) if (!target.matched) rated.push({ instrument: target.instrument, rating: 'miss', offsetMs: null, step: target.step, atMs: target.at, midiArticulationTarget: target.midiArticulationTarget });
@@ -380,7 +456,7 @@ export function scoreSightAttempt(exercise: SightExercise, attempts: SightHit[])
   const extraSteps = new Set(rated.filter(hit => hit.rating === 'extra').map(hit => hit.step ?? -1));
   for (let step = 0; step < sightTotalSteps(exercise); step++) if (!expectedSteps.has(step)) add('rests', !extraSteps.has(step));
   const fluency = Object.fromEntries(Object.entries(buckets).map(([key, value]) => [key, Math.round(value.correct * 100 / value.total)])) as SightFluency;
-  return { rated, fluency, summary: summarizeHits(rated, `sight-v1-${exercise.seed}`, 'Sight reading', exercise.settings.bpm), meanOffsetMs, timingSpreadMs, pulseRecovery: sightPulseRecovery(exercise, rated), earlyHits: offsets.filter(value => value < 0).length, lateHits: offsets.filter(value => value > 0).length };
+  return { rated, fluency, summary: summarizeHits(rated, `sight-v1-${exercise.seed}`, 'Sight reading', exercise.settings.bpm), meanOffsetMs, timingSpreadMs, pulseRecovery: sightPulseRecovery(exercise, rated), dynamicAccuracy: sightDynamicAccuracy(exercise, rated), contextErrors: analyzeSightContextErrors(exercise, rated), earlyHits: offsets.filter(value => value < 0).length, lateHits: offsets.filter(value => value > 0).length };
 }
 export function createSightBarDrill(exercise: SightExercise, bar: number): SightExercise {
   const sourceBar = Math.max(0, Math.min(exercise.settings.bars - 1, Math.floor(bar)));
@@ -390,7 +466,7 @@ export function createSightBarDrill(exercise: SightExercise, bar: number): Sight
   const hits = [...sourceHits, ...sourceHits.map(hit => ({ ...hit, step: hit.step + barSteps }))]
     .sort((a, b) => a.step - b.step || SIGHT_VOICES.indexOf(a.instrument) - SIGHT_VOICES.indexOf(b.instrument));
   const settings = normalizeSightSettings({ ...exercise.settings, meter, mixedMeters: false, bars: 2 });
-  return { ...exercise, version: settings.articulationFocus ? 3 : settings.mixedMeters ? 2 : 1, settings, barMeters: [meter, meter], beatsPerBar: sightMeterBeats(meter), stepsPerBar: barSteps, hits };
+  return { ...exercise, version: sightExerciseVersion(settings), settings, barMeters: [meter, meter], beatsPerBar: sightMeterBeats(meter), stepsPerBar: barSteps, hits };
 }
 export function createSightRangeDrill(exercise: SightExercise, startBar: number, endBar: number, repeats = 2): SightExercise {
   const start = Math.max(0, Math.min(exercise.settings.bars - 1, Math.floor(startBar)));
@@ -406,7 +482,7 @@ export function createSightRangeDrill(exercise: SightExercise, startBar: number,
     .sort((a, b) => a.step - b.step || SIGHT_VOICES.indexOf(a.instrument) - SIGHT_VOICES.indexOf(b.instrument));
   const barMeters = Array.from({ length: count }, () => sourceMeters).flat();
   const settings = normalizeSightSettings({ ...exercise.settings, meter: barMeters[0], mixedMeters: new Set(barMeters).size > 1, bars });
-  return { ...exercise, version: settings.articulationFocus ? 3 : settings.mixedMeters ? 2 : 1, settings, barMeters, beatsPerBar: sightMeterBeats(barMeters[0]), stepsPerBar: Math.round(sightMeterBeats(barMeters[0]) * exercise.subdivision / 4), hits };
+  return { ...exercise, version: sightExerciseVersion(settings), settings, barMeters, beatsPerBar: sightMeterBeats(barMeters[0]), stepsPerBar: Math.round(sightMeterBeats(barMeters[0]) * exercise.subdivision / 4), hits };
 }
 export function weakestSightBar(exercise: SightExercise, rated: RatedHit[]) {
   let weakest = 0, worst = -1;
@@ -472,7 +548,7 @@ export function buildSightGoalPath(goal: SightGoal, history: readonly SightAttem
   return path;
 }
 /** Turns the most common miss/extra into a short, easier two-bar phrase drill. */
-export function createSightErrorDrill(exercise: SightExercise, rated: RatedHit[], seed: number, previous: string[] = [], history: readonly SightAttempt[] = []): { exercise: SightExercise; focus: SightErrorFocus; voice: Instrument | 'mixed' } {
+export function createSightErrorDrill(exercise: SightExercise, rated: RatedHit[], seed: number, previous: string[] = [], history: readonly SightAttempt[] = []): { exercise: SightExercise; focus: SightErrorFocus; voice: Instrument | 'mixed'; context: SightContextError['context'] | null } {
   const errors = rated.filter(hit => (hit.rating === 'miss' || hit.rating === 'extra') && hit.step !== undefined);
   const stepsPerBeat = exercise.subdivision / 4;
   const rhythmAt = (step: number): SightRhythmFocus => {
@@ -501,11 +577,19 @@ export function createSightErrorDrill(exercise: SightExercise, rated: RatedHit[]
   const voiceCounts = new Map<Instrument, number>();
   for (const error of errors) voiceCounts.set(error.instrument, (voiceCounts.get(error.instrument) ?? 0) + 1);
   const voice = [...voiceCounts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'mixed';
+  const contextCounts = new Map<SightContextError['context'], number>();
+  for (const row of analyzeSightContextErrors(exercise, rated)) contextCounts.set(row.context, row.count);
+  for (const row of history.filter(item => item.classification === 'reading' && item.settings.level === exercise.settings.level && item.settings.meter === exercise.settings.meter).slice(-5).flatMap(item => item.contextErrors ?? [])) {
+    contextCounts.set(row.context, (contextCounts.get(row.context) ?? 0) + row.count);
+  }
+  const context = [...contextCounts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  if (context === 'after-rest') focus = 'rests';
+  else if (context === 'offbeat' || context === 'barline-entry' || context === 'group-entry') focus = 'syncopation';
   const supported = sightSupportedRhythms(exercise.settings.level, exercise.settings.meter);
   const rhythm = supported.includes(focus as SightRhythmFocus) ? focus as SightRhythmFocus : 'mixed';
   const useFunk = focus === 'syncopation' && exercise.settings.level !== 'Beginner' && exercise.settings.meter !== '7/8';
   const settings = normalizeSightSettings({ ...exercise.settings, bars: 2, bpm: Math.max(40, exercise.settings.bpm - 10), focusRhythm: rhythm, focusVoice: voice, style: useFunk ? 'funk' : 'varied', density: 'light' });
-  return { exercise: generateFreshSightExercise(settings, seed, previous), focus, voice };
+  return { exercise: generateFreshSightExercise(settings, seed, previous), focus, voice, context };
 }
 export const SIGHT_GOAL_KEY = 'drum-hero:sight-reading-goal:v1';
 export function parseSightGoal(raw: string | null): SightGoal | null {
@@ -519,17 +603,30 @@ export function parseSightGoal(raw: string | null): SightGoal | null {
 export function matchingSightGoalAttempts(history: SightAttempt[], goal: SightGoal) {
   return history.filter(row => row.classification === 'reading' && row.accuracy >= goal.accuracy && row.settings.level === goal.level && row.settings.meter === goal.meter && row.settings.bpm === goal.bpm && row.settings.focusRhythm === goal.focusRhythm);
 }
+export function sightReviewIntervalDays(rows: readonly SightAttempt[]): number {
+  const attempts = [...rows].filter(row => row.classification === 'reading').sort((a, b) => a.playedAt.localeCompare(b.playedAt));
+  const latest = attempts.at(-1);
+  if (!latest) return 1;
+  const last = attempts.slice(-3);
+  const average = last.reduce((sum, row) => sum + row.accuracy, 0) / last.length;
+  let days = average < 55 ? 1 : average < 70 ? 2 : average < 80 ? 4 : average < 90 ? 7 : 10;
+  const strongStreak = [...attempts].reverse().slice(0, 3).filter(row => row.accuracy >= 90).length;
+  if (strongStreak >= 2) days = Math.min(30, days * (strongStreak >= 3 ? 3 : 2));
+  const confidenceMismatch = latest.confidence == null ? 0 : latest.confidence * 20 - latest.accuracy;
+  if (confidenceMismatch >= 20) days = Math.max(1, Math.floor(days / 2));
+  return days;
+}
 export function recommendSightSettings(history: SightAttempt[], settings: SightSettings, source?: SightAttempt['source'], now = Date.now()): { settings: SightSettings; reason: string } | null {
   const dueReviews = new Map<string, { settings: SightSettings; rows: SightAttempt[]; last: number }>();
   for (const row of history.filter(item => item.classification === 'reading' && (!source || item.source === source))) {
-    const key = `${row.settings.level}|${row.settings.meter}|${row.settings.focusRhythm}`;
+    const key = `${row.settings.level}|${row.settings.bpm}|${row.settings.meter}|${row.settings.focusRhythm}|${row.source}`;
     const group = dueReviews.get(key) ?? { settings: row.settings, rows: [], last: 0 };
     group.rows.push(row); group.last = Date.parse(row.playedAt); dueReviews.set(key, group);
   }
-  const overdue = [...dueReviews.values()].map(group => ({ ...group, average: group.rows.slice(-3).reduce((sum, row) => sum + row.accuracy, 0) / Math.min(group.rows.length, 3) }))
-    .filter(group => now - group.last >= 7 * 24 * 60 * 60 * 1000)
+  const overdue = [...dueReviews.values()].map(group => ({ ...group, average: group.rows.slice(-3).reduce((sum, row) => sum + row.accuracy, 0) / Math.min(group.rows.length, 3), interval: sightReviewIntervalDays(group.rows) }))
+    .filter(group => now - group.last >= group.interval * 24 * 60 * 60 * 1000)
     .sort((a, b) => a.average - b.average || a.last - b.last)[0];
-  if (overdue) return { settings: normalizeSightSettings({ ...overdue.settings, bars: 2, style: 'varied', density: 'light' }), reason: `Spaced review: ${overdue.settings.meter} ${overdue.settings.focusRhythm} has not been read for at least a week; recent accuracy was ${Math.round(overdue.average)}%.` };
+  if (overdue) return { settings: normalizeSightSettings({ ...overdue.settings, bars: 2, style: 'varied', density: 'light' }), reason: `Spaced review: ${overdue.settings.level} ${overdue.settings.meter} ${overdue.settings.focusRhythm} is due after ${overdue.interval} day${overdue.interval === 1 ? '' : 's'} at ${overdue.settings.bpm} BPM on ${overdue.rows.at(-1)?.source}; recent accuracy was ${Math.round(overdue.average)}%.` };
   const recent = history.filter(row => row.classification === 'reading' && row.settings.level === settings.level && row.settings.bpm === settings.bpm && row.settings.bars === settings.bars && row.settings.meter === settings.meter && row.settings.triplets === settings.triplets && row.settings.snareOnly === settings.snareOnly && row.settings.focusRhythm === settings.focusRhythm && row.settings.focusVoice === settings.focusVoice && row.settings.style === settings.style && (!source || row.source === source)).slice(-3);
   if (recent.length < 3) return null;
   const average = Math.round(recent.reduce((sum, row) => sum + row.accuracy, 0) / recent.length);
@@ -551,9 +648,9 @@ export function parseSightHistory(raw: string | null): SightAttempt[] {
     const data = JSON.parse(raw ?? 'null');
     if (data?.version !== 1 || !Array.isArray(data.attempts)) return [];
     return data.attempts.filter((item: SightAttempt) => {
-      if (!item || typeof item.id !== 'string' || item.id.length > 100 || typeof item.playedAt !== 'string' || !Number.isFinite(Date.parse(item.playedAt)) || ![1, 2, 3].includes(item.version) || !Number.isInteger(item.seed) || item.seed < 0 || item.seed > 0xffffffff || !item.settings || !['keyboard','touch','midi','audio-voices'].includes(item.source) || typeof item.inputProfile !== 'string' || item.inputProfile.length > 200 || !['reading','practice','assisted'].includes(item.classification) || (item.targetPlayback !== undefined && typeof item.targetPlayback !== 'boolean') || (item.targetPlayback === true && item.classification !== 'assisted') || ![item.score,item.accuracy].every(n => Number.isFinite(n) && n >= 0 && n <= 100) || !(item.meanOffsetMs === null || (Number.isFinite(item.meanOffsetMs) && Math.abs(item.meanOffsetMs) <= 100)) || (item.timingSpreadMs !== undefined && !(item.timingSpreadMs === null || Number.isFinite(item.timingSpreadMs) && item.timingSpreadMs >= 0 && item.timingSpreadMs <= 100)) || (item.pulseRecovery !== undefined && !(item.pulseRecovery === null || Number.isInteger(item.pulseRecovery) && item.pulseRecovery >= 0 && item.pulseRecovery <= 100)) || (item.confidence !== undefined && !(item.confidence === null || Number.isInteger(item.confidence) && item.confidence >= 1 && item.confidence <= 5)) || (item.inputCalibrated !== undefined && typeof item.inputCalibrated !== 'boolean') || (item.inputCalibrationAt !== undefined && !(item.inputCalibrationAt === null || typeof item.inputCalibrationAt === 'string' && Number.isFinite(Date.parse(item.inputCalibrationAt)))) || (item.inputCalibrationSpreadMs !== undefined && !(item.inputCalibrationSpreadMs === null || Number.isFinite(item.inputCalibrationSpreadMs) && item.inputCalibrationSpreadMs >= 0 && item.inputCalibrationSpreadMs <= 240)) || (item.inputTimingCorrectionMs !== undefined && (!Number.isFinite(item.inputTimingCorrectionMs) || Math.abs(item.inputTimingCorrectionMs) > 250)) || (item.earlyHits !== undefined && (!Number.isInteger(item.earlyHits) || item.earlyHits < 0 || item.earlyHits > 100000)) || (item.lateHits !== undefined && (!Number.isInteger(item.lateHits) || item.lateHits < 0 || item.lateHits > 100000)) || (item.fingerprint !== undefined && (typeof item.fingerprint !== 'string' || item.fingerprint.length > 20000)) || ![item.misses,item.extras].every(n => Number.isInteger(n) && n >= 0 && n <= 100000) || (item.fluency !== undefined && (!item.fluency || typeof item.fluency !== 'object' || Object.entries(item.fluency).some(([key, value]) => !['quarters','eighths','sixteenths','triplets','syncopation','rests'].includes(key) || !Number.isInteger(value) || value < 0 || value > 100))) || (item.voiceScores !== undefined && (!item.voiceScores || typeof item.voiceScores !== 'object' || Object.entries(item.voiceScores).some(([key, value]) => !SIGHT_VOICES.includes(key as Instrument) || typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 100))) || (item.sourceLabel !== undefined && (typeof item.sourceLabel !== 'string' || item.sourceLabel.length > 160)) || (item.previewSeconds !== undefined && ![0,5,10].includes(item.previewSeconds)) || (item.countInBars !== undefined && ![0,1,2].includes(item.countInBars)) || (item.assignmentTitle !== undefined && (typeof item.assignmentTitle !== 'string' || item.assignmentTitle.length > 80)) || (item.assignmentDueDate !== undefined && (typeof item.assignmentDueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item.assignmentDueDate))) || (item.assignmentMinimumAccuracy !== undefined && (!Number.isInteger(item.assignmentMinimumAccuracy) || item.assignmentMinimumAccuracy < 50 || item.assignmentMinimumAccuracy > 100))) return false;
+      if (!item || typeof item.id !== 'string' || item.id.length > 100 || typeof item.playedAt !== 'string' || !Number.isFinite(Date.parse(item.playedAt)) || ![1, 2, 3, 4].includes(item.version) || !Number.isInteger(item.seed) || item.seed < 0 || item.seed > 0xffffffff || !item.settings || !['keyboard','touch','midi','audio-voices'].includes(item.source) || typeof item.inputProfile !== 'string' || item.inputProfile.length > 200 || !['reading','practice','assisted'].includes(item.classification) || (item.targetPlayback !== undefined && typeof item.targetPlayback !== 'boolean') || (item.targetPlayback === true && item.classification !== 'assisted') || ![item.score,item.accuracy].every(n => Number.isFinite(n) && n >= 0 && n <= 100) || (item.dynamicAccuracy !== undefined && !(item.dynamicAccuracy === null || Number.isInteger(item.dynamicAccuracy) && item.dynamicAccuracy >= 0 && item.dynamicAccuracy <= 100)) || (item.contextErrors !== undefined && (!Array.isArray(item.contextErrors) || item.contextErrors.length > 5 || item.contextErrors.some(row => !row || !['after-rest','barline-entry','group-entry','offbeat','voice-change'].includes(row.context) || !Number.isInteger(row.count) || row.count < 0 || row.count > 100000))) || !(item.meanOffsetMs === null || (Number.isFinite(item.meanOffsetMs) && Math.abs(item.meanOffsetMs) <= 100)) || (item.timingSpreadMs !== undefined && !(item.timingSpreadMs === null || Number.isFinite(item.timingSpreadMs) && item.timingSpreadMs >= 0 && item.timingSpreadMs <= 100)) || (item.pulseRecovery !== undefined && !(item.pulseRecovery === null || Number.isInteger(item.pulseRecovery) && item.pulseRecovery >= 0 && item.pulseRecovery <= 100)) || (item.confidence !== undefined && !(item.confidence === null || Number.isInteger(item.confidence) && item.confidence >= 1 && item.confidence <= 5)) || (item.inputCalibrated !== undefined && typeof item.inputCalibrated !== 'boolean') || (item.inputCalibrationAt !== undefined && !(item.inputCalibrationAt === null || typeof item.inputCalibrationAt === 'string' && Number.isFinite(Date.parse(item.inputCalibrationAt)))) || (item.inputCalibrationSpreadMs !== undefined && !(item.inputCalibrationSpreadMs === null || Number.isFinite(item.inputCalibrationSpreadMs) && item.inputCalibrationSpreadMs >= 0 && item.inputCalibrationSpreadMs <= 240)) || (item.inputTimingCorrectionMs !== undefined && (!Number.isFinite(item.inputTimingCorrectionMs) || Math.abs(item.inputTimingCorrectionMs) > 250)) || (item.earlyHits !== undefined && (!Number.isInteger(item.earlyHits) || item.earlyHits < 0 || item.earlyHits > 100000)) || (item.lateHits !== undefined && (!Number.isInteger(item.lateHits) || item.lateHits < 0 || item.lateHits > 100000)) || (item.fingerprint !== undefined && (typeof item.fingerprint !== 'string' || item.fingerprint.length > 20000)) || ![item.misses,item.extras].every(n => Number.isInteger(n) && n >= 0 && n <= 100000) || (item.fluency !== undefined && (!item.fluency || typeof item.fluency !== 'object' || Object.entries(item.fluency).some(([key, value]) => !['quarters','eighths','sixteenths','triplets','syncopation','rests'].includes(key) || !Number.isInteger(value) || value < 0 || value > 100))) || (item.voiceScores !== undefined && (!item.voiceScores || typeof item.voiceScores !== 'object' || Object.entries(item.voiceScores).some(([key, value]) => !SIGHT_VOICES.includes(key as Instrument) || typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 100))) || (item.sourceLabel !== undefined && (typeof item.sourceLabel !== 'string' || item.sourceLabel.length > 160)) || (item.previewSeconds !== undefined && ![0,5,10].includes(item.previewSeconds)) || (item.countInBars !== undefined && ![0,1,2].includes(item.countInBars)) || (item.assignmentTitle !== undefined && (typeof item.assignmentTitle !== 'string' || item.assignmentTitle.length > 80)) || (item.assignmentDueDate !== undefined && (typeof item.assignmentDueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item.assignmentDueDate))) || (item.assignmentMinimumAccuracy !== undefined && (!Number.isInteger(item.assignmentMinimumAccuracy) || item.assignmentMinimumAccuracy < 50 || item.assignmentMinimumAccuracy > 100))) return false;
       const normalized = normalizeSightSettings(item.settings);
-      return Object.keys(item.settings).every(key => key in normalized) && Object.entries(normalized).every(([key, value]) => item.settings[key as keyof SightSettings] === value || item.settings[key as keyof SightSettings] === undefined && value === DEFAULT_SIGHT_SETTINGS[key as keyof SightSettings]) && (!normalized.mixedMeters || item.version >= 2) && (!normalized.articulationFocus || item.version >= 3);
+      return Object.keys(item.settings).every(key => key in normalized) && Object.entries(normalized).every(([key, value]) => item.settings[key as keyof SightSettings] === value || item.settings[key as keyof SightSettings] === undefined && value === DEFAULT_SIGHT_SETTINGS[key as keyof SightSettings]) && (!normalized.mixedMeters || item.version >= 2) && (!normalized.articulationFocus || item.version >= 3) && (!normalized.dynamicsFocus || item.version >= 4) && (normalized.dynamicsFocus || item.version < 4 || item.dynamicAccuracy === undefined);
     }).map((row: SightAttempt) => ({ ...row, settings: normalizeSightSettings(row.settings) })).slice(-100);
   } catch { return []; }
 }
@@ -567,6 +664,6 @@ export function sightNotationBars(exercise: SightExercise, showSticking = false)
   const starts = sightBarStarts(exercise), meters = sightExerciseMeters(exercise);
   return Array.from({ length: exercise.settings.bars }, (_, index) => {
     const start = starts[index], steps = sightBarSteps(exercise, index), meter = meters[index], beats = sightMeterBeats(meter);
-    return { index, number: index + 1, sectionId: 'sight', sectionName: exercise.sourceLabel ?? 'Sight reading', sectionKind: 'other', sectionRepeat: 0, sectionBar: index, sectionBars: exercise.settings.bars, partId: 'sight', partName: exercise.sourceLabel ?? 'Reading exercise', meter: meter === '7/8' ? '7/8 (2+2+3)' : meter === '5/4' ? '5/4 (3+2)' : meter, bpm: exercise.settings.bpm, subdivision: exercise.subdivision, partBeats: beats, beats, measureBeats: beats, partBeatOffset: 0, hits: notationHits.filter(h => h.step >= start && h.step < start + steps).map(h => { const local = h.step - start; return { beat: local * 4 / exercise.subdivision, fraction: local / steps, step: local, instrument: h.instrument, accent: !!h.accent, velocity: h.accent ? 110 : 85, ghost: false, sticking: h.sticking, notationCue: h.midiArticulationTarget }; }) };
+    return { index, number: index + 1, sectionId: 'sight', sectionName: exercise.sourceLabel ?? 'Sight reading', sectionKind: 'other', sectionRepeat: 0, sectionBar: index, sectionBars: exercise.settings.bars, partId: 'sight', partName: exercise.sourceLabel ?? 'Reading exercise', meter: meter === '7/8' ? '7/8 (2+2+3)' : meter === '5/4' ? '5/4 (3+2)' : meter, bpm: exercise.settings.bpm, subdivision: exercise.subdivision, partBeats: beats, beats, measureBeats: beats, partBeatOffset: 0, hits: notationHits.filter(h => h.step >= start && h.step < start + steps).map(h => { const local = h.step - start; return { beat: local * 4 / exercise.subdivision, fraction: local / steps, step: local, instrument: h.instrument, accent: !!h.accent, velocity: h.velocityTarget ?? (h.accent ? 110 : 85), ghost: h.velocityTarget !== undefined ? h.velocityTarget <= 50 : false, sticking: h.sticking, notationCue: h.midiArticulationTarget }; }) };
   });
 }

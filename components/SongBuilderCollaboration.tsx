@@ -8,6 +8,8 @@ import type { SongInstrument } from "@/lib/types";
 type Collaborator = { userId: string; name: string; sectionId: string; partId: string; instrument?: SongInstrument; step?: number; updatedAt: number };
 type Cursor = { sectionId: string; partId: string; instrument?: SongInstrument; step?: number };
 type Channel = NonNullable<ReturnType<NonNullable<ReturnType<typeof getSongCloudClient>>["channel"]>>;
+export type SharedTransportState = { mode: string; barIndex: number; fraction: number; loop: boolean; countInRemainingMs?: number };
+export type SharedTransportMessage = SharedTransportState & { sentAt: number; senderName: string };
 
 function mergePartEdits(base:DrumPart,local:DrumPart,remote:DrumPart):DrumPart{
   const key=(hit:DrumPart["hits"][number])=>`${hit.instrument}:${hit.step}`;
@@ -62,27 +64,58 @@ function mergeSongEdits(base:DrumSong,local:DrumSong,remote:DrumSong):DrumSong{
 
 const stableSong=(song:DrumSong)=>JSON.stringify({...song,updatedAt:""});
 
-export function SongBuilderCollaboration({ song, sectionId, partId, cursor, onRemoteSong }: {
+export function SongBuilderCollaboration({ song, sectionId, partId, cursor, transport, onRemoteSong, onRemoteTransport, onStopFollowing }: {
   song: DrumSong;
   sectionId: string;
   partId: string;
   cursor: { instrument: SongInstrument; step: number } | null;
+  transport: SharedTransportState;
   onRemoteSong: (song: DrumSong) => void;
+  onRemoteTransport: (transport: SharedTransportMessage) => void;
+  onStopFollowing: () => void;
 }) {
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [status, setStatus] = useState("Sign in and review a shared cloud library to show live section activity.");
   const [revision, setRevision] = useState(0);
+  const [transportLeader, setTransportLeader] = useState(false);
+  const [followingRemote, setFollowingRemote] = useState(true);
+  const [remoteLeaderName, setRemoteLeaderName] = useState("");
   const channelRef=useRef<Channel|null>(null);
   const accountRef=useRef("");
   const canPublishRef=useRef(false);
   const nameRef=useRef("Drummer");
   const cursorRef=useRef<Cursor>({sectionId,partId});
   const onRemoteRef=useRef(onRemoteSong);
+  const onRemoteTransportRef=useRef(onRemoteTransport);
+  const transportRef=useRef(transport);
+  const transportLeaderRef=useRef(transportLeader);
+  const followingRemoteRef=useRef(followingRemote);
+  const lastRemoteTransportRef=useRef<SharedTransportMessage|null>(null);
   const lastSongRef=useRef(song);
   const lastBroadcastSongRef=useRef(song);
   const ignoreVersionRef=useRef("");
   cursorRef.current={sectionId,partId,...(cursor??{})};
   onRemoteRef.current=onRemoteSong;
+  onRemoteTransportRef.current=onRemoteTransport;
+  transportRef.current=transport;
+  transportLeaderRef.current=transportLeader;
+  followingRemoteRef.current=followingRemote;
+
+  useEffect(()=>{setTransportLeader(false);setFollowingRemote(true);setRemoteLeaderName("");lastRemoteTransportRef.current=null;},[song.id]);
+
+  useEffect(()=>{
+    if(!transportLeader)return;
+    const publish=()=>{
+      const channel=channelRef.current;
+      if(!channel||!accountRef.current)return;
+      const snapshot=transportRef.current;
+      const payload={songId:song.id,senderId:accountRef.current,senderName:nameRef.current,...snapshot,sentAt:Date.now()};
+      void channel.send({type:"broadcast",event:"song-transport",payload}).catch(()=>setStatus("Could not share rehearsal transport. Check the library connection."));
+    };
+    publish();
+    const timer=window.setInterval(publish,400);
+    return()=>window.clearInterval(timer);
+  },[song.id,transportLeader]);
 
   useEffect(() => {
     const refresh = () => setRevision(value => value + 1);
@@ -139,6 +172,15 @@ export function SongBuilderCollaboration({ song, sectionId, partId, cursor, onRe
         onRemoteRef.current(incoming);
         setStatus(`Updated live from ${String(message.payload?.name??"a collaborator").slice(0,48)}.`);
       });
+      channel.on("broadcast", { event: "song-transport" }, message => {
+        const payload=message.payload;
+        if(!active||payload?.songId!==song.id||payload?.senderId===accountRef.current||typeof payload?.mode!=="string"||!Number.isInteger(payload?.barIndex)||!Number.isFinite(payload?.fraction)||typeof payload?.loop!=="boolean")return;
+        const snapshot:SharedTransportMessage={mode:payload.mode,barIndex:Math.max(0,Number(payload.barIndex)),fraction:Math.max(0,Math.min(1,Number(payload.fraction))),loop:payload.loop,countInRemainingMs:Number.isFinite(payload.countInRemainingMs)?Math.max(0,Math.min(30_000,Number(payload.countInRemainingMs))):undefined,sentAt:Number(payload.sentAt)||Date.now(),senderName:String(payload.senderName??"A collaborator").slice(0,48)};
+        lastRemoteTransportRef.current=snapshot;
+        setRemoteLeaderName(snapshot.senderName);
+        if(transportLeaderRef.current||!followingRemoteRef.current)return;
+        onRemoteTransportRef.current(snapshot);
+      });
       channel.subscribe(async state => {
         if (state !== "SUBSCRIBED" || !active || !channel) return;
         const current=cursorRef.current;
@@ -188,5 +230,20 @@ export function SongBuilderCollaboration({ song, sectionId, partId, cursor, onRe
     return()=>window.clearTimeout(timer);
   },[song]);
 
-  return <section className="song-builder-collaboration" aria-label="Song Builder collaboration"><h3>Live editing</h3><p>{status}</p>{collaborators.length>0&&<ul>{collaborators.map(person=>{const section=song.sections.find(item=>item.id===person.sectionId);const part=section?.parts.find(item=>item.id===person.partId);return <li key={person.userId}><strong>{person.name}</strong><span>In {section?.name??"another section"}{part?` · ${part.name}`:""}{person.instrument&&Number.isInteger(person.step)?` · ${person.instrument} step ${person.step!+1}`:""}</span></li>;})}</ul>}<small>Members of this reviewed cloud library see section presence. Owners and editors receive note edits in real time; viewers remain read-only. Cursor and edits are temporary until the song is saved to the shared library.</small></section>;
+  return <section className="song-builder-collaboration" aria-label="Song Builder collaboration">
+    <h3>Live editing and rehearsal</h3>
+    <p>{status}</p>
+    <div className="song-builder-live-transport">
+      <span>{transportLeader ? "You are leading the shared rehearsal" : remoteLeaderName ? followingRemote ? `${remoteLeaderName} is leading the shared rehearsal` : `${remoteLeaderName} is available to follow` : "No shared rehearsal leader"}</span>
+      <button type="button" aria-pressed={transportLeader} onClick={() => { onStopFollowing(); setFollowingRemote(false); setTransportLeader(true); }}>{transportLeader ? "Leading playback" : "Lead shared rehearsal"}</button>
+      {(transportLeader || (remoteLeaderName && followingRemote)) && <button type="button" aria-pressed={!followingRemote} onClick={() => { onStopFollowing(); setTransportLeader(false); setFollowingRemote(false); }}>Follow local playback</button>}
+      {!transportLeader && !followingRemote && remoteLeaderName && <button type="button" aria-pressed={followingRemote} onClick={() => { setFollowingRemote(true); const latest = lastRemoteTransportRef.current; if (latest) onRemoteTransport(latest); }}>Follow {remoteLeaderName}'s rehearsal</button>}
+    </div>
+    {collaborators.length > 0 && <ul>{collaborators.map(person => {
+      const section = song.sections.find(item => item.id === person.sectionId);
+      const part = section?.parts.find(item => item.id === person.partId);
+      return <li key={person.userId}><strong>{person.name}</strong><span>In {section?.name ?? "another section"}{part ? ` · ${part.name}` : ""}{person.instrument && Number.isInteger(person.step) ? ` · ${person.instrument} step ${person.step! + 1}` : ""}</span></li>;
+    })}</ul>}
+    <small>Members of this reviewed cloud library see section presence. Owners and editors receive note edits in real time; everyone with access can lead the shared transport. Cursor and edits are temporary until the song is saved to the shared library.</small>
+  </section>;
 }

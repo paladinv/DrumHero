@@ -13,12 +13,12 @@ Drum Hero supports 24 interface locales. Translation catalogs and `dir` switchin
 | Guided session and progress map | Check timer pause/resume behavior, status announcements, goal controls, weekly date boundaries, and cross-mode evidence labels | Not signed off |
 | Home review queue and next action | Confirm due song reviews, older lesson skills, and weak reliable Trainer patterns open the right activity; verify the recommendation updates when the active profile changes and the queue refreshes after returning from practice | Not signed off |
 | Learner data scope | Switch profiles and confirm displayed progress counts change while shared songs, custom grooves, and audio remain visibly device-wide | Not signed off |
-| Song Library and Play-Along | Review search, forms and starter arrangements, stem labels, source/rights notes, import errors, storage removal, and export confirmations | Not signed off |
+| Song Library and Play-Along | Review search, forms and starter arrangements, stem labels, source/rights notes, the required package-export metadata gate, import errors, storage removal, and export confirmations; on Android, review imported-song search, notation, and practice-bar controls | Not signed off |
 | Shared classroom groups | Review join consent, invite-code handling, assignment instructions, submission status, member removal, and translated privacy text with educators and learners/guardians | Not signed off |
 | Technique video clips | Review captions, caption language selection, playback controls, mobile layout, and the text/visual fallback for every published clip | No expert clips supplied |
 | RTL layouts | Check Arabic, Hebrew, Persian, and Urdu for navigation order, form alignment, chart direction, and overflowing controls | Not signed off |
 | Keyboard access | Complete every form and playback action without a pointer; verify visible focus and logical focus order | Not signed off |
-| Screen readers | Check VoiceOver on iOS and Safari, TalkBack in Android Chrome and the native Android app, and a desktop screen reader; verify labels, live status, audio controls, and custom canvases | Not signed off |
+| Screen readers | Check VoiceOver on iOS and Safari, TalkBack in Android Chrome and the native Android app, and a desktop screen reader; verify labels, live status, audio controls, custom canvases, Android song notation, microphone status, reminder switch/time, and touch-pad names | Not signed off |
 | Text scaling and motion | Increase text size, use 200% zoom, enable reduced motion, and check mobile touch targets | Not signed off |
 | WebView/native shell | Check iOS song creation, the five-voice pattern grid, song and progress backup import/export, MIDI and microphone setup, import errors, and Song Library at every supported size and locale, including landscape and Dynamic Type | Not signed off |
 

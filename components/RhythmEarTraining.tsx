@@ -1,8 +1,9 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { createDrumAudio, type DrumAudio } from "@/lib/audio";
-import { adaptiveEarLevel, createEarComparison, createEarExercise, createEarVoiceComparison, earBarDurationMs, earHitOffsetMs, earMeterGroups, earMeterGroupings, earPatternBank, EAR_FEELS, EAR_GROOVE_STYLES, EAR_GROOVE_LESSONS, EAR_CHALLENGE_PACKS_KEY, EAR_HISTORY_KEY, EAR_LEVELS, EAR_METERS, EAR_REVIEW_KEY, EAR_TEACHER_REPORTS_KEY, explainEarAnswer, parseEarChallengePack, parseEarChallengePacks, parseEarHistory, parseEarReviewSchedule, parseEarTeacherReport, parseEarTeacherReports, recommendedEarLevel, scoreEarAttempt, scoreEarDictation, skillsForEarPattern, updateEarReviewSchedule, type EarAssignment, type EarAttempt, type EarChallengeItem, type EarChallengePack, type EarChallengePackPayload, type EarErrorCell, type EarExercise, type EarFeel, type EarFeelDetail, type EarGrooveStyle, type EarLevel, type EarMeter, type EarMode, type EarResult, type EarReviewItem, type EarSkill, type EarTeacherReport, type EarTimingCell, type EarVoiceStats } from "@/lib/ear-training";
+import { adaptiveEarLevel, createEarComparison, createEarExercise, createEarVoiceComparison, earBarDurationMs, earHitOffsetMs, earMeterGroups, earMeterGroupings, earPatternBank, EAR_FEELS, EAR_GROOVE_STYLES, EAR_GROOVE_LESSONS, EAR_CHALLENGE_PACKS_KEY, EAR_HISTORY_KEY, EAR_LEVELS, EAR_METERS, EAR_REVIEW_KEY, EAR_TEACHER_REPORTS_KEY, explainEarAnswer, parseEarChallengePack, parseEarChallengePacks, parseEarHistory, parseEarReviewSchedule, parseEarTeacherReport, parseEarTeacherReports, recommendedEarLevel, scoreEarAttempt, scoreEarDictation, skillsForEarPattern, updateEarReviewSchedule, type EarAssignment, type EarAttempt, type EarChallengeItem, type EarChallengePack, type EarChallengePackPayload, type EarErrorCell, type EarExercise, type EarFeel, type EarFeelDetail, type EarGrooveStyle, type EarLevel, type EarMeter, type EarMode, type EarPhraseBars, type EarResult, type EarReviewItem, type EarRudiment, type EarSkill, type EarTeacherReport, type EarTimingCell, type EarVoiceStats } from "@/lib/ear-training";
 import { learnerStorageKey } from "@/lib/learner-profiles";
 import { classifyOffset, stepDurationMs } from "@/lib/scoring";
 import { createTrainerPatternFromMidi, trainerMidiPreview, trainerPatternMidi } from "@/lib/trainer-midi";
@@ -14,6 +15,7 @@ import styles from "./RhythmEarTraining.module.css";
 import { TrainerNotationView } from "./TrainerNotationView";
 import { EarAudioImportPanel } from "./EarAudioImportPanel";
 import { EarSongLibraryPanel, type SongEarSelection } from "./EarSongLibraryPanel";
+import { earPatternToMusicXml } from "@/lib/ear-training-export";
 
 type Phase = "ready" | "loading" | "listening" | "preview" | "recall-delay" | "answer" | "locate" | "count-in" | "playing" | "results";
 const pads: Array<{ voice: Instrument; label: string; code: string; key: string }> = [
@@ -24,11 +26,49 @@ const pads: Array<{ voice: Instrument; label: string; code: string; key: string 
   { voice: "crash", label: "Crash", code: "KeyY", key: "Y" },
 ];
 
-const skillLabels: Record<EarSkill, string> = { rests: "Hearing rests", offbeats: "Hearing offbeats", "sixteenth-notes": "Sixteenth-note spacing", triplets: "Triplet timing", syncopation: "Groove syncopation", "voice-separation": "Separating drum voices", meter: "Recognizing meter", "meter-grouping": "Hearing odd-meter groupings", swing: "Hearing swing and shuffle", pocket: "Hearing pushed and laid-back pocket", "error-detection": "Finding rhythmic changes", "pulse-stability": "Holding the pulse through silence", "cross-rhythm": "Hearing cross-rhythms", quintuplets: "Hearing quintuplets", "tempo-control": "Holding tempo as it changes" };
+const skillLabels: Record<EarSkill, string> = { rests: "Hearing rests", offbeats: "Hearing offbeats", "sixteenth-notes": "Sixteenth-note spacing", triplets: "Triplet timing", syncopation: "Groove syncopation", "voice-separation": "Separating drum voices", meter: "Recognizing meter", "meter-grouping": "Hearing odd-meter groupings", swing: "Hearing swing and shuffle", pocket: "Hearing pushed and laid-back pocket", "error-detection": "Finding rhythmic changes", "pulse-stability": "Holding the pulse through silence", "cross-rhythm": "Hearing cross-rhythms", quintuplets: "Hearing quintuplets", "tempo-control": "Holding tempo as it changes", rudiments: "Recognizing drum rudiments" };
 const timingLabels = { great: "Great", good: "Good", miss: "Missed", extra: "Extra" } as const;
 const DEFAULT_EAR_MIDI_MAP: Record<Instrument, number> = { kick: 36, snare: 38, hihat: 42, tom: 50, crash: 49 };
 type EarMidiMaps = Record<string, Partial<Record<Instrument, number>>>;
 type NotationFeedback = Array<{ instrument: Instrument; step: number; review: "matched" | "missed" | "early" | "late" | "violation" }>;
+const EAR_RUDIMENTS: EarRudiment[] = ["single-stroke", "double-stroke", "paradiddle", "flam", "drag", "buzz-roll"];
+const rudimentLabels: Record<EarRudiment, string> = { "single-stroke": "Single-stroke roll", "double-stroke": "Double-stroke roll", paradiddle: "Paradiddle", flam: "Flam", drag: "Drag", "buzz-roll": "Buzz roll" };
+
+function createRudimentPattern(rudiment: EarRudiment, meter: EarMeter, bars: EarPhraseBars): PracticePattern {
+  const [numerator, denominator] = meter.split("/").map(Number);
+  const beatsPerBar = numerator! * 4 / denominator!;
+  const beats = beatsPerBar * bars;
+  const totalSteps = Math.round(beats * 4);
+  const sticking = rudiment === "single-stroke" ? ["R", "L"] : rudiment === "double-stroke" ? ["R", "R", "L", "L"] : ["R", "L", "R", "R", "L", "R", "L", "L"];
+  const hits: PatternHit[] = [];
+  for (let step = 0; step < totalSteps; step += 1) {
+    if (rudiment === "flam" || rudiment === "drag" || rudiment === "buzz-roll") {
+      if (step % 4 !== 0) continue;
+      hits.push({ step, instrument: "snare", sticking: sticking[(step / 4) % sticking.length] as "R" | "L", accent: true, articulation: rudiment === "buzz-roll" ? "buzz" : rudiment });
+    } else {
+      const hand = sticking[step % sticking.length] as "R" | "L";
+      const accent = rudiment === "single-stroke" ? step % 4 === 0 : rudiment === "double-stroke" ? step % 2 === 0 : step % 8 === 0;
+      hits.push({ step, instrument: "snare", sticking: hand, ...(accent ? { accent: true, velocityTarget: 112 } : { velocityTarget: 72 }) });
+    }
+  }
+  return { id: `ear-rudiment-${rudiment}-${meter}-${bars}`, name: "Rudiment recognition", level: "Intermediate", description: "Listen for the sticking and ornament in the snare phrase.", subdivision: 16, beats, defaultBpm: 72, tempoRange: [40, 140], hits };
+}
+
+function scheduleEarPattern(player: DrumAudio, pattern: PracticePattern, start: number, bpm: number, feel: EarFeel, feelDetail?: EarFeelDetail) {
+  for (const note of pattern.hits) {
+    const at = start + note.step * stepDurationMs(bpm, pattern.subdivision) + earHitOffsetMs(note.step, bpm, pattern.subdivision, feel, note.instrument, feelDetail);
+    if (note.articulation === "flam") {
+      player.scheduleHit(note.instrument, at - 42, false, 42);
+      player.scheduleHit(note.instrument, at, true, note.velocityTarget ?? 116);
+    } else if (note.articulation === "drag") {
+      player.scheduleHit(note.instrument, at - 82, false, 34);
+      player.scheduleHit(note.instrument, at - 50, false, 40);
+      player.scheduleHit(note.instrument, at, true, note.velocityTarget ?? 116);
+    } else if (note.articulation === "buzz") {
+      for (const offset of [92, 72, 52, 32, 12, 0]) player.scheduleHit(note.instrument, at - offset, false, offset ? 48 : note.velocityTarget ?? 116);
+    } else player.scheduleHit(note.instrument, at, note.accent, note.velocityTarget);
+  }
+}
 
 function notationFeedback(result: ReturnType<typeof scoreEarAttempt> | null): NotationFeedback {
   if (!result) return [];
@@ -136,6 +176,19 @@ function scheduleCountIn(player: DrumAudio, start: number, bpm: number, meter: E
     for (let pulse = 0; pulse < pulses.length; pulse++) { player.scheduleClick(start + bar * barDuration + offset, pulse === 0); offset += pulses[pulse]!; }
   }
 }
+function scheduleHapticPulses(start: number, bpm: number, meter: EarMeter, bars: number, grouping: number[] | undefined, timers: { current: ReturnType<typeof setTimeout>[] }) {
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function" || bars <= 0) return;
+  const pulses = countInPulseDurations(bpm, meter, grouping);
+  const barDuration = pulses.reduce((sum, duration) => sum + duration, 0);
+  for (let bar = 0; bar < bars; bar += 1) {
+    let offset = 0;
+    for (let pulse = 0; pulse < pulses.length; pulse += 1) {
+      const delay = Math.max(0, Math.round(start + bar * barDuration + offset - performance.now()));
+      timers.current.push(setTimeout(() => navigator.vibrate(pulse === 0 ? 24 : 12), delay));
+      offset += pulses[pulse]!;
+    }
+  }
+}
 function localDayKey() { const today = new Date(); return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`; }
 function localWeekKey(date = new Date()) {
   const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -178,8 +231,8 @@ function songPartAnswerChoices(pattern: PracticePattern, seed: number) {
   const choices = [...distractors.slice(0, answer), pattern, ...distractors.slice(answer, 3)];
   return { choices, answer };
 }
-function modeForSkill(skill: EarSkill): EarMode { return skill === "tempo-control" ? "tempo-estimate" : skill === "meter" ? "meter" : skill === "meter-grouping" ? "grouping" : skill === "swing" || skill === "pocket" ? "feel-detail" : skill === "voice-separation" ? "voice-change" : skill === "syncopation" ? "identify" : skill === "error-detection" ? "error" : "play"; }
-function levelForSkill(skill: EarSkill): EarLevel { return skill === "tempo-control" || skill === "sixteenth-notes" ? "rhythm" : skill === "triplets" || skill === "swing" || skill === "quintuplets" ? "triplet" : skill === "voice-separation" || skill === "syncopation" || skill === "cross-rhythm" || skill === "meter-grouping" || skill === "pocket" ? "groove" : "pulse"; }
+function modeForSkill(skill: EarSkill): EarMode { return skill === "rudiments" ? "rudiment" : skill === "tempo-control" ? "tempo-estimate" : skill === "meter" ? "meter" : skill === "meter-grouping" ? "grouping" : skill === "swing" || skill === "pocket" ? "feel-detail" : skill === "voice-separation" ? "voice-change" : skill === "syncopation" ? "identify" : skill === "error-detection" ? "error" : "play"; }
+function levelForSkill(skill: EarSkill): EarLevel { return skill === "rudiments" || skill === "triplets" || skill === "swing" || skill === "quintuplets" ? "triplet" : skill === "tempo-control" || skill === "sixteenth-notes" ? "rhythm" : skill === "voice-separation" || skill === "syncopation" || skill === "cross-rhythm" || skill === "meter-grouping" || skill === "pocket" ? "groove" : "pulse"; }
 type PlanFocus = "automatic" | EarSkill;
 type SessionLength = 3 | 5 | 10;
 type PlanSettings = { length: SessionLength; focus: PlanFocus; mixed?: boolean };
@@ -668,7 +721,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
   const [tempoGuess, setTempoGuess] = useState(90);
   const [feelDetailKind, setFeelDetailKind] = useState<"swing" | "pocket">("swing");
   const [countingSystem, setCountingSystem] = useState<CountingSystem>("numeric");
-  const [phraseBars, setPhraseBars] = useState<1 | 2>(1);
+  const [phraseBars, setPhraseBars] = useState<EarPhraseBars>(1);
   const [meter, setMeter] = useState<EarMeter>("4/4");
   const [feel, setFeel] = useState<EarFeel>("straight");
   const [grooveStyle, setGrooveStyle] = useState<EarGrooveStyle>("free");
@@ -688,7 +741,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
   const [lastScore, setLastScore] = useState<number | null>(null);
   const [previewSpeed, setPreviewSpeed] = useState<75 | 100>(75);
   const [previewVoice, setPreviewVoice] = useState<Instrument | "all">("all");
-  const [reviewSegment, setReviewSegment] = useState<"full" | "1" | "2">("full");
+  const [reviewSegment, setReviewSegment] = useState("full");
   const [exercise, setExercise] = useState<EarExercise | null>(null);
   const [phase, setPhase] = useState<Phase>("ready");
   const [beat, setBeat] = useState(0);
@@ -698,6 +751,10 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
   const [notationStep, setNotationStep] = useState<number | undefined>(undefined);
   const [liveFeedback, setLiveFeedback] = useState<{ message: string; kind: "great" | "good" | "miss" | "extra" } | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [confidenceRating, setConfidenceRating] = useState<1 | 2 | 3 | null>(null);
+  const [hapticPulse, setHapticPulse] = useState(false);
+  const [hapticsAvailable, setHapticsAvailable] = useState(false);
+  const [printScore, setPrintScore] = useState(false);
   const [errorLocation, setErrorLocation] = useState<number | null>(null);
   const [dictationDraft, setDictationDraft] = useState<PatternHit[]>([]);
   const [dictationVoice, setDictationVoice] = useState<Instrument>("snare");
@@ -740,6 +797,21 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
   const calibrationTimer = useRef<number | null>(null);
   const calibrationActiveRef = useRef(false);
   const generation = useRef(0);
+
+  useEffect(() => { setHapticsAvailable(typeof navigator !== "undefined" && typeof navigator.vibrate === "function"); }, []);
+  useEffect(() => {
+    if (!printScore) return;
+    document.body.classList.add("rhythm-ear-score-printing");
+    const print = () => window.print();
+    const timer = window.setTimeout(print, 80);
+    const finish = () => setPrintScore(false);
+    window.addEventListener("afterprint", finish, { once: true });
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("afterprint", finish);
+      document.body.classList.remove("rhythm-ear-score-printing");
+    };
+  }, [printScore]);
   const capture = useRef<{ start: number; end: number; hits: EarAttempt[] } | null>(null);
   const calibrationCapture = useRef<EarCalibrationCapture | null>(null);
   const midiProfileKeyRef = useRef("midi-default");
@@ -776,6 +848,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     closeMidiInputs(midiInputs.current);
     audio.current?.close();
     audio.current = null;
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") navigator.vibrate(0);
   }, []);
 
   useEffect(() => {
@@ -928,8 +1001,8 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
       return { instrument, expected, matched: rated.filter(hit => hit.rating === "great" || hit.rating === "good").length, extra: rated.filter(hit => hit.rating === "extra").length, meanOffsetMs: offsets.length ? Math.round(offsets.reduce((sum, offset) => sum + offset, 0) / offsets.length) : null };
     }) : [];
     const activePack = activeChallenge ? challengePacks.find(pack => pack.id === activeChallenge.packId) : undefined;
-    const isAssisted = assistedOverride || (notationSupport !== "off" && (modeOverride === "play" || modeOverride === "voice" || modeOverride === "tempo-transfer" || modeOverride === "tempo-estimate"));
-    const entry: EarResult = { id: crypto.randomUUID(), playedAt: new Date().toISOString(), level: modeOverride === "dropout" || modeOverride === "tempo-ramp" ? "pulse" : level, mode: modeOverride, score, replays: Math.max(0, listens - 1), assisted: isAssisted, skills, meter: overrides.meter ?? (modeOverride === "dropout" ? "4/4" : trainingExercise?.meter ?? meter), feel: modeOverride === "dropout" || modeOverride === "tempo-ramp" ? "straight" : trainingExercise?.feel ?? feel, ...((overrides.grouping ?? trainingExercise?.grouping) ? { grouping: overrides.grouping ?? trainingExercise?.grouping } : {}), bars: overrides.bars ?? (modeOverride === "dropout" ? 4 : trainingExercise?.bars ?? phraseBars), style: trainingExercise?.style ?? grooveStyle, focus: trainingExercise?.focus, complexity: trainingExercise?.complexity ?? complexity, voice: trainingExercise?.voice, lessonId: trainingExercise?.lessonId, ...(trainingExercise || overrides.bpm ? { bpm: overrides.bpm ?? (modeOverride === "tempo-transfer" ? transferAnswerBpm : bpm), ...(trainingExercise ? { subdivision: trainingExercise.pattern.subdivision } : {}) } : {}), ...(modeOverride === "tempo-transfer" || modeOverride === "tempo-estimate" ? { sourceBpm: trainingExercise?.sourceBpm ?? bpm } : {}), ...((modeOverride === "play" || modeOverride === "voice" || modeOverride === "tempo-transfer") ? { input: inputMode } : {}), ...(scoredResult ? { meanOffsetMs, timedHits: timed.length, voiceStats, ...(timingCells ? { timingCells } : {}), ...(errorCells.length ? { errorCells } : {}), ...(scoredResult.summary.dynamicsScore === undefined ? {} : { dynamicsScore: scoredResult.summary.dynamicsScore }) } : {}), ...(activeChallenge && modeOverride !== "tempo-ramp" ? { challengePackId: activeChallenge.packId, challengePackIndex: activeChallenge.index } : {}), ...(activePack?.assignment && modeOverride !== "tempo-ramp" ? { assignmentId: activePack.assignment.id } : {}), ...(activeWeeklyChallengeId && modeOverride !== "tempo-ramp" ? { weeklyChallengeId: activeWeeklyChallengeId } : {}) };
+    const isAssisted = assistedOverride || hapticPulse || (notationSupport !== "off" && (modeOverride === "play" || modeOverride === "voice" || modeOverride === "tempo-transfer" || modeOverride === "tempo-estimate"));
+    const entry: EarResult = { id: crypto.randomUUID(), playedAt: new Date().toISOString(), level: modeOverride === "dropout" || modeOverride === "tempo-ramp" ? "pulse" : level, mode: modeOverride, score, replays: Math.max(0, listens - 1), assisted: isAssisted, ...(confidenceRating ? { confidence: confidenceRating } : {}), skills, meter: overrides.meter ?? (modeOverride === "dropout" ? "4/4" : trainingExercise?.meter ?? meter), feel: modeOverride === "dropout" || modeOverride === "tempo-ramp" ? "straight" : trainingExercise?.feel ?? feel, ...((overrides.grouping ?? trainingExercise?.grouping) ? { grouping: overrides.grouping ?? trainingExercise?.grouping } : {}), bars: overrides.bars ?? (modeOverride === "dropout" ? 4 : trainingExercise?.bars ?? phraseBars), style: trainingExercise?.style ?? grooveStyle, focus: trainingExercise?.focus, complexity: trainingExercise?.complexity ?? complexity, voice: trainingExercise?.voice, lessonId: trainingExercise?.lessonId, ...(trainingExercise || overrides.bpm ? { bpm: overrides.bpm ?? (modeOverride === "tempo-transfer" ? transferAnswerBpm : bpm), ...(trainingExercise ? { subdivision: trainingExercise.pattern.subdivision } : {}) } : {}), ...(modeOverride === "tempo-transfer" || modeOverride === "tempo-estimate" ? { sourceBpm: trainingExercise?.sourceBpm ?? bpm } : {}), ...((modeOverride === "play" || modeOverride === "voice" || modeOverride === "tempo-transfer") ? { input: inputMode } : {}), ...(scoredResult ? { meanOffsetMs, timedHits: timed.length, voiceStats, ...(timingCells ? { timingCells } : {}), ...(errorCells.length ? { errorCells } : {}), ...(scoredResult.summary.dynamicsScore === undefined ? {} : { dynamicsScore: scoredResult.summary.dynamicsScore }) } : {}), ...(activeChallenge && modeOverride !== "tempo-ramp" ? { challengePackId: activeChallenge.packId, challengePackIndex: activeChallenge.index } : {}), ...(activePack?.assignment && modeOverride !== "tempo-ramp" ? { assignmentId: activePack.assignment.id } : {}), ...(activeWeeklyChallengeId && modeOverride !== "tempo-ramp" ? { weeklyChallengeId: activeWeeklyChallengeId } : {}) };
     const next = [...historyRef.current, entry].slice(-100);
     historyRef.current = next;
     setHistory(next);
@@ -948,14 +1021,15 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
       try { localStorage.setItem(planStorageKey, JSON.stringify({ version: 3, day: localDayKey(), scores: nextPlanScores, length: targetLength, focus: planSettings?.focus ?? "automatic", mixed: planSettings?.mixed ?? false, ...(planSettings?.mixed ? { skills: mixedSkillQueue } : {}) })); } catch { /* The session can continue if daily plan storage is unavailable. */ }
     }
     window.dispatchEvent(new Event("drum-hero:ear-training-change"));
-  }, [level, mode, meter, feel, grooveStyle, complexity, exercise, phraseBars, listens, assisted, notationSupport, inputMode, bpm, transferAnswerBpm, planScores, planSettings, mixedSkillQueue, activeChallenge, activeWeeklyChallengeId, challengePacks, reviewSchedule, storageKey, reviewStorageKey, planStorageKey, t]);
+  }, [level, mode, meter, feel, grooveStyle, complexity, exercise, phraseBars, listens, assisted, confidenceRating, hapticPulse, notationSupport, inputMode, bpm, transferAnswerBpm, planScores, planSettings, mixedSkillQueue, activeChallenge, activeWeeklyChallengeId, challengePacks, reviewSchedule, storageKey, reviewStorageKey, planStorageKey, t]);
 
-  const newExercise = useCallback((nextLevel = level, options: { meter?: EarMeter; feel?: EarFeel; bars?: 1 | 2; style?: EarGrooveStyle; focus?: EarSkill; complexity?: 1 | 2 | 3; grouping?: number[] } = { meter, feel, bars: phraseBars, style: grooveStyle, ...(focusSkill ? { focus: focusSkill } : {}), ...(grouping.length ? { grouping } : {}), complexity }, exerciseMode = mode) => {
+  const newExercise = useCallback((nextLevel = level, options: { meter?: EarMeter; feel?: EarFeel; bars?: EarPhraseBars; style?: EarGrooveStyle; focus?: EarSkill; complexity?: 1 | 2 | 3; grouping?: number[] } = { meter, feel, bars: phraseBars, style: grooveStyle, ...(focusSkill ? { focus: focusSkill } : {}), ...(grouping.length ? { grouping } : {}), complexity }, exerciseMode = mode) => {
     stop();
     setActiveChallenge(null);
     setActiveWeeklyChallengeId(null);
     const seed = crypto.getRandomValues(new Uint32Array(1))[0];
     const targetFocus = exerciseMode === "grouping" ? "meter-grouping"
+      : exerciseMode === "rudiment" ? "rudiments"
       : exerciseMode === "feel-detail" ? options.focus === "swing" || options.focus === "pocket" ? options.focus : feelDetailKind
       : "focus" in options ? options.focus : focusSkill;
     const detailKind = targetFocus === "swing" ? "swing" : targetFocus === "pocket" ? "pocket" : feelDetailKind;
@@ -985,18 +1059,21 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
       complexity: options.complexity ?? complexity,
       ...(targetGrouping ? { grouping: targetGrouping } : {}),
       ...(targetFocus ? { focus: targetFocus } : {}),
+      includeChoices: exerciseMode === "identify",
     };
     if ((targetFocus === "cross-rhythm" || targetFocus === "quintuplets") && meter !== "4/4") setMeter("4/4");
     const base = createEarExercise(nextLevel, seed, exercise?.pattern.id, targetOptions);
-    const voices = [...new Set(base.pattern.hits.map(hit => hit.instrument))];
-    const comparison = exerciseMode === "voice-change" ? createEarVoiceComparison(base.pattern, seed ^ 0x417cb9) : createEarComparison(base.pattern, seed ^ 0x417cb9);
+    const rudiment = exerciseMode === "rudiment" ? EAR_RUDIMENTS[(seed >>> 9) % EAR_RUDIMENTS.length]! : undefined;
+    const pattern = rudiment ? createRudimentPattern(rudiment, targetMeter, options.bars ?? phraseBars) : base.pattern;
+    const voices = [...new Set(pattern.hits.map(hit => hit.instrument))];
+    const comparison = exerciseMode === "voice-change" ? createEarVoiceComparison(pattern, seed ^ 0x417cb9) : createEarComparison(pattern, seed ^ 0x417cb9);
     const groupingChoices = exerciseMode === "grouping" ? earMeterGroupings(targetMeter) : undefined;
     const groupingAnswer = groupingChoices?.findIndex(value => value.join("+") === targetGrouping?.join("+")) ?? -1;
     const voiceChoices: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
     const changedVoice = comparison.changedVoice;
     const detailAnswer = feelDetail ? detailChoices!.indexOf(feelDetail.value) : -1;
-    const next: EarExercise = { ...base, comparison, ...(exerciseMode === "voice" && voices.length ? { voice: voices[(seed >>> 13) % voices.length]! } : {}), ...(groupingChoices?.length ? { groupingChoices, answer: Math.max(0, groupingAnswer) } : {}), ...(changedVoice ? { changedVoice, answer: voiceChoices.indexOf(changedVoice) } : {}), ...(exerciseMode === "tempo-estimate" ? { sourceBpm: 52 + ((seed >>> 7) % 99), answer: 0 } : {}), ...(feelDetail ? { feelDetail, feelDetailChoices: detailChoices, answer: detailAnswer } : {}) };
-    setExercise(next); setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage(""); setLiveFeedback(null); setTempoGuess(90); setSongLinkedLabel("");
+    const next: EarExercise = { ...base, pattern, comparison, ...(exerciseMode === "voice" && voices.length ? { voice: voices[(seed >>> 13) % voices.length]! } : {}), ...(groupingChoices?.length ? { groupingChoices, answer: Math.max(0, groupingAnswer) } : {}), ...(changedVoice ? { changedVoice, answer: voiceChoices.indexOf(changedVoice) } : {}), ...(exerciseMode === "tempo-estimate" ? { sourceBpm: 52 + ((seed >>> 7) % 99), answer: 0 } : {}), ...(feelDetail ? { feelDetail, feelDetailChoices: detailChoices, answer: detailAnswer } : {}), ...(rudiment ? { rudiment, rudimentChoices: EAR_RUDIMENTS, answer: EAR_RUDIMENTS.indexOf(rudiment) } : {}) };
+    setExercise(next); setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setConfidenceRating(null); setReviewSegment("full"); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage(""); setLiveFeedback(null); setTempoGuess(90); setSongLinkedLabel("");
     return next;
   }, [level, mode, meter, feel, phraseBars, exercise, stop, grooveStyle, focusSkill, complexity, grouping, feelDetailKind]);
 
@@ -1173,6 +1250,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const player = await prepareAudio();
     if (!player) return;
     setListens(count => count + 1);
+    setConfidenceRating(null);
     setPhase("listening");
     const currentMeter = current.meter;
     const playbackBpm = mode === "tempo-estimate" ? current.sourceBpm ?? bpm : bpm;
@@ -1181,13 +1259,14 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const countStart = performance.now() + 120;
     const phraseStart = countStart + countDuration;
     scheduleCountIn(player, countStart, playbackBpm, currentMeter, activeCountIn, current.grouping);
-    for (const note of current.pattern.hits) player.scheduleHit(note.instrument, phraseStart + note.step * stepDurationMs(playbackBpm, current.pattern.subdivision) + earHitOffsetMs(note.step, playbackBpm, current.pattern.subdivision, current.feel, note.instrument, current.feelDetail), note.accent, note.velocityTarget);
-    const phraseDuration = earBarDurationMs(current.pattern, playbackBpm);
     const compareMode = mode === "error" || mode === "voice" || mode === "voice-change";
+    if (hapticPulse) scheduleHapticPulses(countStart, playbackBpm, currentMeter, activeCountIn + current.bars * (compareMode ? 2 : 1), current.grouping, timers);
+    scheduleEarPattern(player, current.pattern, phraseStart, playbackBpm, current.feel, current.feelDetail);
+    const phraseDuration = earBarDurationMs(current.pattern, playbackBpm);
     if ((mode === "error" || mode === "voice-change") && current.comparison) {
-      for (const note of current.comparison.pattern.hits) player.scheduleHit(note.instrument, phraseStart + phraseDuration + 350 + note.step * stepDurationMs(playbackBpm, current.comparison.pattern.subdivision) + earHitOffsetMs(note.step, playbackBpm, current.comparison.pattern.subdivision, current.feel, note.instrument, current.feelDetail), note.accent, note.velocityTarget);
+      scheduleEarPattern(player, current.comparison.pattern, phraseStart + phraseDuration + 350, playbackBpm, current.feel, current.feelDetail);
     } else if (mode === "voice" && current.voice) {
-      for (const note of current.pattern.hits) if (note.instrument === current.voice) player.scheduleHit(note.instrument, phraseStart + phraseDuration + 350 + note.step * stepDurationMs(playbackBpm, current.pattern.subdivision) + earHitOffsetMs(note.step, playbackBpm, current.pattern.subdivision, current.feel, note.instrument, current.feelDetail), note.accent, note.velocityTarget);
+      scheduleEarPattern(player, { ...current.pattern, hits: current.pattern.hits.filter(note => note.instrument === current.voice) }, phraseStart + phraseDuration + 350, playbackBpm, current.feel, current.feelDetail);
     }
     const phraseEndDelay = 120 + countDuration + phraseDuration * (compareMode ? 2 : 1) + (compareMode ? 350 : 0) + 150;
     timers.current.push(setTimeout(() => {
@@ -1197,7 +1276,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
         timers.current.push(setTimeout(() => setPhase("answer"), recallDelay * 1000));
       } else setPhase("answer");
     }, phraseEndDelay));
-  }, [exercise, level, meter, feel, countInBars, newExercise, prepareAudio, bpm, recallSupport, listens, mode, recallDelay]);
+  }, [exercise, level, meter, feel, countInBars, newExercise, prepareAudio, bpm, recallSupport, listens, mode, recallDelay, hapticPulse]);
 
   const playAnswer = useCallback(async () => {
     if (!exercise) return;
@@ -1237,6 +1316,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     capture.current = { start, end: start + duration, hits: [] };
     setPhase("count-in"); setBeat(0);
     scheduleCountIn(player, countStart, answerBpm, currentMeter, activeCountIn, exercise.grouping);
+    if (hapticPulse) scheduleHapticPulses(countStart, answerBpm, currentMeter, activeCountIn + exercise.bars, exercise.grouping, timers);
     ticker.current = activeCountIn ? setInterval(() => { setBeat(Math.max(0, Math.min(pulseCount, countInBeatAt(performance.now() - countStart, answerBpm, currentMeter, activeCountIn, exercise.grouping)))); }, 40) : null;
     setLiveFeedback(null);
     timers.current.push(setTimeout(() => {
@@ -1248,7 +1328,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
       const scored = scoreEarAttempt(answerPattern, answerBpm, capture.current?.hits ?? [], exercise.feel, correction, exercise.feelDetail);
       capture.current = null; closeMicCapture(microphone.current); microphone.current = null; closeMidiInputs(midiInputs.current); player.silence(); setResult(scored); save(scored.summary.score, [...new Set([...skillsForEarPattern(exercise.pattern, level, exercise), ...(mode === "tempo-transfer" ? ["tempo-control" as EarSkill] : [])])], mode, exercise, assisted, { bpm: answerBpm, grouping: exercise.grouping }, scored); setPhase("results");
     }, 120 + countDuration + duration + 101));
-  }, [exercise, prepareAudio, bpm, transferAnswerBpm, countInBars, save, level, mode, inputMode, openMicrophone, openMidiInput, recallSupport, timingProfiles, t, stop, assisted]);
+  }, [exercise, prepareAudio, bpm, transferAnswerBpm, countInBars, save, level, mode, inputMode, openMicrophone, openMidiInput, recallSupport, timingProfiles, t, stop, assisted, hapticPulse]);
 
   function choose(index: number) {
     if (!exercise || phase !== "answer") return;
@@ -1305,7 +1385,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const targetHits = sourceHits.map(hit => ({ ...hit, step: Math.max(0, Math.round(hit.step - barStart)) }));
     const pattern: PracticePattern = { ...exercise.pattern, id: `ear-focused-${crypto.randomUUID()}`, name: isolateVoice ? `${mistake.instrument} focus · ${exercise.pattern.name}` : `Quiet ${mistake.instrument} · ${exercise.pattern.name}`, beats: beatsPerBar, hits: targetHits };
     const review: EarExercise = { ...exercise, pattern, bars: 1, focus: exercise.focus ?? skillsForEarPattern(exercise.pattern, level, exercise)[0] };
-    stop(); setActiveChallenge(null); setActiveWeeklyChallengeId(null); setMode("play"); setFocusSkill(review.focus); setPhraseBars(1); setExercise(review); setInputMode("pads"); setAssisted(true); setSelected(null); setErrorLocation(null); setDictationDraft([]); setResult(null); setListens(0); setPhase("ready"); setLastScore(null); setLiveFeedback(null); setMessage(t(isolateVoice ? `Focused review: listen for the ${mistake.instrument} around count ${mistake.step - barStart + 1}. This practice stays separate from first-attempt scores.` : `Focused review: keep the ${mistake.instrument} quiet around count ${mistake.step - barStart + 1}. This practice stays separate from first-attempt scores.`));
+    stop(); setActiveChallenge(null); setActiveWeeklyChallengeId(null); setMode("play"); setFocusSkill(review.focus); setPhraseBars(1); setExercise(review); setInputMode("pads"); setAssisted(true); setSelected(null); setConfidenceRating(null); setReviewSegment("full"); setErrorLocation(null); setDictationDraft([]); setResult(null); setListens(0); setPhase("ready"); setLastScore(null); setLiveFeedback(null); setMessage(t(isolateVoice ? `Focused review: listen for the ${mistake.instrument} around count ${mistake.step - barStart + 1}. This practice stays separate from first-attempt scores.` : `Focused review: keep the ${mistake.instrument} quiet around count ${mistake.step - barStart + 1}. This practice stays separate from first-attempt scores.`));
   };
 
   const checkDictation = () => {
@@ -1326,7 +1406,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const bars = Math.max(1, Math.round(lesson.pattern.beats / beatsPerBar)) as 1 | 2;
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
     const next: EarExercise = { pattern: lesson.pattern, choices: [], answer: 0, meter: lesson.meter, feel: lesson.feel, bars, style: lesson.style, complexity: 1, focus: lessonFocus, lessonId: lesson.id, comparison: createEarComparison(lesson.pattern, seed) };
-    setExercise(next); setPhraseBars(bars); setFocusSkill(lessonFocus); setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage(""); setLiveFeedback(null);
+    setExercise(next); setPhraseBars(bars); setFocusSkill(lessonFocus); setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setConfidenceRating(null); setReviewSegment("full"); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage(""); setLiveFeedback(null);
   }, [stop]);
 
   useEffect(() => {
@@ -1346,17 +1426,17 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     setMode("play"); setLevel(item.level); setMeter(item.meter); setGrouping(item.grouping ?? earMeterGroupings(item.meter)[0] ?? []); setFeel(item.feel); setPhraseBars(item.bars);
     setGrooveStyle(item.style); setComplexity(item.complexity); setFocusSkill(undefined); setInputMode("pads");
     setBpm(Math.max(40, Math.min(140, item.pattern.defaultBpm)));
-    setExercise({ pattern: item.pattern, choices: [], answer: 0, meter: item.meter, feel: item.feel, ...(item.grouping ? { grouping: item.grouping } : {}), bars: item.bars, style: item.style, complexity: item.complexity });
-    setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage("");
+    setExercise({ pattern: item.pattern, choices: [], answer: 0, meter: item.meter, feel: item.feel, ...(item.grouping ? { grouping: item.grouping } : {}), bars: item.bars, style: item.style, complexity: item.complexity }); setReviewSegment("full");
+    setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setConfidenceRating(null); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage("");
   };
 
   const startWeeklyChallenge = () => {
     stop();
     const seed = seedFromText("drum-hero-ear-week-" + currentWeek);
-    const weekly = createEarExercise("groove", seed, undefined, { meter: "4/4", feel: "straight", bars: 2, style: "funk", complexity: 2 });
+    const weekly = createEarExercise("groove", seed, undefined, { meter: "4/4", feel: "straight", bars: 2, style: "funk", complexity: 2, includeChoices: false });
     setActiveChallenge(null); setActiveWeeklyChallengeId(currentWeek);
     setMode("play"); setLevel("groove"); setMeter("4/4"); setFeel("straight"); setPhraseBars(2); setGrooveStyle("funk"); setComplexity(2); setFocusSkill(undefined); setInputMode("pads"); setBpm(80);
-    setExercise(weekly); setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage(""); setLiveFeedback(null);
+    setExercise(weekly); setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setConfidenceRating(null); setReviewSegment("full"); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage(""); setLiveFeedback(null);
   };
 
   const startChallengePack = (pack: EarChallengePack) => {
@@ -1379,8 +1459,9 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
 
   const saveCurrentToPack = () => {
     if (!exercise) { setPackMessage(t("Listen to or create a rhythm before saving it to a pack.")); return; }
+    if (exercise.bars > 2) { setPackMessage(t("Challenge packs currently support phrases up to two bars.")); return; }
     saveRhythmToPack({
-    id: crypto.randomUUID(), level, meter: exercise.meter, feel: exercise.feel, ...(exercise.grouping ? { grouping: exercise.grouping } : {}), bars: exercise.bars,
+    id: crypto.randomUUID(), level, meter: exercise.meter, feel: exercise.feel, ...(exercise.grouping ? { grouping: exercise.grouping } : {}), bars: exercise.bars as 1 | 2,
       style: exercise.style, complexity: exercise.complexity,
       pattern: { ...exercise.pattern, hits: exercise.pattern.hits.map(hit => ({ ...hit })) },
     });
@@ -1395,6 +1476,17 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const link = document.createElement("a"); link.href = url; link.download = `${patternName}.mid`; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setPackMessage(t(`Exported ${exercise.pattern.name} as MIDI.`));
+  };
+
+  const exportCurrentMusicXml = () => {
+    if (!exercise) return;
+    const safeName = exercise.pattern.name.replace(/[^\p{L}\p{N}-]+/gu, "-").replace(/^-|-$/g, "") || "rhythm";
+    const scoreBpm = mode === "tempo-estimate" ? exercise.sourceBpm ?? bpm : mode === "tempo-transfer" ? transferAnswerBpm : bpm;
+    const xml = earPatternToMusicXml(exercise.pattern, exercise.meter, scoreBpm);
+    const url = URL.createObjectURL(new Blob([xml], { type: "application/vnd.recordare.musicxml+xml;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = `${safeName}.musicxml`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setPackMessage(t(`Exported ${exercise.pattern.name} as MusicXML.`));
   };
 
   const saveBuiltPatternToPack = (pattern: PracticePattern, patternMeter: EarMeter) => {
@@ -1501,7 +1593,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
     const choices = selection.activity === "identify" ? songPartAnswerChoices(pattern, seed) : null;
     const comparison = selection.activity === "error" ? createEarComparison(pattern, seed ^ 0x417cb9) : undefined;
-    setActiveChallenge(null); setActiveWeeklyChallengeId(null); setMode(selection.activity); setLevel("groove"); setMeter(selection.meter); setGrouping(earMeterGroupings(selection.meter)[0] ?? []); setFeel(selection.feel); setGrooveStyle("free"); setComplexity(2); setFocusSkill(undefined); setPhraseBars(bars); setBpm(bpm); setInputMode("pads"); setExercise({ pattern, choices: choices?.choices ?? [], answer: choices?.answer ?? 0, meter: selection.meter, feel: selection.feel, bars, style: "free", complexity: 2, grouping: earMeterGroupings(selection.meter)[0] ?? [], ...(comparison ? { comparison } : {}) }); setSongLinkedLabel(selection.label); setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage(""); setLiveFeedback(null); setTempoGuess(90); stop();
+    setActiveChallenge(null); setActiveWeeklyChallengeId(null); setMode(selection.activity); setLevel("groove"); setMeter(selection.meter); setGrouping(earMeterGroupings(selection.meter)[0] ?? []); setFeel(selection.feel); setGrooveStyle("free"); setComplexity(2); setFocusSkill(undefined); setPhraseBars(bars); setBpm(bpm); setInputMode("pads"); setExercise({ pattern, choices: choices?.choices ?? [], answer: choices?.answer ?? 0, meter: selection.meter, feel: selection.feel, bars, style: "free", complexity: 2, grouping: earMeterGroupings(selection.meter)[0] ?? [], ...(comparison ? { comparison } : {}) }); setSongLinkedLabel(selection.label); setPhase("ready"); setListens(0); setAssisted(false); setSelected(null); setConfidenceRating(null); setReviewSegment("full"); setErrorLocation(null); setDictationDraft([]); setResult(null); setLastScore(null); setMessage(""); setLiveFeedback(null); setTempoGuess(90); stop();
   };
 
   const startSkillReview = (skill: EarSkill) => {
@@ -1533,9 +1625,10 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const countStart = performance.now() + 120;
     const phraseStart = countStart + countDuration;
     scheduleCountIn(player, countStart, playbackBpm, exercise.meter, countInBars, exercise.grouping);
-    for (const note of exercise.pattern.hits) if (previewVoice === "all" || note.instrument === previewVoice) player.scheduleHit(note.instrument, phraseStart + note.step * stepDurationMs(playbackBpm, exercise.pattern.subdivision) + earHitOffsetMs(note.step, playbackBpm, exercise.pattern.subdivision, exercise.feel, note.instrument, exercise.feelDetail), note.accent, note.velocityTarget);
+    if (hapticPulse) scheduleHapticPulses(countStart, playbackBpm, exercise.meter, countInBars + exercise.bars, exercise.grouping, timers);
+    scheduleEarPattern(player, { ...exercise.pattern, hits: exercise.pattern.hits.filter(note => previewVoice === "all" || note.instrument === previewVoice) }, phraseStart, playbackBpm, exercise.feel, exercise.feelDetail);
     timers.current.push(setTimeout(() => { player.silence(); setPhase("answer"); }, 120 + countDuration + earBarDurationMs(exercise.pattern, playbackBpm) + 150));
-  }, [exercise, prepareAudio, bpm, previewSpeed, previewVoice, countInBars, mode]);
+  }, [exercise, prepareAudio, bpm, previewSpeed, previewVoice, countInBars, mode, hapticPulse]);
 
   const playResultReview = useCallback(async (kind: "target" | "answer") => {
     if (!exercise || kind === "answer" && !result) return;
@@ -1555,10 +1648,13 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const endStep = reviewSegment === "full" ? totalSteps : startStep + stepsPerBar;
     const startAtMs = startStep * stepDurationMs(scoringBpm, exercise.pattern.subdivision);
     const stopAtMs = endStep * stepDurationMs(scoringBpm, exercise.pattern.subdivision);
-    const events = kind === "target"
-      ? exercise.pattern.hits.filter(note => note.step >= startStep && note.step < endStep && (previewVoice === "all" || note.instrument === previewVoice)).map(note => ({ instrument: note.instrument, atMs: (note.step - startStep) * stepDurationMs(playbackBpm, exercise.pattern.subdivision) + earHitOffsetMs(note.step, playbackBpm, exercise.pattern.subdivision, exercise.feel, note.instrument, exercise.feelDetail), accent: note.accent ?? false, velocityTarget: note.velocityTarget }))
-      : result!.rated.filter((hit): hit is typeof hit & { atMs: number } => hit.rating !== "miss" && typeof hit.atMs === "number" && hit.atMs >= startAtMs && hit.atMs < stopAtMs && (previewVoice === "all" || hit.instrument === previewVoice)).map(hit => ({ instrument: hit.instrument, atMs: (hit.atMs - startAtMs) * speedScale, accent: false, velocityTarget: hit.velocity }));
-    for (const event of events) player.scheduleHit(event.instrument, phraseStart + event.atMs, event.accent, event.velocityTarget);
+    if (kind === "target") {
+      const reviewPattern = { ...exercise.pattern, beats: reviewSegment === "full" ? exercise.pattern.beats : exercise.pattern.beats / exercise.bars, hits: exercise.pattern.hits.filter(note => note.step >= startStep && note.step < endStep && (previewVoice === "all" || note.instrument === previewVoice)).map(note => ({ ...note, step: note.step - startStep })) };
+      scheduleEarPattern(player, reviewPattern, phraseStart, playbackBpm, exercise.feel, exercise.feelDetail);
+    } else {
+      const events = result!.rated.filter((hit): hit is typeof hit & { atMs: number } => hit.rating !== "miss" && typeof hit.atMs === "number" && hit.atMs >= startAtMs && hit.atMs < stopAtMs && (previewVoice === "all" || hit.instrument === previewVoice)).map(hit => ({ instrument: hit.instrument, atMs: (hit.atMs - startAtMs) * speedScale, velocityTarget: hit.velocity }));
+      for (const event of events) player.scheduleHit(event.instrument, phraseStart + event.atMs, false, event.velocityTarget);
+    }
     const duration = reviewSegment === "full" ? earBarDurationMs(exercise.pattern, playbackBpm) : exercise.pattern.beats / exercise.bars * 60_000 / playbackBpm;
     timers.current.push(setTimeout(() => { player.silence(); setPhase("results"); }, 120 + countDuration + duration + 180));
   }, [exercise, result, prepareAudio, bpm, transferAnswerBpm, mode, previewSpeed, previewVoice, reviewSegment]);
@@ -1623,6 +1719,10 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     const attempts = history.filter(item => !item.assisted && item.dynamicsScore !== null && item.dynamicsScore !== undefined).slice(-60);
     return attempts.length ? { average: Math.round(attempts.reduce((sum, item) => sum + (item.dynamicsScore ?? 0), 0) / attempts.length), count: attempts.length } : null;
   })();
+  const confidenceCalibration = ([1, 2, 3] as const).map(rating => {
+    const attempts = history.filter(item => !item.assisted && item.confidence === rating).slice(-40);
+    return { rating, count: attempts.length, average: attempts.length ? Math.round(attempts.reduce((sum, item) => sum + item.score, 0) / attempts.length) : null };
+  });
   const coreVoices: Instrument[] = ["kick", "snare", "hihat", "tom", "crash"];
   const tempoErrorPercent = exercise?.sourceBpm && mode === "tempo-estimate" ? Math.abs(tempoGuess - exercise.sourceBpm) / exercise.sourceBpm * 100 : 100;
   const tempoEstimateScore = Math.max(0, Math.min(100, Math.round(100 - tempoErrorPercent * 3.5)));
@@ -1630,8 +1730,8 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
   const detailChoiceLabel = (value: number, revealDirection = false) => exercise?.feelDetail?.kind === "swing"
     ? `${value}% · ${100 - value}%`
     : revealDirection ? `${exercise?.feel === "pushed" ? "Ahead" : "Behind"} · ${value} ms` : `${value} ms`;
-  const selectedAnswer = selected === null ? "" : mode === "tempo-estimate" ? `${tempoGuess} BPM` : mode === "feel-detail" ? detailChoiceLabel(exercise?.feelDetailChoices?.[selected] ?? 0) : mode === "meter" ? EAR_METERS[selected]! : mode === "feel" ? EAR_FEELS[selected]! : mode === "error" ? selected === 1 ? "Different" : "Same" : mode === "grouping" ? exercise?.groupingChoices?.[selected]?.join(" + ") ?? "" : mode === "voice-change" ? pads.find(pad => pad.voice === coreVoices[selected])?.label ?? coreVoices[selected] ?? "" : String.fromCharCode(65 + selected);
-  const correctAnswer = mode === "tempo-estimate" ? `${exercise?.sourceBpm ?? "—"} BPM` : mode === "feel-detail" ? detailChoiceLabel(exercise?.feelDetail?.value ?? 0, true) : mode === "meter" ? exercise?.meter ?? "" : mode === "feel" ? exercise?.feel ?? "" : mode === "error" ? exercise?.comparison?.changed ? "Different" : "Same" : mode === "grouping" ? exercise?.grouping?.join(" + ") ?? "" : mode === "voice-change" ? pads.find(pad => pad.voice === exercise?.changedVoice)?.label ?? exercise?.changedVoice ?? "" : String.fromCharCode(65 + (exercise?.answer ?? 0));
+  const selectedAnswer = selected === null ? "" : mode === "tempo-estimate" ? `${tempoGuess} BPM` : mode === "feel-detail" ? detailChoiceLabel(exercise?.feelDetailChoices?.[selected] ?? 0) : mode === "meter" ? EAR_METERS[selected]! : mode === "feel" ? EAR_FEELS[selected]! : mode === "error" ? selected === 1 ? "Different" : "Same" : mode === "grouping" ? exercise?.groupingChoices?.[selected]?.join(" + ") ?? "" : mode === "voice-change" ? pads.find(pad => pad.voice === coreVoices[selected])?.label ?? coreVoices[selected] ?? "" : mode === "rudiment" ? rudimentLabels[exercise?.rudimentChoices?.[selected] ?? "single-stroke"] : String.fromCharCode(65 + selected);
+  const correctAnswer = mode === "tempo-estimate" ? `${exercise?.sourceBpm ?? "—"} BPM` : mode === "feel-detail" ? detailChoiceLabel(exercise?.feelDetail?.value ?? 0, true) : mode === "meter" ? exercise?.meter ?? "" : mode === "feel" ? exercise?.feel ?? "" : mode === "error" ? exercise?.comparison?.changed ? "Different" : "Same" : mode === "grouping" ? exercise?.grouping?.join(" + ") ?? "" : mode === "voice-change" ? pads.find(pad => pad.voice === exercise?.changedVoice)?.label ?? exercise?.changedVoice ?? "" : mode === "rudiment" ? rudimentLabels[exercise?.rudiment ?? "single-stroke"] : String.fromCharCode(65 + (exercise?.answer ?? 0));
   const wrongPattern = selected !== null && mode === "identify" && !correct ? exercise?.choices[selected] : undefined;
   const answerExplanation = exercise ? explainEarAnswer(exercise.pattern, result?.rated ?? [], wrongPattern) : "";
   const modeExplanation = mode === "meter"
@@ -1643,6 +1743,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     : mode === "tempo-estimate" ? "The phrase used a hidden tempo. Compare the groove to your internal pulse, then estimate its beats per minute."
     : mode === "voice-change" && exercise?.changedVoice ? `The ${exercise.changedVoice} part changed between the two phrases.`
     : mode === "voice-change" ? "Listen to both full grooves and notice which drum part shifts."
+    : mode === "rudiment" && exercise?.rudiment ? `${rudimentLabels[exercise.rudiment]}: listen to the sticking pattern and its characteristic ornament.`
     : mode === "error" && exercise?.comparison?.changed ? `The second phrase shifted the ${exercise.comparison.instrument} from grid step ${(exercise.comparison.fromStep ?? 0) + 1} to ${(exercise.comparison.toStep ?? 0) + 1}. Listen for that space changing.`
     : mode === "error" ? "Both phrases kept the same hits in the same places. Listen for an unchanged pattern." : "";
   const maxListens = recallSupport === "challenge" ? 1 : recallSupport === "faded" ? 2 : Infinity;
@@ -1667,7 +1768,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
       if (mode === "tempo-transfer") return notationSupport !== "off" ? `Follow the notation and echo at ${transferAnswerBpm} BPM.` : `Echo the phrase at ${transferAnswerBpm} BPM.`;
       if (notationSupport !== "off" && (mode === "play" || mode === "voice")) return notationSupport === "listen-only" ? "Keep the pulse with the moving playhead; the noteheads are hidden." : "Follow the notation and keep each stroke with the moving playhead.";
       if (mode === "voice") return "Play only the drum part you just heard in isolation.";
-      return `Your turn — play ${phraseBars === 1 ? "one bar" : "two bars"} from memory.`;
+      return `Your turn — play the ${phraseBars}-bar phrase from memory.`;
     }
     if (phase === "answer") {
       if (mode === "tempo-estimate") return "Enter the tempo you heard, in beats per minute.";
@@ -1678,6 +1779,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
       if (mode === "error") return "Did the second phrase change?";
       if (mode === "voice") return "Play only the part that was isolated.";
       if (mode === "voice-change") return "Which drum voice changed between the two grooves?";
+      if (mode === "rudiment") return "Which sticking or snare ornament did you hear?";
       if (mode === "grouping") return "Choose the eighth-note grouping you heard.";
       if (mode === "play") return inputMode === "microphone" ? "Allow mic input, then tap or clap the rhythm." : inputMode === "midi" ? "Play the rhythm on your connected MIDI drum controller." : "Ready? Take the count-in, then play it back.";
       if (mode === "identify") return "Which rhythm did you hear?";
@@ -1722,12 +1824,12 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     let nextComplexity = complexity;
     if (adaptive && !chosenFocus && lastScore !== null && lastScore >= 85) {
       if (complexity < 3) nextComplexity = (complexity + 1) as 2 | 3;
-      else if (phraseBars === 1) nextPhraseBars = 2;
+      else if (phraseBars < 8) nextPhraseBars = (phraseBars * 2) as EarPhraseBars;
       else nextBpm = Math.min(140, bpm + 5);
     } else if (adaptive && !chosenFocus && lastScore !== null && lastScore < 55) {
       if (bpm > 40) nextBpm = Math.max(40, bpm - 5);
       else if (complexity > 1) nextComplexity = (complexity - 1) as 1 | 2;
-      else if (phraseBars === 2) nextPhraseBars = 1;
+      else if (phraseBars > 1) nextPhraseBars = (phraseBars / 2) as EarPhraseBars;
     }
     if (nextBpm !== bpm) setBpm(nextBpm);
     if (adaptive && lastScore !== null && nextPhraseBars !== phraseBars) setPhraseBars(nextPhraseBars);
@@ -1830,17 +1932,18 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     if (choices.length && !choices.includes(dictationNoteValue)) setDictationNoteValue(choices[0]!);
   }, [exercise, dictationNoteValue]);
 
-  return <div className={styles.layout}>
+  return <>
+  <div className={styles.layout}>
     <section className={`card ${styles.console}`} aria-label={t("Rhythm ear training")}>
       <div className={styles.settings}>
-        <label>{t("Exercise")}<select value={mode} disabled={busy} onChange={event => { const value = event.target.value as EarMode; const nextLevel = value === "voice" || value === "voice-change" || value === "feel-detail" ? "groove" : value === "tempo-transfer" || value === "tempo-estimate" ? "rhythm" : level; const nextMeter = value === "grouping" && earMeterGroupings(meter).length < 2 ? "7/8" : meter; const nextGrouping = earMeterGroupings(nextMeter)[0] ?? []; setMode(value); setLevel(nextLevel); setMeter(nextMeter); setGrouping(nextGrouping); if ((value === "voice" || value === "tempo-transfer") && inputMode === "microphone") setInputMode("pads"); newExercise(nextLevel, { meter: nextMeter, grouping: nextGrouping, feel, style: grooveStyle, complexity, focus: value === "grouping" ? "meter-grouping" : undefined }, value); }}><option value="play">{t("Listen and tap back")}</option><option value="identify">{t("Match the rhythm")}</option><option value="meter">{t("Name the meter")}</option><option value="grouping">{t("Hear the meter grouping")}</option><option value="feel">{t("Identify the feel")}</option><option value="feel-detail">{t("Measure swing and pocket")}</option><option value="dictation">{t("Transcribe in drum notation")}</option><option value="error">{t("Find the rhythmic change")}</option><option value="voice">{t("Isolate a drum voice")}</option><option value="voice-change">{t("Hear which drum voice changed")}</option><option value="tempo-transfer">{t("Echo at a new tempo")}</option><option value="tempo-estimate">{t("Estimate the hidden tempo")}</option></select></label>
+        <label>{t("Exercise")}<select value={mode} disabled={busy} onChange={event => { const value = event.target.value as EarMode; const nextLevel = value === "rudiment" ? "triplet" : value === "voice" || value === "voice-change" || value === "feel-detail" ? "groove" : value === "tempo-transfer" || value === "tempo-estimate" ? "rhythm" : level; const nextMeter = value === "grouping" && earMeterGroupings(meter).length < 2 ? "7/8" : meter; const nextGrouping = earMeterGroupings(nextMeter)[0] ?? []; setMode(value); setLevel(nextLevel); setMeter(nextMeter); setGrouping(nextGrouping); if ((value === "voice" || value === "tempo-transfer") && inputMode === "microphone") setInputMode("pads"); newExercise(nextLevel, { meter: nextMeter, grouping: nextGrouping, feel, style: grooveStyle, complexity, focus: value === "grouping" ? "meter-grouping" : value === "rudiment" ? "rudiments" : undefined }, value); }}><option value="play">{t("Listen and tap back")}</option><option value="identify">{t("Match the rhythm")}</option><option value="meter">{t("Name the meter")}</option><option value="grouping">{t("Hear the meter grouping")}</option><option value="feel">{t("Identify the feel")}</option><option value="feel-detail">{t("Measure swing and pocket")}</option><option value="dictation">{t("Transcribe in drum notation")}</option><option value="error">{t("Find the rhythmic change")}</option><option value="voice">{t("Isolate a drum voice")}</option><option value="voice-change">{t("Hear which drum voice changed")}</option><option value="rudiment">{t("Name the rudiment")}</option><option value="tempo-transfer">{t("Echo at a new tempo")}</option><option value="tempo-estimate">{t("Estimate the hidden tempo")}</option></select></label>
         <label>{t("Difficulty")}<select value={level} disabled={busy} onChange={event => { const value = event.target.value as EarLevel; setLevel(value); if (value === "groove" && inputMode === "microphone") setInputMode("pads"); newExercise(value, { meter, feel, style: grooveStyle, complexity }); }}>{EAR_LEVELS.map(item => <option key={item.id} value={item.id}>{t(item.label)}</option>)}</select></label>
         {mode === "meter" ? <div className={styles.settingNote}><strong>{t("Meter")}</strong><span>{t("Mixed · 4/4 through 13/8")}</span></div> : <label>{t("Meter")}<select value={meter} disabled={busy} onChange={event => { const value = event.target.value as EarMeter; const nextGrouping = earMeterGroupings(value).find(item => item.join("+") === grouping.join("+")) ?? earMeterGroupings(value)[0] ?? []; setMeter(value); setGrouping(nextGrouping); newExercise(level, { meter: value, grouping: nextGrouping, feel, style: grooveStyle, complexity, ...(mode === "grouping" ? { focus: "meter-grouping" as EarSkill } : {}) }); }}>{(mode === "grouping" ? EAR_METERS.filter(value => earMeterGroupings(value).length > 1) : EAR_METERS).map(value => <option key={value} value={value}>{t(value)}</option>)}</select></label>}
         {mode === "grouping" ? <div className={styles.settingNote}><strong>{t("Grouping lab")}</strong><span>{t("Listen for which eighth-note groups are accented.")}</span></div> : earMeterGroupings(meter).length > 1 ? <label>{t("Meter grouping")}<select value={grouping.join("+")} disabled={busy} onChange={event => { const value = earMeterGroupings(meter).find(item => item.join("+") === event.target.value) ?? []; setGrouping(value); newExercise(level, { meter, grouping: value, feel, style: grooveStyle, complexity }); }}>{earMeterGroupings(meter).map(value => <option key={value.join("+")} value={value.join("+")}>{value.join(" + ")}</option>)}</select></label> : null}
         {mode === "feel" ? <div className={styles.settingNote}><strong>{t("Feel")}</strong><span>{t("Mixed · straight, swing, shuffle, pushed, laid-back")}</span></div> : mode === "feel-detail" ? <label>{t("Timing detail")}<select value={feelDetailKind} disabled={busy} onChange={event => { const value = event.target.value as "swing" | "pocket"; setFeelDetailKind(value); newExercise("groove", { meter, grouping, feel, style: grooveStyle, complexity, focus: value }); }}><option value="swing">{t("Swing ratio · 54–70%")}</option><option value="pocket">{t("Snare pocket · 18–48 ms")}</option></select></label> : <label>{t("Feel")}<select value={feel} disabled={busy} onChange={event => { const value = event.target.value as EarFeel; setFeel(value); newExercise(level, { meter, grouping, feel: value }); }}><option value="straight">{t("Straight")}</option><option value="swing">{t("Swing · light")}</option><option value="shuffle">{t("Shuffle · triplet")}</option><option value="pushed">{t("Pushed · ahead of the beat")}</option><option value="laid-back">{t("Laid back · behind the beat")}</option></select></label>}
         {level === "groove" ? <label>{t("Groove family")}<select value={grooveStyle} disabled={busy} onChange={event => { const value = event.target.value as EarGrooveStyle; setGrooveStyle(value); newExercise(level, { meter, feel, style: value, complexity }); }}>{EAR_GROOVE_STYLES.map(value => <option key={value} value={value}>{t(value === "free" ? "Open groove" : value)}</option>)}</select></label> : null}
         <label>{t("Rhythm density")}<select value={complexity} disabled={busy} onChange={event => { const value = Number(event.target.value) as 1 | 2 | 3; setComplexity(value); newExercise(level, { meter, feel, style: grooveStyle, complexity: value }); }}><option value={1}>{t("Sparse")}</option><option value={2}>{t("Balanced")}</option><option value={3}>{t("Dense")}</option></select></label>
-        <label>{t("Phrase length")}<select value={phraseBars} disabled={busy} onChange={event => { const value = Number(event.target.value) as 1 | 2; setPhraseBars(value); newExercise(level, { meter, feel, bars: value }); }}><option value={1}>{t("1 bar")}</option><option value={2}>{t("2 bars")}</option></select></label>
+        <label>{t("Phrase length")}<select value={phraseBars} disabled={busy} onChange={event => { const value = Number(event.target.value) as EarPhraseBars; setPhraseBars(value); newExercise(level, { meter, feel, bars: value }); }}><option value={1}>{t("1 bar")}</option><option value={2}>{t("2 bars")}</option><option value={4}>{t("4 bars")}</option><option value={8}>{t("8 bars")}</option></select></label>
         {mode === "tempo-estimate" ? <div className={styles.settingNote}><strong>{t("Tempo estimate")}</strong><span>{t("The phrase tempo is hidden. Estimate from 40 to 200 BPM after listening.")}</span></div> : <label>{t("Tempo")} · {bpm} BPM<input type="range" aria-label={t("Tempo")} min={40} max={140} step={5} value={bpm} disabled={busy} onChange={event => { setBpm(Number(event.target.value)); newExercise(level, { meter, feel }); }} /></label>}
         {mode === "tempo-transfer" ? <label>{t("Answer tempo")} · {transferAnswerBpm} BPM<input type="range" aria-label={t("Answer tempo")} min={40} max={140} step={5} value={transferAnswerBpm} disabled={busy} onChange={event => setTransferAnswerBpm(Number(event.target.value))} /><small>{t("The phrase plays at {bpm} BPM, then you echo it at this tempo.", { bpm })}</small></label> : null}
         {mode === "tempo-estimate" ? null : <label>{t("Count-in")}<select value={countInBars} disabled={busy} onChange={event => setCountInBars(Number(event.target.value) as 0 | 1 | 2)}><option value={0}>{t("Off")}</option><option value={1}>{t("1 bar")}</option><option value={2}>{t("2 bars")}</option></select></label>}
@@ -1849,9 +1952,11 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
         <label>{t("Counting syllables")}<select value={countingSystem} disabled={busy} onChange={event => setCountingSystem(event.target.value as CountingSystem)}><option value="numeric">{t("1-e-&-a")}</option><option value="takadimi">{t("Takadimi")}</option><option value="konnakol">{t("Konnakol")}</option></select></label>
         {(mode === "play" || mode === "voice" || mode === "tempo-transfer") ? <label>{t("Answer input")}<select value={inputMode} disabled={busy} onChange={event => setInputMode(event.target.value as EarInputMode)}><option value="pads">{t("Drum pads")}</option>{microphoneCompatible ? <option value="microphone">{t("Microphone taps")}</option> : null}<option value="midi">{t("MIDI drum controller")}</option></select></label> : null}
         <label className={styles.toggle}><input type="checkbox" checked={adaptive} disabled={busy} onChange={event => setAdaptive(event.target.checked)} />{t("Adaptive level and tempo")}</label>
+        {hapticsAvailable ? <label className={styles.toggle}><input type="checkbox" checked={hapticPulse} disabled={busy} onChange={event => setHapticPulse(event.target.checked)} />{t("Haptic pulse cues")}</label> : <div className={styles.settingNote}><strong>{t("Haptic pulse cues")}</strong><span>{t("This browser or device does not support vibration cues.")}</span></div>}
+        {hapticPulse ? <small>{t("Haptic cues mark attempts as assisted, so they are kept out of ear-only averages.")}</small> : null}
         {(mode === "play" || mode === "voice" || mode === "tempo-transfer" || mode === "tempo-estimate") ? <label>{t("Score support")}<select value={notationSupport} disabled={busy} onChange={event => setNotationSupport(event.target.value as "off" | "full" | "listen-only")}><option value="off">{t("Ear only · unassisted")}</option><option value="full">{t("Full score throughout · assisted")}</option><option value="listen-only">{t("Show score while listening, fade notes for the answer · assisted")}</option></select></label> : null}
       </div>
-      <p className={styles.description}>{t(EAR_LEVELS.find(item => item.id === level)!.description)} {t(phraseBars === 1 ? "1 bar phrase" : "2 bar phrase")} · {t(mode === "meter" ? "mixed meter" : meter)} · {t(mode === "feel" ? "mixed feel" : mode === "feel-detail" ? exercise?.feelDetail?.kind === "swing" ? "swing timing" : "snare pocket" : mode === "tempo-estimate" ? "tempo hidden" : feel)} · {t(activeCountIn ? `${activeCountIn} bar count-in` : "count-in off")}{mode === "tempo-transfer" ? ` · ${t("Listen at {source} BPM, answer at {target} BPM", { source: bpm, target: transferAnswerBpm })}` : ""}</p>
+      <p className={styles.description}>{t(EAR_LEVELS.find(item => item.id === level)!.description)} {t("{bars} bar phrase", { bars: exercise?.bars ?? phraseBars })} · {t(mode === "meter" ? "mixed meter" : meter)} · {t(mode === "feel" ? "mixed feel" : mode === "feel-detail" ? exercise?.feelDetail?.kind === "swing" ? "swing timing" : "snare pocket" : mode === "tempo-estimate" ? "tempo hidden" : feel)} · {t(activeCountIn ? `${activeCountIn} bar count-in` : "count-in off")}{mode === "tempo-transfer" ? ` · ${t("Listen at {source} BPM, answer at {target} BPM", { source: bpm, target: transferAnswerBpm })}` : ""}</p>
       {adaptive ? <p className={styles.description}>{t("Adaptive practice changes one difficulty step at a time, so it is clear whether tempo, rhythm density, or phrase length got harder.")}</p> : null}
       {activeLesson ? <p className={styles.lessonContext}><strong>{t(activeLesson.name)}</strong> · {t(activeLesson.concept)}</p> : null}
       {songLinkedLabel ? <p className={styles.lessonContext}><strong>{t("Song-linked drill")}</strong> · {t(songLinkedLabel)}</p> : null}
@@ -1885,29 +1990,32 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
           {level === "groove" ? <label>{t("Hear a voice")}<select value={previewVoice} onChange={event => setPreviewVoice(event.target.value as Instrument | "all")}><option value="all">{t("All voices")}</option>{pads.map(pad => <option value={pad.voice} key={pad.voice}>{t(pad.label)}</option>)}</select></label> : null}
           <small>{t("A focused preview helps you study the rhythm. It marks this attempt as assisted.")}</small>
         </div> : null}
+        {phase === "answer" ? <fieldset className={styles.confidencePicker}><legend>{t("How sure are you before answering?")}</legend><div>{([1, 2, 3] as const).map(rating => <button type="button" key={rating} className="button-secondary" aria-pressed={confidenceRating === rating} onClick={() => setConfidenceRating(rating)}>{t(rating === 1 ? "Guessing" : rating === 2 ? "Somewhat sure" : "Very sure")}</button>)}</div><small>{t("This helps compare confidence with first-attempt accuracy. You can leave it blank.")}</small></fieldset> : null}
         {message ? <p role="status">{message}</p> : null}
       </div>
       {mode === "dictation" && phase === "answer" && exercise ? <section className={styles.dictation} aria-label={t("Rhythm dictation answer")}><h3>{t("Write what you heard")}</h3><p>{t("Add hits directly to the drum staff. Choose a voice and note value, then select a score position. Empty spaces remain rests.")}</p><div className={styles.dictationTools}><label>{t("Drum voice to write")}<select value={dictationVoice} onChange={event => setDictationVoice(event.target.value as Instrument)}>{pads.map(pad => <option key={pad.voice} value={pad.voice}>{t(pad.label)}</option>)}</select></label><label>{t("Note value / subdivision")}<select value={activeDictationSubdivision} onChange={event => setDictationNoteValue(Number(event.target.value) as 4 | 8 | 12 | 16 | 20)}>{dictationSubdivisions.map(value => <option key={value} value={value}>{t(value === 4 ? "Quarter notes" : value === 8 ? "Eighth notes" : value === 12 ? "Triplet notes" : value === 16 ? "Sixteenth notes" : "Quintuplet notes")}</option>)}</select></label><small className={styles.dictationHelp}>{t("Click a note position on the staff to add or remove the selected drum voice. Keyboard users can focus score positions and press Enter or Space.")}</small></div><div className={styles.notationBridge}><h4>{t("Your transcription in notation")}</h4><TrainerNotationView pattern={{ ...exercise.pattern, hits: dictationDraft }} meter={exercise.meter} grouping={exercise.grouping} tupletLabel={notationTupletLabel(exercise)} editor={{ instrument: dictationVoice, onToggle: toggleDictationStep, isActive: step => dictationDraft.some(hit => hit.instrument === dictationVoice && hit.step === step), isEnabled: step => step % dictationStepInterval === 0 }} showRhythmStems /></div><details><summary>{t("Use the step grid instead")}</summary>{pads.map(pad => <fieldset className={styles.dictationVoice} key={pad.voice}><legend>{t(pad.label)}</legend><div className={styles.stepButtons}>{Array.from({ length: exercise.pattern.beats * exercise.pattern.subdivision / 4 }, (_, step) => { const active = dictationDraft.some(hit => hit.instrument === pad.voice && hit.step === step); return <button key={step} type="button" className={`${styles.stepButton} ${active ? styles.stepActive : ""}`} aria-pressed={active} aria-label={`${t(pad.label)} · ${t("Step")} ${step + 1} · ${t(active ? "Hit" : "Rest")}`} onClick={() => { if (pad.voice === dictationVoice) toggleDictationStep(step); else { setDictationVoice(pad.voice); if (step % dictationStepInterval === 0) setDictationDraft(current => current.some(hit => hit.instrument === pad.voice && hit.step === step) ? current.filter(hit => hit.instrument !== pad.voice || hit.step !== step) : [...current, { instrument: pad.voice, step, flagCount: flagCountForSubdivision(activeDictationSubdivision) }]); } }}>{active ? "●" : "·"}</button>; })}</div></fieldset>)}</details><button className="button" onClick={checkDictation}>{t("Check transcription")}</button></section> : null}
       {mode === "error" && phase === "answer" ? <fieldset className={styles.quizChoices}><legend>{t("Did the second phrase change?")}</legend><button className="button-secondary" onClick={() => choose(0)}>{t("Same rhythm")}</button><button className="button-secondary" onClick={() => choose(1)}>{t("A hit moved")}</button></fieldset> : null}
       {mode === "error" && phase === "locate" && exercise ? <div className={styles.notationBridge}><h4>{t("Select the changed position on the drum staff")}</h4><p>{t("Choose the count where the moved note landed.")}</p><TrainerNotationView pattern={exercise.comparison?.pattern ?? exercise.pattern} meter={exercise.meter} grouping={exercise.grouping} editor={{ instrument: exercise.comparison?.instrument ?? "snare", onToggle: chooseErrorStep, isActive: step => errorLocation === step, isEnabled: () => true, label: step => t("Select count {count}", { count: step + 1 }) }} showRhythmStems /></div> : null}
       {mode === "grouping" && phase === "answer" && exercise?.groupingChoices ? <fieldset className={styles.quizChoices}><legend>{t("Which eighth-note grouping did you hear?")}</legend>{exercise.groupingChoices.map((choice, index) => <button className="button-secondary" key={choice.join("+")} onClick={() => choose(index)}>{choice.join(" + ")}</button>)}</fieldset> : null}
+      {mode === "rudiment" && phase === "answer" && exercise?.rudimentChoices ? <fieldset className={styles.quizChoices}><legend>{t("Which rudiment did you hear?")}</legend>{exercise.rudimentChoices.map((rudiment, index) => <button className="button-secondary" key={rudiment} onClick={() => choose(index)}>{t(rudimentLabels[rudiment])}</button>)}</fieldset> : null}
       {mode === "voice-change" && phase === "answer" ? <fieldset className={styles.quizChoices}><legend>{t("Which drum voice changed between the two full grooves?")}</legend>{coreVoices.map((voice, index) => <button className="button-secondary" key={voice} onClick={() => choose(index)}>{t(pads.find(pad => pad.voice === voice)?.label ?? voice)}</button>)}</fieldset> : null}
       {mode === "feel-detail" && phase === "answer" && exercise?.feelDetailChoices ? <fieldset className={styles.quizChoices}><legend>{t(exercise.feelDetail.kind === "swing" ? "Which swing ratio did you hear?" : "How far was the snare from the pulse?")}</legend>{exercise.feelDetailChoices.map((value, index) => <button className="button-secondary" key={value} onClick={() => choose(index)}>{t(detailChoiceLabel(value))}</button>)}</fieldset> : null}
       {mode === "tempo-estimate" && phase === "answer" ? <section className={styles.tempoEstimateAnswer} aria-label={t("Tempo estimate answer")}><label>{t("Your tempo estimate")}<span><input type="number" min={40} max={200} step={1} value={tempoGuess} onChange={event => setTempoGuess(Number(event.target.value))} /> {t("BPM")}</span></label><input type="range" aria-label={t("Tempo estimate slider")} min={40} max={200} step={1} value={tempoGuess} onChange={event => setTempoGuess(Number(event.target.value))} /><button className="button" type="button" onClick={submitTempoEstimate}>{t("Check tempo estimate")}</button></section> : null}
       {(mode === "play" || mode === "voice" || mode === "tempo-transfer") && inputMode === "pads" ? <div className={styles.pads} aria-label={t("Answer pads")}>
         {visiblePads.map(pad => <button data-ear-pad key={pad.voice} className={styles.pad} disabled={phase !== "playing" && phase !== "count-in"} onPointerDown={event => { event.preventDefault(); const pressure = event.pointerType !== "mouse" && event.pressure > 0 ? Math.round(event.pressure * 127) : undefined; hit(pad.voice, pressure); }} onClick={event => { if (event.detail === 0) hit(pad.voice); }}><strong>{t(pad.label)}</strong><kbd>{pad.key}</kbd></button>)}
-        <small>{t(`Use keys Space, F, J, T, Y or touch. Play ${phraseBars === 1 ? "one bar" : "two bars"} from memory. Timing: Great ≤ 50 ms, Good ≤ 100 ms.`)}</small>
+        <small>{t("Use keys Space, F, J, T, Y or touch. Play {bars} bars from memory. Timing: Great ≤ 50 ms, Good ≤ 100 ms.", { bars: exercise?.bars ?? phraseBars })}</small>
       </div> : null}
       {mode === "play" && inputMode === "microphone" ? <p className={styles.micNote} role="note">{t("Microphone detects clap or desk-tap onsets and estimates strike strength for single-drum dynamics. Use headphones to prevent speaker bleed; mic access starts only when you begin your answer.")}</p> : null}
       {(mode === "play" || mode === "voice" || mode === "tempo-transfer") && inputMode === "midi" ? <p className={styles.micNote} role="note">{t("Connect a MIDI drum controller, configure its note map above, then allow MIDI access when you start your answer. MIDI velocity, touch-pad pressure, or microphone strike strength is used for accent and ghost-note scoring when a rhythm contains dynamic targets.")}</p> : null}
       {mode === "identify" && phase === "answer" && exercise ? <fieldset className={styles.choices}><legend>{t("Choose the rhythm you heard")}</legend>{exercise.choices.map((pattern, index) => <div className={styles.choice} key={pattern.id}><button className="button-secondary" onClick={() => choose(index)}>{t("Choose")} {String.fromCharCode(65 + index)}</button><TrainerNotationView pattern={pattern} meter={exercise.meter} grouping={exercise.grouping} showRhythmStems /><details><summary>{t("Show rhythm grid")}</summary><RhythmGrid pattern={pattern} meter={meter} grouping={exercise.grouping} label={`${t("Option")} ${String.fromCharCode(65 + index)}`} /></details></div>)}</fieldset> : null}
       {(mode === "meter" || mode === "feel") && phase === "answer" && exercise ? <fieldset className={styles.quizChoices}><legend>{t(mode === "meter" ? "Choose the meter you heard" : "Choose the feel you heard")}</legend>{(mode === "meter" ? EAR_METERS : EAR_FEELS).map((option, index) => <button className="button-secondary" key={option} onClick={() => choose(index)}>{t(option)}</button>)}</fieldset> : null}
       {phase === "results" && exercise ? <section className={styles.results} aria-label={t("Ear training results")}>
-        <h3 ref={resultHeading} tabIndex={-1}>{t(mode === "tempo-estimate" ? selected !== null ? tempoEstimateScore >= 80 ? "Close tempo estimate!" : "Tempo estimate checked" : "Tempo revealed" : selected !== null ? correct ? "Correct rhythm!" : "Listen for the difference" : result ? "Your rhythm recap" : "Rhythm revealed")}</h3>
+        <h3 ref={resultHeading} tabIndex={-1}>{t(mode === "tempo-estimate" ? selected !== null ? tempoEstimateScore >= 80 ? "Close tempo estimate!" : "Tempo estimate checked" : "Tempo revealed" : selected !== null ? correct ? mode === "rudiment" ? "Correct rudiment!" : "Correct rhythm!" : "Listen for the difference" : result ? "Your rhythm recap" : "Rhythm revealed")}</h3>
         {mode === "tempo-estimate" && exercise.sourceBpm ? selected !== null ? <><p className={styles.score}>{tempoEstimateScore}<small>/100</small></p><p>{t("Your estimate")}: {tempoGuess} BPM · {t("Actual tempo")}: {exercise.sourceBpm} BPM · {t("Difference")}: {tempoErrorPercent.toFixed(1)}%</p></> : <p>{t("Actual tempo")}: {exercise.sourceBpm} BPM · {t("This assisted reveal was not scored.")}</p> : null}
         {result ? <><p className={styles.score}>{result.summary.score}<small>/100</small></p><p>{t("Rhythm placement")}: {result.summary.placementScore}% · {t("Timing")}: {result.summary.timingScore}%</p>{result.summary.dynamicsScore !== null ? <p>{t("Accent and ghost-note dynamics")}: {result.summary.dynamicsScore}%</p> : null}<p>{t("Great")}: {result.summary.great} · {t("Good")}: {result.summary.good} · {t("Missed")}: {result.summary.miss} · {t("Extra")}: {result.summary.extra}</p><p>{t(answerExplanation)}</p></> : null}
-        {selected !== null && (mode === "meter" || mode === "feel" || mode === "feel-detail" || mode === "grouping" || mode === "voice-change") ? <><p>{t("Your choice")}: {t(selectedAnswer)} · {t("Answer")}: {t(correctAnswer)}</p><p>{t(modeExplanation)}</p></> : null}
+        {selected !== null && (mode === "meter" || mode === "feel" || mode === "feel-detail" || mode === "grouping" || mode === "voice-change" || mode === "rudiment") ? <><p>{t("Your choice")}: {t(selectedAnswer)} · {t("Answer")}: {t(correctAnswer)}</p><p>{t(modeExplanation)}</p></> : null}
         {selected === null && assisted && mode === "feel-detail" ? <><p>{t("Answer")}: {t(correctAnswer)}</p><p>{t(modeExplanation)}</p></> : null}
+        {confidenceRating ? <p>{t("Confidence")}: {t(confidenceRating === 1 ? "Guessing" : confidenceRating === 2 ? "Somewhat sure" : "Very sure")}</p> : null}
         {selected !== null && mode === "error" ? <><p>{t("Your choice")}: {t(selectedAnswer)} · {t("Answer")}: {t(correctAnswer)}</p>{errorLocation !== null ? <p>{t("You chose count")} {errorLocation + 1}.</p> : null}<p>{t(modeExplanation)}</p><TrainerNotationView pattern={exercise.comparison?.pattern ?? exercise.pattern} meter={exercise.meter} grouping={exercise.grouping} showRhythmStems /></> : null}
         {mode === "voice-change" && selected !== null && exercise.comparison ? <div className={styles.builderCompare}><div className={styles.notationBridge}><h4>{t("First groove")}</h4><TrainerNotationView pattern={exercise.pattern} meter={exercise.meter} grouping={exercise.grouping} showRhythmStems /></div><div className={styles.notationBridge}><h4>{t("Second groove")}</h4><TrainerNotationView pattern={exercise.comparison.pattern} meter={exercise.meter} grouping={exercise.grouping} showRhythmStems /></div></div> : null}
         {selected !== null && mode === "identify" && !correct ? <p>{t(answerExplanation)}</p> : null}
@@ -1917,10 +2025,12 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
         {selected !== null && !correct && mode === "identify" ? <><div className={styles.notationBridge}><h4>{t("Your chosen rhythm in notation")}</h4><TrainerNotationView pattern={exercise.choices[selected]!} meter={exercise.meter} grouping={exercise.grouping} showRhythmStems /></div><details><summary>{t("Show your chosen rhythm grid")}</summary><RhythmGrid pattern={exercise.choices[selected]!} meter={meter} grouping={exercise.grouping} label={t("Your chosen rhythm")} /></details></> : null}
         <div className={styles.previewControls} aria-label={t("Compare the heard rhythm and your answer")}>
           <label>{t("Replay speed")}<select value={previewSpeed} onChange={event => setPreviewSpeed(Number(event.target.value) as 75 | 100)}><option value={75}>{t("Slower · 75%")}</option><option value={100}>{t("Original · 100%")}</option></select></label>
-          {exercise.bars > 1 ? <label>{t("Replay section")}<select value={reviewSegment} onChange={event => setReviewSegment(event.target.value as "full" | "1" | "2")}><option value="full">{t("Full phrase")}</option><option value="1">{t("Bar 1")}</option><option value="2">{t("Bar 2")}</option></select></label> : null}
+          {exercise.bars > 1 ? <label>{t("Replay section")}<select value={reviewSegment} onChange={event => setReviewSegment(event.target.value)}><option value="full">{t("Full phrase")}</option>{Array.from({ length: exercise.bars }, (_, bar) => <option value={String(bar + 1)} key={bar}>{t("Bar {bar}", { bar: bar + 1 })}</option>)}</select></label> : null}
           {level === "groove" ? <label>{t("Hear a voice")}<select value={previewVoice} onChange={event => setPreviewVoice(event.target.value as Instrument | "all")}><option value="all">{t("All voices")}</option>{pads.map(pad => <option value={pad.voice} key={pad.voice}>{t(pad.label)}</option>)}</select></label> : null}
           <button className="button-secondary" disabled={busy} onClick={() => void playResultReview("target")}>{t("Hear target")}</button>
           {result ? <button className="button-secondary" disabled={busy} onClick={() => void playResultReview("answer")}>{t("Hear my answer")}</button> : null}
+          <button className="button-secondary" disabled={!exercise} onClick={exportCurrentMusicXml}>{t("Export MusicXML")}</button>
+          <button className="button-secondary" disabled={!exercise} onClick={() => setPrintScore(true)}>{t("Print notation")}</button>
           <small>{t("Listen to the target and your recorded hits back-to-back in separate replays. This review does not change your score.")}</small>
         </div>
         {result ? <details><summary>{t("Hit timing details")}</summary><ul>{result.rated.map((hit, index) => <li key={index}>{t(pads.find(pad => pad.voice === hit.instrument)?.label ?? hit.instrument)} · {t(({ great: "Great", good: "Good", miss: "Missed", extra: "Extra" })[hit.rating])}{hit.offsetMs !== null ? ` · ${hit.offsetMs > 0 ? "+" : ""}${hit.offsetMs} ms` : ""}</li>)}</ul></details> : null}
@@ -1950,6 +2060,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
         {dynamicsSummary ? <p className={styles.timingInsight}>{t("Accent and ghost-note dynamics")}: <strong>{dynamicsSummary.average}%</strong> · {dynamicsSummary.count} {t("velocity-enabled attempts")}</p> : null}
         {!meterAverages.length && !feelAverages.length && !subdivisionAverages.length && !voiceAverages.length && !timingHeatmap.length ? <p>{t("More detailed rhythm diagnostics will appear after you complete a few unassisted tap-back rounds.")}</p> : null}
       </section>
+      <section className={styles.analytics} aria-label={t("Confidence calibration")}><h4>{t("Confidence calibration")}</h4><p>{t("Compare how sure you felt with your score on unassisted first attempts.")}</p><ul className={styles.confidenceRows}>{confidenceCalibration.map(item => <li key={item.rating}><span>{t(item.rating === 1 ? "Guessing" : item.rating === 2 ? "Somewhat sure" : "Very sure")}</span><small>{item.average === null ? t("No attempts yet") : `${item.average}% ${t("average score")}`} · n={item.count}</small></li>)}</ul></section>
       <section className={styles.recommendation} aria-label={t("Spaced review schedule")}><h4>{t("Spaced review")}</h4>{dueReviews.length ? <><p>{t(`${dueReviews.length} skills are due for a short review.`)}</p><ul className={styles.reviewList}>{dueReviews.map(item => <li key={item.skill}><span>{t(skillLabels[item.skill])}</span><small>{t("Last score")}: {item.lastScore}%</small><button className="button-secondary" disabled={busy} onClick={() => startDueReview(item)}>{t(item.skill === "pulse-stability" ? "Review pulse challenge" : "Review now")}</button></li>)}</ul></> : upcomingReview ? <p>{t("Next review")}: {t(skillLabels[upcomingReview.skill])} · {new Date(upcomingReview.dueAt).toLocaleDateString()}</p> : <p>{t("Unassisted results schedule skills for review. Strong scores stretch the interval; missed rhythms return sooner.")}</p>}</section>
       <section className={styles.recommendation} aria-label={t("Practice recommendation")}><h4>{t("Suggested focus")}</h4>{recommendation ? <><p>{t(skillLabels[recommendation.skill])} · {recommendation.average}% {t("across your recent first attempts")}</p><button className="button-secondary" disabled={busy} onClick={() => startSkillReview(recommendation.skill)}>{t(recommendation.skill === "pulse-stability" ? "Practice the pulse dropout" : "Practice this focus")} · {t(EAR_LEVELS.find(item => item.id === recommendation.level)!.label)}</button></> : <p>{t("Complete three unassisted first attempts in a skill to get a focused recommendation.")}</p>}</section>
       <p>{history.length} {t("saved attempts on this learner profile")}</p><p>{t("Ear training stays separate from Trainer mastery. Data is saved locally, included in full local backups, and included in optional private learner sync when enabled.")}</p>
@@ -1963,10 +2074,11 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
       <p>{t("Save up to 12 rhythms in a pack, export a small JSON file, and share it with a teacher or practice partner. Imported packs are previewed before they are saved.")}</p>
       <div className={styles.builderControls}>
         <label>{t("Pack name")}<input type="text" maxLength={60} value={challengePackName} disabled={!challengePacksReady || busy} onChange={event => setChallengePackName(event.target.value)} /></label>
-        <button className="button-secondary" disabled={!challengePacksReady || !exercise || busy} onClick={saveCurrentToPack}>{t("Save current rhythm to pack")}</button>
+        <button className="button-secondary" disabled={!challengePacksReady || !exercise || exercise.bars > 2 || busy} onClick={saveCurrentToPack}>{t("Save current rhythm to pack")}</button>
         <button className="button-secondary" disabled={!exercise || busy} onClick={exportCurrentMidi}>{t("Export current rhythm as MIDI")}</button>
         <label className={styles.packFile}>{t("Preview an imported pack")}<input type="file" accept="application/json,.json" disabled={!challengePacksReady || busy} onChange={event => { void previewChallengePack(event.target.files?.[0]); event.currentTarget.value = ""; }} /></label>
       </div>
+      {exercise && exercise.bars > 2 ? <small>{t("Challenge packs currently support phrases up to two bars. Export this longer score as MusicXML instead.")}</small> : null}
       {importedPack ? <section className={styles.packPreview} aria-label={t("Imported challenge pack preview")}>
         <h4>{t("Preview")}: {importedPack.name}</h4><p>{importedPack.items.length} {t("rhythms · preview before adding to this learner profile")}</p>
         {importedPack.assignment ? <p><strong>{t("Assigned to")}: {importedPack.assignment.learnerName}</strong> · {t("Due")}: {new Date(importedPack.assignment.dueAt).toLocaleDateString()}</p> : null}
@@ -1989,5 +2101,7 @@ function EarTrainingSession({ profileId }: { profileId: string }) {
     <section className={`card ${styles.builder}`} aria-label={t("Curated groove lessons")}><span className="eyebrow">{t("Guided listening path")}</span><h3>{t("Curated groove lessons")}</h3><p>{t("Learn a groove by listening, echoing it, and noticing what each drum voice contributes. Earn two unassisted scores of 80% to unlock the next lesson.")}</p><ol className={styles.grooveLessons}>{EAR_GROOVE_LESSONS.map((lesson, index) => { const attempts = history.filter(item => !item.assisted && item.lessonId === lesson.id); const complete = attempts.filter(item => item.score >= 80).length >= 2; const locked = index >= lessonLimit; return <li key={lesson.id} className={locked ? styles.lessonLocked : ""}><div><strong>{t(lesson.name)}</strong><p>{t(lesson.concept)}</p><small>{t(lesson.hint)}</small>{complete ? <span className={styles.lessonComplete}>{t("Lesson complete")}</span> : null}</div><button className="button-secondary" disabled={busy || locked} onClick={() => startGrooveLesson(lesson)}>{t(locked ? "Complete the previous lesson" : complete ? "Practice again" : "Start lesson")}</button></li>; })}</ol></section>
     <PulseDropoutTrainer bpm={bpm} disabled={busy} onScore={(score, meter, bars) => save(score, ["pulse-stability"], "dropout", null, false, { meter, bars })} />
     <TempoEnduranceTrainer bpm={bpm} meter={meter} disabled={busy} onScore={(score, meter, challengeBpm) => save(score, ["tempo-control"], "tempo-ramp", null, false, { meter, bars: 8, bpm: challengeBpm })} />
-  </div>;
+  </div>
+  {printScore && exercise && typeof document !== "undefined" ? createPortal(<div className="ear-score-print-root"><h1>{exercise.pattern.name}</h1><p>{t(exercise.meter)} · {mode === "tempo-estimate" ? exercise.sourceBpm ?? bpm : mode === "tempo-transfer" ? transferAnswerBpm : bpm} BPM · {exercise.bars} {t(exercise.bars === 1 ? "bar" : "bars")}</p>{Array.from({ length: Math.ceil(exercise.bars / 2) }, (_, page) => <section className="ear-score-print-page" key={page}>{Array.from({ length: Math.min(2, exercise.bars - page * 2) }, (_, index) => { const bar = page * 2 + index + 1; return <TrainerNotationView key={bar} pattern={exercise.pattern} meter={exercise.meter} grouping={exercise.grouping} tupletLabel={notationTupletLabel(exercise)} barActions={{ selectedBar: bar, onSelect: () => undefined }} showRhythmStems />; })}</section>)}</div>, document.body) : null}
+  </>;
 }

@@ -3,7 +3,7 @@ import { SONG_INSTRUMENTS, type Groove, type Instrument, type SongHitArticulatio
 import { cleanMeterLabel, meterBeats } from "./song-builder";
 
 export type MusicXmlSource = { id: string; label: string; count: number; defaultVoice: SongInstrument | null };
-export type MusicXmlNote = { measure: number; beat: number; sourceId: string; velocity: number; duration: number; sticking?: "R" | "L"; accent?: boolean; ghost?: boolean; articulation?: SongHitArticulation; tuplet?: { actualNotes: number; normalNotes: number }; unsupported?: string[] };
+export type MusicXmlNote = { measure: number; beat: number; sourceId: string; velocity: number; duration: number; sticking?: "R" | "L"; accent?: boolean; ghost?: boolean; grace?: boolean; articulation?: SongHitArticulation; tuplet?: { actualNotes: number; normalNotes: number }; unsupported?: string[] };
 export type MusicXmlPreview = { title: string; artist: string; measures: Array<{ meter: string; bpm: number; beats: number }>; notes: MusicXmlNote[]; sources: MusicXmlSource[]; warnings: string[] };
 export type MusicXmlMapping = Record<string, SongInstrument | "ignore">;
 
@@ -205,7 +205,7 @@ export function previewMusicXmlImport(xml: string, fallbackTitle = "MusicXML imp
             if (Array.from(item.getElementsByTagName("*")).some(element => element.localName === "ornaments" && Array.from(element.children).some(child => child.localName !== "tremolo"))) unsupported.add("ornaments beyond drum rolls");
             const supportedMarks = new Set(["accent", "strong-accent", "staccato", "staccatissimo", "stopped"]);
             if (Array.from(item.getElementsByTagName("*")).some(element => element.localName === "articulations" && Array.from(element.children).some(child => !supportedMarks.has(child.localName)))) unsupported.add("articulations beyond accents, ghost notes, and chokes");
-            record.notes.push({ measure: number, beat, sourceId, velocity, duration, ...(sticking ? { sticking } : {}), ...(accent ? { accent } : {}), ...(ghost ? { ghost } : {}), ...(articulation ? { articulation } : {}), ...(tuplet ? { tuplet } : {}), ...(unsupported.size ? { unsupported: [...unsupported] } : {}) });
+            record.notes.push({ measure: number, beat, sourceId, velocity, duration, ...(sticking ? { sticking } : {}), ...(accent ? { accent } : {}), ...(ghost ? { ghost } : {}), ...(grace ? { grace: true } : {}), ...(articulation ? { articulation } : {}), ...(tuplet ? { tuplet } : {}), ...(unsupported.size ? { unsupported: [...unsupported] } : {}) });
           }
           if (!chord) { previousNoteBeat = cursor; cursor += duration; maxCursor = Math.max(maxCursor, cursor); }
         }
@@ -224,17 +224,24 @@ export function previewMusicXmlImport(xml: string, fallbackTitle = "MusicXML imp
   const notes = [...records.entries()].flatMap(([measure, record]) => record.notes.map(note => ({ ...note, measure }))).slice(0, 20_000);
   if (notes.length === 20_000) warnings.push("Only the first 20,000 percussion notes are included.");
   const tuplets = [...new Set(notes.flatMap(note => note.tuplet ? [`${note.tuplet.actualNotes}:${note.tuplet.normalNotes}`] : []))].sort();
-  if (tuplets.length) warnings.push(`Tuplet ratios detected (${tuplets.join(", ")}). Beat positions are retained where the Trainer grid can represent them; check the per-note rounding warnings and notation preview.`);
+  if (tuplets.length) warnings.push(`Tuplet ratios detected (${tuplets.join(", ")}). Trainer selects a fine grid for exact note positions; review the notation preview against the source score.`);
   const stickingCount = notes.filter(note => note.sticking).length;
   if (stickingCount) warnings.push(`${stickingCount} right/left sticking mark${stickingCount === 1 ? "" : "s"} detected and available in the Trainer score preview.`);
   const unsupported = [...new Set(notes.flatMap(note => note.unsupported ?? []))].sort();
   if (unsupported.length) warnings.push(`These MusicXML details are retained only in the local original score copy, not in the editable drum part: ${unsupported.join(", ")}. Review the source score before relying on this imported measure.`);
-  const unsnappedMeasures = [...new Set(notes.filter(note => ![4, 8, 12, 16, 20].some(subdivision => Math.abs(note.beat - Math.round(note.beat * subdivision / 4) * 4 / subdivision) < 0.015)).map(note => note.measure))];
-  if (unsnappedMeasures.length) warnings.push(`Measures ${unsnappedMeasures.slice(0, 12).join(", ")}${unsnappedMeasures.length > 12 ? ", …" : ""} contain note positions finer than the editor grid; those notes will be rounded to the nearest supported step.`);
+  const unsnappedMeasures = [...new Set(notes.filter(note => !Array.from({ length: 60 }, (_, index) => (index + 1) * 4).some(subdivision => Math.abs(note.beat * subdivision / 4 - Math.round(note.beat * subdivision / 4)) < 0.015)).map(note => note.measure))];
+  if (unsnappedMeasures.length) warnings.push(`Measures ${unsnappedMeasures.slice(0, 12).join(", ")}${unsnappedMeasures.length > 12 ? ", …" : ""} contain note positions finer than the notation grid; review those positions in the imported score.`);
   const title = descendantText(root, "work-title") || descendantText(root, "movement-title") || fallbackTitle;
   const artist = Array.from(doc.getElementsByTagName("*" )).find(element => element.localName === "creator")?.textContent?.trim() || "MusicXML import";
   const dedupedWarnings = [...new Set(warnings)];
   return { title: title.slice(0, 120), artist: artist.slice(0, 120), measures, notes, sources: [...sources.values()].sort((a, b) => a.label.localeCompare(b.label)), warnings: dedupedWarnings };
+}
+
+function supportedTrainerSubdivision(beatPositions: number[], beats: number): number {
+  const matches = (subdivision: number) => Number.isInteger(beats * subdivision / 4) &&
+    beatPositions.every(beat => Math.abs(beat * subdivision / 4 - Math.round(beat * subdivision / 4)) < 0.015);
+  for (let subdivision = 4; subdivision <= 240; subdivision += 4) if (matches(subdivision)) return subdivision;
+  return 16;
 }
 
 function supportedSubdivision(beatPositions: number[], beats: number): 4 | 8 | 12 | 16 | 20 {
@@ -251,46 +258,100 @@ function trainerVoice(voice: SongInstrument | null | undefined): Instrument | nu
   return null;
 }
 
-/** Build a single-measure Trainer groove from a reviewed MusicXML preview. */
-export function createTrainerPatternFromMusicXmlPreview(preview: MusicXmlPreview, mapping: TrainerMusicXmlMapping, measureNumber: number): { pattern: Groove; noteCount: number; ignoredNoteCount: number; warnings: string[] } {
-  const measure = preview.measures[measureNumber - 1];
-  if (!measure) throw new Error("Choose a measure that exists in the imported score.");
-  const sourceNotes = preview.notes.filter(note => note.measure === measureNumber);
-  const assigned = sourceNotes.flatMap(note => {
-    const source = preview.sources.find(item => item.id === note.sourceId);
-    const voice = mapping[note.sourceId] ?? trainerVoice(source?.defaultVoice) ?? "ignore";
-    return voice === "ignore" ? [] : [{ ...note, voice }];
-  });
-  if (!assigned.length) throw new Error("Map at least one note in this measure to a Trainer drum voice.");
-  const subdivision = supportedSubdivision(assigned.map(note => note.beat), measure.beats);
-  const merged = new Map<string, { step: number; instrument: Instrument; accent?: boolean; sticking?: "R" | "L" }>();
-  const warnings = new Set<string>();
-  for (const note of assigned) {
-    const rawStep = note.beat * subdivision / 4;
-    const step = Math.max(0, Math.min(Math.ceil(measure.beats * subdivision / 4) - 1, Math.round(rawStep)));
-    if (Math.abs(rawStep - step) > 0.015) warnings.add("Some notes were rounded to the closest Trainer grid step.");
-    for (const item of note.unsupported ?? []) warnings.add(`The Trainer cannot preserve ${item}.`);
-    const key = `${note.voice}:${step}`, previous = merged.get(key);
-    merged.set(key, { step, instrument: note.voice, accent: Boolean(previous?.accent || note.velocity >= 108), sticking: note.sticking ?? previous?.sticking });
+export type TrainerMusicXmlPatterns = {
+  pattern: Groove;
+  sourcePattern: Groove | null;
+  noteCount: number;
+  ignoredNoteCount: number;
+  sourceNoteCount: number;
+  sourceIgnoredNoteCount: number;
+  firstMeasure: number;
+  lastMeasure: number;
+  warnings: string[];
+};
+
+/** Build a contiguous, single-meter and single-tempo MusicXML passage for Trainer. */
+export function createTrainerPatternsFromMusicXmlPreview(preview: MusicXmlPreview, mapping: TrainerMusicXmlMapping, firstMeasure: number, lastMeasure = firstMeasure): TrainerMusicXmlPatterns {
+  if (!Number.isInteger(firstMeasure) || !Number.isInteger(lastMeasure) || firstMeasure < 1 || lastMeasure < firstMeasure || lastMeasure > preview.measures.length) {
+    throw new Error("Choose a valid contiguous measure range from the imported score.");
   }
-  const beats = Math.max(0.5, measure.beats);
-  const pattern: Groove = {
-    id: `custom-${crypto.randomUUID()}`,
-    name: `${preview.title} · measure ${measureNumber}`.slice(0, 100),
-    level: "Intermediate",
-    description: `Imported from MusicXML · ${measure.meter} · ${assigned.length} mapped notes. Check the score and source notation before practice.`,
-    subdivision,
-    beats,
-    defaultBpm: Math.max(40, Math.min(200, measure.bpm)),
-    tempoRange: [40, 200],
-    meter: measure.meter,
-    style: "Imported score",
-    focus: `MusicXML measure ${measureNumber}; ${preview.artist}`.slice(0, 180),
-    tags: ["musicxml-import", "review-source-score"],
-    hits: [...merged.values()].sort((left, right) => left.step - right.step || left.instrument.localeCompare(right.instrument)),
+  if (lastMeasure - firstMeasure >= 8) throw new Error("Trainer imports up to eight measures at a time.");
+  const measures = preview.measures.slice(firstMeasure - 1, lastMeasure);
+  const first = measures[0]!;
+  if (measures.some(measure => measure.meter !== first.meter || measure.bpm !== first.bpm)) {
+    throw new Error("Choose measures that share one time signature and tempo. Import a new section when either changes.");
+  }
+  const beats = measures.reduce((sum, measure) => sum + measure.beats, 0);
+  if (beats > 32) throw new Error("This passage is longer than 32 beats. Choose a shorter range.");
+  const measureStarts: number[] = [];
+  let cumulativeBeats = 0;
+  measures.forEach(measure => { measureStarts.push(cumulativeBeats); cumulativeBeats += measure.beats; });
+  const sourceNotes = preview.notes.filter(note => note.measure >= firstMeasure && note.measure <= lastMeasure);
+  const assignNotes = (resolveVoice: (note: MusicXmlNote) => Instrument | "ignore") => sourceNotes.flatMap(note => {
+    const voice = resolveVoice(note);
+    return voice === "ignore" ? [] : [{ ...note, voice, position: measureStarts[note.measure - firstMeasure]! + note.beat }];
+  });
+  const mapped = assignNotes(note => {
+    const source = preview.sources.find(item => item.id === note.sourceId);
+    return mapping[note.sourceId] ?? trainerVoice(source?.defaultVoice) ?? "ignore";
+  });
+  const sourceMapped = assignNotes(note => trainerVoice(preview.sources.find(item => item.id === note.sourceId)?.defaultVoice) ?? "ignore");
+  if (!mapped.length) throw new Error("Map at least one note in this measure range to a Trainer drum voice.");
+
+  const warnings = new Set<string>();
+  const makePattern = (assigned: typeof mapped, sourceView: boolean): Groove | null => {
+    if (!assigned.length) return null;
+    const subdivision = supportedTrainerSubdivision(assigned.map(note => note.position), beats);
+    const totalSteps = Math.ceil(beats * subdivision / 4);
+    const merged = new Map<string, { step: number; instrument: Instrument; accent?: boolean; sticking?: "R" | "L"; articulation?: "flam" | "drag" | "buzz"; tuplet?: { actualNotes: number; normalNotes: number }; grace?: true }>();
+    for (const note of assigned) {
+      const rawStep = note.position * subdivision / 4;
+      const step = Math.max(0, Math.min(totalSteps - 1, Math.round(rawStep)));
+      if (Math.abs(rawStep - step) > 0.015) warnings.add("Some notes were rounded to the closest Trainer grid step.");
+      for (const item of note.unsupported ?? []) warnings.add(`The Trainer cannot preserve ${item}.`);
+      const articulation = note.grace ? undefined : note.articulation === "roll" ? "buzz" : note.articulation === "flam" || note.articulation === "drag" || note.articulation === "buzz" ? note.articulation : undefined;
+      if (note.articulation && !articulation && note.articulation !== "normal" && !note.grace) warnings.add(`The Trainer cannot preserve the ${note.articulation} articulation.`);
+      const key = `${note.voice}:${step}:${note.grace ? "grace" : "principal"}`, previous = merged.get(key);
+      merged.set(key, { step, instrument: note.voice, accent: Boolean(previous?.accent || note.velocity >= 108 || note.accent), sticking: note.sticking ?? previous?.sticking, articulation: articulation ?? previous?.articulation, tuplet: note.tuplet ?? previous?.tuplet, ...(note.grace || previous?.grace ? { grace: true } : {}) });
+    }
+    const tupletRatios = [...new Set(assigned.flatMap(note => note.tuplet ? [`${note.tuplet.actualNotes}:${note.tuplet.normalNotes}`] : []))];
+    const tupletLabel = tupletRatios.length === 1 ? tupletRatios[0] : undefined;
+    const range = firstMeasure === lastMeasure ? `measure ${firstMeasure}` : `measures ${firstMeasure}–${lastMeasure}`;
+    return {
+      id: `custom-musicxml-preview-${sourceView ? "source" : "mapped"}-${firstMeasure}-${lastMeasure}`,
+      name: `${preview.title} · ${range}`.slice(0, 60),
+      level: "Intermediate",
+      description: `Imported from MusicXML · ${first.meter} · ${assigned.length} ${sourceView ? "recognized" : "mapped"} notes. Compare with the source score before practice.`,
+      subdivision,
+      beats,
+      defaultBpm: Math.max(40, Math.min(200, first.bpm)),
+      tempoRange: [40, 200],
+      meter: firstMeasure === lastMeasure ? first.meter : `${lastMeasure - firstMeasure + 1} bars · ${first.meter}`,
+      style: "Imported score",
+      focus: `${range}; ${preview.artist}`.slice(0, 120),
+      tags: ["musicxml-import", "review-source-score"],
+      ...(tupletLabel ? { tupletLabel, tupletGroupSteps: Math.max(1, Math.round(subdivision / 4)) } : {}),
+      hits: [...merged.values()].sort((left, right) => left.step - right.step || left.instrument.localeCompare(right.instrument)),
+    };
   };
-  if (sourceNotes.some(note => note.tuplet)) warnings.add("Tuplet notes are represented on the supported Trainer grid where possible; compare them with the source score.");
-  return { pattern, noteCount: assigned.length, ignoredNoteCount: sourceNotes.length - assigned.length, warnings: [...warnings] };
+  const pattern = makePattern(mapped, false)!;
+  const sourcePattern = makePattern(sourceMapped, true);
+  if (sourceNotes.some(note => note.tuplet) && pattern.subdivision === 16 && sourceNotes.some(note => note.tuplet && Math.abs(note.position * pattern.subdivision / 4 - Math.round(note.position * pattern.subdivision / 4)) > 0.015)) warnings.add("Some tuplet positions could not be represented exactly on the selected Trainer grid; compare them with the source score.");
+  return {
+    pattern, sourcePattern,
+    noteCount: mapped.length,
+    ignoredNoteCount: sourceNotes.length - mapped.length,
+    sourceNoteCount: sourceMapped.length,
+    sourceIgnoredNoteCount: sourceNotes.length - sourceMapped.length,
+    firstMeasure, lastMeasure,
+    warnings: [...warnings],
+  };
+}
+
+/** Backwards-compatible single-measure entry point. */
+export function createTrainerPatternFromMusicXmlPreview(preview: MusicXmlPreview, mapping: TrainerMusicXmlMapping, measureNumber: number): { pattern: Groove; noteCount: number; ignoredNoteCount: number; warnings: string[] } {
+  const result = createTrainerPatternsFromMusicXmlPreview(preview, mapping, measureNumber);
+  return { pattern: result.pattern, noteCount: result.noteCount, ignoredNoteCount: result.ignoredNoteCount, warnings: result.warnings };
 }
 
 export function createSongFromMusicXmlPreview(preview: MusicXmlPreview, mapping: MusicXmlMapping, title = preview.title, artist = preview.artist): { song: DrumSong; noteCount: number; ignoredNoteCount: number } {

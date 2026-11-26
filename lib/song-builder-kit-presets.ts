@@ -24,7 +24,8 @@ export async function saveKitSampleSnapshot(id: string, samples: CustomSampleRec
   const unique = new Map<SongInstrument, CustomSampleRecord>();
   for (const sample of samples) if (SONG_INSTRUMENTS.includes(sample.instrument)) unique.set(sample.instrument, sample);
   const rows = [...unique.values()].map(sample => ({ ...sample }));
-  const bytes = rows.reduce((sum, sample) => sum + sample.blob.size + (sample.softBlob?.size ?? 0) + (sample.accentBlob?.size ?? 0), 0);
+  const sampleBytes = (sample: CustomSampleRecord) => sample.blob.size + (sample.softBlob?.size ?? 0) + (sample.accentBlob?.size ?? 0) + Object.values(sample.alternates ?? {}).flatMap(items => items ?? []).reduce((sum, item) => sum + item.blob.size, 0);
+  const bytes = rows.reduce((sum, sample) => sum + sampleBytes(sample), 0);
   if (bytes > MAX_SNAPSHOT_BYTES) throw new Error("This kit uses more than 72 MB of custom samples. Remove some layers and save it again.");
   const database = await openDatabase();
   try {
@@ -34,7 +35,7 @@ export async function saveKitSampleSnapshot(id: string, samples: CustomSampleRec
       let abortReason: Error | undefined;
       request.onsuccess = () => {
         const existing = (request.result as KitSampleSnapshot[]).filter(item => item.id !== id);
-        const usedBytes = existing.reduce((sum, item) => sum + item.samples.reduce((subtotal, sample) => subtotal + sample.blob.size + (sample.softBlob?.size ?? 0) + (sample.accentBlob?.size ?? 0), 0), 0);
+        const usedBytes = existing.reduce((sum, item) => sum + item.samples.reduce((subtotal, sample) => subtotal + sampleBytes(sample), 0), 0);
         if (usedBytes + bytes > MAX_LIBRARY_BYTES) { abortReason = new Error("Saved kit samples are limited to 256 MB on this device. Remove a kit preset and try again."); transaction.abort(); return; }
         store.put({ id, samples: rows, updatedAt: new Date().toISOString() } satisfies KitSampleSnapshot);
       };

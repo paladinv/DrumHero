@@ -139,8 +139,8 @@ export function trainerPatternMusicXml(pattern: PracticePattern, bpm: number) {
   const beatsPerBar = meter.quarterNotesPerBar;
   const stepsPerBar = Math.max(1, Math.round(beatsPerBar * pattern.subdivision / 4));
   const bars = Math.max(1, Math.ceil(pattern.beats / beatsPerBar));
-  const divisions = 60;
-  const stepDuration = Math.round(divisions * 4 / pattern.subdivision);
+  const divisions = pattern.subdivision;
+  const stepDuration = 4;
   const safeBpm = Math.max(40, Math.min(220, Math.round(bpm)));
   const notes: Record<Instrument, { gm: number; step: string; octave: number; label: string }> = {
     kick: { gm: 36, step: "C", octave: 3, label: "Bass Drum" },
@@ -152,29 +152,58 @@ export function trainerPatternMusicXml(pattern: PracticePattern, bpm: number) {
   const usedVoices = [...new Set(pattern.hits.map(hit => hit.instrument))];
   const instrumentId = (voice: Instrument) => `P1-I${usedVoices.indexOf(voice) + 1}`;
   const scoreInstruments = usedVoices.map(voice => `<score-instrument id="${instrumentId(voice)}"><instrument-name>${notes[voice].label}</instrument-name></score-instrument><midi-instrument id="${instrumentId(voice)}"><midi-channel>10</midi-channel><midi-program>1</midi-program><midi-unpitched>${notes[voice].gm + 1}</midi-unpitched></midi-instrument>`).join("");
-  const noteType = pattern.subdivision === 4 ? "quarter" : pattern.subdivision === 8 || pattern.subdivision === 12 ? "eighth" : "16th";
-  const timeModification = pattern.subdivision === 12
-    ? "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>"
-    : pattern.subdivision === 20
-      ? "<time-modification><actual-notes>5</actual-notes><normal-notes>4</normal-notes></time-modification>"
-      : "";
+  const ratioFromLabel = pattern.tupletLabel?.match(/^(\d+):(\d+)$/);
+  const globalTuplet = ratioFromLabel ? { actualNotes: Number(ratioFromLabel[1]), normalNotes: Number(ratioFromLabel[2]) } : null;
+  const noteTypeForNormalCount = (count?: number) => count === 1 ? "quarter" : count === 2 ? "eighth" : count === 4 ? "16th" : count === 8 ? "32nd" : count === 16 ? "64th" : pattern.subdivision === 4 ? "quarter" : pattern.subdivision <= 12 ? "eighth" : "16th";
+  const timeModification = (ratio?: { actualNotes: number; normalNotes: number } | null) => ratio
+    ? `<time-modification><actual-notes>${ratio.actualNotes}</actual-notes><normal-notes>${ratio.normalNotes}</normal-notes></time-modification>`
+    : "";
   const hitByStep = new Map<number, typeof pattern.hits>();
   for (const hit of pattern.hits) hitByStep.set(hit.step, [...(hitByStep.get(hit.step) ?? []), hit]);
+  const globalTupletGroupSteps = Math.max(1, pattern.tupletGroupSteps ?? pattern.subdivision / 4);
+  const tupletBracket = (start: boolean, end: boolean) => `${start ? '<tuplet type="start" number="1"/>' : ""}${end ? '<tuplet type="stop" number="1"/>' : ""}`;
   const measureXml = Array.from({ length: bars }, (_, bar) => {
     const body = Array.from({ length: stepsPerBar }, (_, localStep) => {
       const step = bar * stepsPerBar + localStep;
       const group = (hitByStep.get(step) ?? []).filter(hit => usedVoices.includes(hit.instrument));
-      if (!group.length) return `<note><rest/><duration>${stepDuration}</duration><voice>1</voice><type>${noteType}</type>${timeModification}</note>`;
-      return group.map((hit, index) => {
+      if (!group.length) {
+        const start = Boolean(globalTuplet && step % globalTupletGroupSteps === 0);
+        const end = Boolean(globalTuplet && (step + 1) % globalTupletGroupSteps === 0);
+        const notations = start || end ? `<notations>${tupletBracket(start, end)}</notations>` : "";
+        return `<note><rest/><duration>${stepDuration}</duration><voice>1</voice><type>${noteTypeForNormalCount(globalTuplet?.normalNotes)}</type>${timeModification(globalTuplet)}${notations}</note>`;
+      }
+      const graceGroup = group.filter(hit => hit.grace);
+      const principalGroup = group.filter(hit => !hit.grace);
+      const graceXml = graceGroup.map((hit, index) => {
         const note = notes[hit.instrument];
+        const tuplet = hit.tuplet ?? globalTuplet;
+        const tupletGroupSteps = Math.max(1, hit.tuplet ? pattern.tupletGroupSteps ?? hit.tuplet.actualNotes : globalTupletGroupSteps);
+        const tupletStart = Boolean(tuplet && step % tupletGroupSteps === 0 && index === 0);
+        const tupletEnd = Boolean(tuplet && (step + 1) % tupletGroupSteps === 0 && index === graceGroup.length - 1 && principalGroup.length === 0);
+        const accents = hit.accent ? "<articulations><accent/></articulations>" : "";
+        const sticking = hit.sticking ? `<technical><other-technical>${hit.sticking}</other-technical></technical>` : "";
+        const notations = accents || sticking || tupletStart || tupletEnd ? `<notations>${accents}${sticking}${tupletBracket(tupletStart, tupletEnd)}</notations>` : "";
+        return `<note>${index ? "<chord/>" : ""}<grace slash="yes"/><unpitched><display-step>${note.step}</display-step><display-octave>${note.octave}</display-octave></unpitched><instrument id="${instrumentId(hit.instrument)}"/><voice>1</voice><type>${noteTypeForNormalCount(tuplet?.normalNotes)}</type>${timeModification(tuplet)}<stem>${hit.instrument === "kick" || hit.instrument === "snare" || hit.instrument === "tom" ? "down" : "up"}</stem>${notations}</note>`;
+      }).join("");
+      const principalXml = principalGroup.map((hit, index) => {
+        const note = notes[hit.instrument];
+        const tuplet = hit.tuplet ?? globalTuplet;
+        const tupletGroupSteps = Math.max(1, hit.tuplet ? pattern.tupletGroupSteps ?? hit.tuplet.actualNotes : globalTupletGroupSteps);
+        const tupletStart = Boolean(tuplet && step % tupletGroupSteps === 0 && index === 0 && graceGroup.length === 0);
+        const tupletEnd = Boolean(tuplet && (step + 1) % tupletGroupSteps === 0 && index === principalGroup.length - 1);
         const accents = hit.accent ? "<articulations><accent/></articulations>" : "";
         const sticking = hit.sticking ? `<technical><other-technical>${hit.sticking}</other-technical></technical>` : "";
         const articulation = hit.articulation ? `<other-notation type="single">${xmlEscape(hit.articulation)}</other-notation>` : "";
         const articulationText = hit.midiArticulationTarget ? `<other-notation type="single">${xmlEscape(hit.midiArticulationTarget.replaceAll("-", " "))}</other-notation>` : "";
-        const notations = accents || sticking || articulation || articulationText
-          ? `<notations>${accents}${sticking}${articulation}${articulationText}</notations>` : "";
-        return `<note>${index ? "<chord/>" : ""}<unpitched><display-step>${note.step}</display-step><display-octave>${note.octave}</display-octave></unpitched><instrument id="${instrumentId(hit.instrument)}"/><duration>${stepDuration}</duration><voice>1</voice><type>${noteType}</type>${timeModification}<stem>${hit.instrument === "kick" || hit.instrument === "snare" || hit.instrument === "tom" ? "down" : "up"}</stem>${notations}</note>`;
+        const tupletNotation = tupletBracket(tupletStart, tupletEnd);
+        const notations = accents || sticking || articulation || articulationText || tupletNotation
+          ? `<notations>${accents}${sticking}${articulation}${articulationText}${tupletNotation}</notations>` : "";
+        return `<note>${index ? "<chord/>" : ""}<unpitched><display-step>${note.step}</display-step><display-octave>${note.octave}</display-octave></unpitched><instrument id="${instrumentId(hit.instrument)}"/><duration>${stepDuration}</duration><voice>1</voice><type>${noteTypeForNormalCount(tuplet?.normalNotes)}</type>${timeModification(tuplet)}<stem>${hit.instrument === "kick" || hit.instrument === "snare" || hit.instrument === "tom" ? "down" : "up"}</stem>${notations}</note>`;
       }).join("");
+      const graceOnlyRest = graceGroup.length > 0 && principalGroup.length === 0
+        ? `<note><rest/><duration>${stepDuration}</duration><voice>1</voice><type>${noteTypeForNormalCount(globalTuplet?.normalNotes)}</type>${timeModification(globalTuplet)}</note>`
+        : "";
+      return graceXml + principalXml + graceOnlyRest;
     }).join("");
     const attributes = `<attributes><divisions>${divisions}</divisions><time><beats>${numerator}</beats><beat-type>${denominator}</beat-type></time><clef><sign>percussion</sign><line>2</line></clef></attributes>`;
     const direction = `<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${safeBpm}</per-minute></metronome></direction-type><sound tempo="${safeBpm}"/></direction>`;

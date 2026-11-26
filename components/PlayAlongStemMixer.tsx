@@ -11,6 +11,7 @@ export type PlayAlongStemMixerHandle = {
   getTempo: () => number | undefined;
   getStems: () => BuilderBacking[];
   isRightsConfirmed: () => boolean;
+  shareReadiness: () => { ready: boolean; unreviewed: number };
   replaceStems: (stems: PortablePlayAlongStem[], tempo?: number) => Promise<void>;
 };
 
@@ -108,6 +109,10 @@ export const PlayAlongStemMixer = forwardRef<PlayAlongStemMixerHandle, Props>(fu
     getTempo: () => tracks.length ? syncTempo : undefined,
     getStems: () => tracksRef.current,
     isRightsConfirmed: () => rightsConfirmed,
+    shareReadiness: () => {
+      const unreviewed = tracksRef.current.filter((track) => !track.source?.trim() || !track.rights?.trim()).length;
+      return { ready: unreviewed === 0, unreviewed };
+    },
     replaceStems: async (stems, tempo) => {
       if (stems.length && !rightsConfirmed) throw new Error(t('Confirm that you own or have permission to use these audio files.'));
       if (stems.length > MAX_STEMS) throw new Error(t('A Play-Along mix can contain up to {count} imported stems.', { count: MAX_STEMS }));
@@ -271,6 +276,11 @@ export const PlayAlongStemMixer = forwardRef<PlayAlongStemMixerHandle, Props>(fu
     <summary>{t('Imported audio stems')} · {tracks.length}/{MAX_STEMS}</summary>
     <p>{t('Add up to six aligned stems, such as bass, guitar, or a reference mix. The section form and tempo map control playback; each stem has its own downbeat and volume. Files stay on this device.')}</p>
     <p>{t('Source and rights notes are supplied by you and are not verified by Drum Hero.')}</p>
+    {tracks.length > 0 && <p role="status">{!rightsConfirmed
+      ? t('Confirm that you own or have permission to use these audio files.')
+      : tracks.some((track) => !track.source?.trim() || !track.rights?.trim())
+        ? t('Add a source or attribution plus a license or permission note to every imported stem before exporting a shareable package.')
+        : t('Every imported stem has source and rights notes. Drum Hero does not verify those claims.')}</p>}
     <p>{t('{count} stems · {size} MiB stored locally.', { count: tracks.length, size: (totalBytes / 1_048_576).toFixed(2) })}</p>
     <label>{t('Shared stem sync tempo · BPM')}<input type="number" min={40} max={200} step={1} value={syncTempo} onChange={(event) => void updateTempo(Number(event.target.value))} /></label>
     <label>{t('Source or attribution')} <span>({t('optional')})</span><input maxLength={180} value={source} onChange={(event) => setSource(event.target.value)} placeholder={t('Creator, source URL, or recording name')} /></label>

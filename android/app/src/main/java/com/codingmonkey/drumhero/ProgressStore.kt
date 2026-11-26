@@ -47,10 +47,97 @@ data class AndroidArchiveReview(
     val ignoredSessions: Int,
     val preservedEarResults: Int,
     val preservedTrainerRounds: Int,
+    val preservedSightAttempts: Int,
 )
 
 private const val ARCHIVE_FORMAT = "drum-hero-learning-archive-v1"
 private const val ARCHIVE_LIMIT_BYTES = 32 * 1024 * 1024
+private val PORTABLE_SONG_VOICES = setOf("kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4", "custom5", "custom6", "custom7", "custom8")
+
+internal fun portableSongPatternId(songId: String, sectionId: String, partId: String, bar: Int): String =
+    "song-part-${UUID.nameUUIDFromBytes(JSONArray().put(songId).put(sectionId).put(partId).put(bar).toString().toByteArray(Charsets.UTF_8))}"
+
+internal fun portableSongPartBarCount(song: JSONObject, section: JSONObject, part: JSONObject): Int {
+    val meter = part.optString("meter").ifBlank { section.optString("meter").ifBlank { song.optString("meter", "4/4") } }
+    val beatsPerBar = meter.substringBefore('/').toIntOrNull()?.coerceIn(1, 12) ?: 4
+    val subdivision = part.optInt("subdivision", 16).takeIf { it in setOf(4, 8, 12, 16, 20) } ?: 16
+    val stepsPerBar = (beatsPerBar * subdivision / 4.0).toInt().coerceAtLeast(1)
+    val hits = part.optJSONArray("hits")
+    var maxStep = -1
+    if (hits != null) for (index in 0 until hits.length()) maxStep = maxOf(maxStep, hits.optJSONObject(index)?.optInt("step", -1) ?: -1)
+    val totalBeats = part.optDouble("beats", beatsPerBar.toDouble()).coerceIn(0.25, 256.0)
+    return maxOf(1, kotlin.math.ceil(totalBeats / beatsPerBar).toInt(), kotlin.math.ceil((maxStep + 1).coerceAtLeast(0) / stepsPerBar.toDouble()).toInt()).coerceAtMost(64)
+}
+
+internal fun portableSongPatternIds(songs: JSONArray?): Set<String> {
+    if (songs == null) return emptySet()
+    return buildSet {
+        for (songIndex in 0 until songs.length()) {
+            val song = songs.optJSONObject(songIndex) ?: continue
+            val sections = song.optJSONArray("sections") ?: continue
+            for (sectionIndex in 0 until sections.length()) {
+                val section = sections.optJSONObject(sectionIndex) ?: continue
+                val sectionId = section.optString("id")
+                val parts = section.optJSONArray("parts") ?: continue
+                for (partIndex in 0 until parts.length()) {
+                    val part = parts.optJSONObject(partIndex) ?: continue
+                    val partId = part.optString("id")
+                    if (song.optString("id").isBlank() || sectionId.isBlank() || partId.isBlank()) continue
+                    repeat(portableSongPartBarCount(song, section, part)) { bar -> add(portableSongPatternId(song.getString("id"), sectionId, partId, bar)) }
+                }
+            }
+        }
+    }
+}
+
+private fun validatePortableSongs(songs: JSONArray) {
+    require(songs.length() <= 200) { "The learning archive contains too many personal songs." }
+    val songIds = mutableSetOf<String>()
+    var totalHits = 0
+    var totalParts = 0
+    var totalBars = 0
+    for (songIndex in 0 until songs.length()) {
+        val song = songs.optJSONObject(songIndex) ?: throw IllegalArgumentException("The learning archive contains an invalid personal song.")
+        val id = song.optString("id")
+        val title = song.optString("title")
+        require(id.isNotBlank() && id.length <= 120 && songIds.add(id) && title.isNotBlank() && title.length <= 120 && song.optString("artist").length <= 120) {
+            "The learning archive contains an invalid personal song."
+        }
+        val sections = song.optJSONArray("sections") ?: throw IllegalArgumentException("A personal song is missing its sections.")
+        require(sections.length() <= 32) { "A personal song has an invalid number of sections." }
+        var songBars = 0
+        for (sectionIndex in 0 until sections.length()) {
+            val section = sections.optJSONObject(sectionIndex) ?: throw IllegalArgumentException("The learning archive contains an invalid song section.")
+            val parts = section.optJSONArray("parts") ?: throw IllegalArgumentException("A song section is missing its parts.")
+            require(parts.length() <= 256) { "A song section has an invalid number of parts." }
+            for (partIndex in 0 until parts.length()) {
+                totalParts += 1
+                require(totalParts <= 20_000) { "The learning archive contains too many song parts to browse on Android." }
+                val part = parts.optJSONObject(partIndex) ?: throw IllegalArgumentException("The learning archive contains an invalid song part.")
+                val beats = part.optDouble("beats", Double.NaN)
+                val subdivision = part.optInt("subdivision", -1)
+                val hits = part.optJSONArray("hits") ?: throw IllegalArgumentException("A song part is missing its score events.")
+                require(beats.isFinite() && beats > 0 && beats <= 32 && beats * 2 % 1.0 == 0.0 && subdivision in setOf(4, 8, 12, 16, 20) && hits.length() <= 256) {
+                    "A personal song has invalid score timing."
+                }
+                val barCount = portableSongPartBarCount(song, section, part)
+                songBars += barCount
+                totalBars += barCount
+                require(songBars <= 512 && totalBars <= 20_000) { "The learning archive contains too many song bars to browse on Android." }
+                totalHits += hits.length()
+                require(totalHits <= 100_000) { "The learning archive contains too many personal-song score events." }
+                val steps = (beats * subdivision / 4.0).toInt()
+                for (hitIndex in 0 until hits.length()) {
+                    val hit = hits.optJSONObject(hitIndex) ?: throw IllegalArgumentException("The learning archive contains an invalid song score event.")
+                    require(hit.optInt("step", -1) in 0 until steps && hit.optString("instrument") in PORTABLE_SONG_VOICES) {
+                        "The learning archive contains an invalid song score event."
+                    }
+                }
+            }
+        }
+    }
+}
+
 fun readAndroidArchive(input: InputStream): String {
     val bytes = ByteArrayOutputStream()
     val buffer = ByteArray(8 * 1024)
@@ -89,8 +176,11 @@ private fun mergeTrainerPractice(current: JSONObject?, incoming: JSONObject): JS
         val key = keys.next()
         val nextValue = incoming.opt(key)
         if (nextValue !is JSONArray) { merged.put(key, nextValue); continue }
+        if (key == "rounds") {
+            merged.put(key, mergeTrainerRounds(merged.optJSONArray(key), nextValue as? JSONArray))
+            continue
+        }
         val options = when (key) {
-            "rounds" -> 50 to true
             "cueSequences" -> 30 to true
             "coachFeedback" -> 100 to true
             else -> null
@@ -99,6 +189,45 @@ private fun mergeTrainerPractice(current: JSONObject?, incoming: JSONObject): JS
         merged.put(key, mergePortableArray(merged.optJSONArray(key), nextValue, options.first, options.second))
     }
     return merged
+}
+
+private fun mergeTrainerRounds(current: JSONArray?, incoming: JSONArray?): JSONArray {
+    val byId = linkedMapOf<String, JSONObject>()
+    fun add(rows: JSONArray?, replace: Boolean) {
+        if (rows == null) return
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            val id = row.optString("id").takeIf(String::isNotBlank) ?: continue
+            if (replace || id !in byId) byId[id] = row
+        }
+    }
+    add(current, replace = false)
+    add(incoming, replace = true)
+    return JSONArray().also { result -> byId.values.sortedByDescending { it.optString("playedAt") }.take(1000).forEach { result.put(it) } }
+}
+
+private fun mergeSightReading(current: JSONObject?, incoming: JSONObject): JSONObject {
+    val result = current?.let { JSONObject(it.toString()) } ?: JSONObject()
+    val byId = linkedMapOf<String, JSONObject>()
+    fun add(rows: JSONArray?, replace: Boolean) {
+        if (rows == null) return
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            val id = row.optString("id").takeIf(String::isNotBlank) ?: continue
+            if (replace || id !in byId) byId[id] = JSONObject(row.toString())
+        }
+    }
+    add(result.optJSONArray("attempts"), replace = false)
+    add(incoming.optJSONArray("attempts"), replace = true)
+    result.put("attempts", JSONArray().also { rows -> byId.values.sortedBy { it.optString("playedAt") }.takeLast(100).forEach(rows::put) })
+    val templates = linkedMapOf<String, JSONObject>()
+    for (source in listOf(result.optJSONArray("templates"), incoming.optJSONArray("templates"))) {
+        if (source == null) continue
+        for (index in 0 until source.length()) source.optJSONObject(index)?.let { row -> row.optString("id").takeIf(String::isNotBlank)?.let { templates.putIfAbsent(it, JSONObject(row.toString())) } }
+    }
+    result.put("templates", JSONArray().also { rows -> templates.values.takeLast(40).forEach(rows::put) })
+    incoming.optJSONObject("goal")?.let { result.put("goal", JSONObject(it.toString())) }
+    return result
 }
 
 fun parseAndroidArchive(raw: String, lessonIds: Set<String>, patternIds: Set<String>): AndroidArchiveReview {
@@ -112,6 +241,60 @@ fun parseAndroidArchive(raw: String, lessonIds: Set<String>, patternIds: Set<Str
     require(validArchiveDate(root.optString("exportedAt"))) { "The learning archive has an invalid export date." }
     val lessonRows = root.optJSONArray("completedLessons") ?: throw IllegalArgumentException("The learning archive has no lesson list.")
     val sessionRows = root.optJSONArray("practiceSessions") ?: throw IllegalArgumentException("The learning archive has no practice history.")
+    val personalSongValue = root.opt("personalSongs")
+    val archiveSongs = if (personalSongValue == null || personalSongValue == JSONObject.NULL) null
+        else personalSongValue as? JSONArray ?: throw IllegalArgumentException("The learning archive has invalid personal songs.")
+    archiveSongs?.let(::validatePortableSongs)
+    val sightReading = root.optJSONObject("sightReading")?.let { JSONObject(it.toString()) }
+    if (root.has("sightReading") && sightReading == null) throw IllegalArgumentException("The learning archive contains invalid sight-reading data.")
+    sightReading?.let { reading ->
+        val attempts = reading.optJSONArray("attempts") ?: throw IllegalArgumentException("The learning archive contains invalid sight-reading attempts.")
+        val templates = reading.optJSONArray("templates")
+        require(attempts.length() <= 100 && (templates?.length() ?: 0) <= 40) { "The learning archive contains too many sight-reading records." }
+        val ids = mutableSetOf<String>()
+        for (index in 0 until attempts.length()) {
+            val row = attempts.optJSONObject(index) ?: throw IllegalArgumentException("The learning archive contains an invalid sight-reading attempt.")
+            val id = row.optString("id"); val accuracy = row.optInt("accuracy", -1); val score = row.optInt("score", -1)
+            require(id.isNotBlank() && id.length <= 100 && ids.add(id) && validArchiveDate(row.optString("playedAt")) &&
+                accuracy in 0..100 && score in 0..100 && row.optJSONObject("settings") != null &&
+                row.optString("source") in setOf("keyboard", "touch", "midi", "audio-voices") && row.optString("classification") in setOf("reading", "practice", "assisted")) {
+                "The learning archive contains an invalid sight-reading attempt."
+            }
+        }
+        if (templates != null) {
+            val templateIds = mutableSetOf<String>()
+            for (index in 0 until templates.length()) {
+                val row = templates.optJSONObject(index) ?: throw IllegalArgumentException("The learning archive contains invalid phrase templates.")
+                val id = row.optString("id"); val hits = row.optJSONArray("hits")
+                val level = row.optString("level")
+                val meter = row.optString("meter")
+                val subdivision = row.optInt("subdivision", -1)
+                val beats = row.optDouble("beats", Double.NaN)
+                val expectedBeats = if (meter == "7/8") 3.5 else meter.substringBefore('/').toDoubleOrNull() ?: Double.NaN
+                val supportedMeters = when (level) { "Beginner" -> setOf("4/4"); "Intermediate" -> setOf("4/4", "3/4"); "Advanced" -> setOf("4/4", "3/4", "5/4", "7/8"); else -> emptySet() }
+                require(id.isNotBlank() && id.length <= 100 && templateIds.add(id) && row.optString("name").isNotBlank() && row.optString("name").length <= 80 &&
+                    meter in supportedMeters && subdivision in setOf(4, 8, 12, 16) && (level == "Advanced" || subdivision !in setOf(12, 16)) &&
+                    !(meter == "7/8" && subdivision % 8 != 0) && beats.isFinite() && kotlin.math.abs(beats - expectedBeats) < 0.0001 &&
+                    validArchiveDate(row.optString("createdAt")) && hits != null && hits.length() in 1..120) {
+                    "The learning archive contains invalid phrase templates."
+                }
+                val stepCount = (beats * subdivision / 4.0).toInt()
+                val noteKeys = mutableSetOf<String>()
+                val notesPerStep = mutableMapOf<Int, Int>()
+                for (hitIndex in 0 until hits!!.length()) {
+                    val hit = hits.optJSONObject(hitIndex) ?: throw IllegalArgumentException("The learning archive contains invalid phrase templates.")
+                    val step = hit.optInt("step", -1)
+                    val voice = hit.optString("instrument")
+                    val velocity = hit.optInt("velocityTarget", -1)
+                    require(step in 0 until stepCount && voice in setOf("kick", "snare", "hihat", "tom", "crash") && noteKeys.add("$step/$voice") &&
+                        (velocity == -1 || velocity in 1..127)) { "The learning archive contains invalid phrase templates." }
+                    notesPerStep[step] = (notesPerStep[step] ?: 0) + 1
+                    require(notesPerStep.getValue(step) <= 3) { "The learning archive contains invalid phrase templates." }
+                }
+            }
+        }
+    }
+    val supportedPatternIds = patternIds + portableSongPatternIds(archiveSongs)
     require(lessonRows.length() <= 100 && sessionRows.length() <= 100) { "The learning archive contains too many progress records." }
 
     val importedLessons = mutableListOf<Pair<String, String>>()
@@ -138,7 +321,7 @@ fun parseAndroidArchive(raw: String, lessonIds: Set<String>, patternIds: Set<Str
             playedAt.length <= 40 && validArchiveDate(playedAt) && score in 0..100 && accuracy in 0..100) {
             "The learning archive contains an invalid practice record."
         }
-        if (patternId !in patternIds) { ignoredSessions++; continue }
+        if (patternId !in supportedPatternIds) { ignoredSessions++; continue }
         sessions += AndroidPracticeSession(id, patternId, row.getString("patternName"), bpm, playedAt, score, accuracy,
             row.optInt("great").coerceIn(0, 100_000), row.optInt("good").coerceIn(0, 100_000),
             row.optInt("miss").coerceIn(0, 100_000), row.optInt("extra").coerceIn(0, 100_000), row.optInt("maxCombo").coerceIn(0, 100_000))
@@ -150,16 +333,17 @@ fun parseAndroidArchive(raw: String, lessonIds: Set<String>, patternIds: Set<Str
         while (keys.hasNext()) {
             val id = keys.next(); val score = bestObject.optInt(id, -1)
             require(id.isNotBlank() && id.length <= 160 && score in 0..100) { "The learning archive contains an invalid best score." }
-            if (id in patternIds) put(id, score)
+            if (id in supportedPatternIds) put(id, score)
         }
     }
     val passthrough = JSONObject()
-    listOf("earTraining", "trainerPractice", "guidedPracticeSession", "weeklyGoal", "personalSongs", "customGrooves")
+    listOf("earTraining", "trainerPractice", "guidedPracticeSession", "weeklyGoal", "personalSongs", "customGrooves", "sightReading")
         .forEach { key -> root.opt(key)?.let { value -> if (value != JSONObject.NULL) passthrough.put(key, value) } }
     val earCount = passthrough.optJSONArray("earTraining")?.length() ?: 0
     val trainerRounds = passthrough.optJSONObject("trainerPractice")?.optJSONArray("rounds")
     val trainerCount = trainerRounds?.length() ?: 0
-    require(earCount <= 100 && trainerCount <= 50 && (passthrough.optJSONArray("personalSongs")?.length() ?: 0) <= 200 &&
+    val sightCount = passthrough.optJSONObject("sightReading")?.optJSONArray("attempts")?.length() ?: 0
+    require(earCount <= 100 && trainerCount <= 1000 && (passthrough.optJSONArray("personalSongs")?.length() ?: 0) <= 200 &&
         (passthrough.optJSONArray("customGrooves")?.length() ?: 0) <= 100) { "The learning archive contains too many optional records." }
     if (passthrough.has("earTraining")) {
         val ear = passthrough.optJSONArray("earTraining") ?: throw IllegalArgumentException("The learning archive has invalid ear-training history.")
@@ -178,7 +362,7 @@ fun parseAndroidArchive(raw: String, lessonIds: Set<String>, patternIds: Set<Str
         require(!row.has("hits") || timing != null && timing.length() <= 600) { "The learning archive contains invalid Trainer timing." }
     }
     return AndroidArchiveReview(importedLessons, sessions, bestScores, root.optInt("preferredBpm", 80), passthrough,
-        ignoredLessons, ignoredSessions, earCount, trainerCount)
+        ignoredLessons, ignoredSessions, earCount, trainerCount, sightCount)
 }
 
 class DrumProgressStore(context: Context) : SQLiteOpenHelper(context.applicationContext, "drum-hero-progress.db", null, 1) {
@@ -234,6 +418,92 @@ class DrumProgressStore(context: Context) : SQLiteOpenHelper(context.application
         db.execSQL("DELETE FROM practice_sessions WHERE id NOT IN (SELECT id FROM practice_sessions ORDER BY played_at DESC LIMIT 50)")
     }
 
+    fun trainerRoundCount(): Int {
+        val extras = readableDatabase.rawQuery("SELECT value FROM archive_extras WHERE key='portable'", null).use { cursor -> if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else JSONObject() }
+        return extras.optJSONObject("trainerPractice")?.optJSONArray("rounds")?.length() ?: 0
+    }
+
+    fun personalSongs(): List<JSONObject> {
+        val extras = readableDatabase.rawQuery("SELECT value FROM archive_extras WHERE key='portable'", null).use { cursor -> if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else JSONObject() }
+        val songs = extras.optJSONArray("personalSongs") ?: return emptyList()
+        return buildList {
+            for (index in 0 until songs.length()) songs.optJSONObject(index)?.let { add(JSONObject(it.toString())) }
+        }
+    }
+
+    fun customGrooves(): List<JSONObject> {
+        val extras = readableDatabase.rawQuery("SELECT value FROM archive_extras WHERE key='portable'", null).use { cursor -> if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else JSONObject() }
+        val grooves = extras.optJSONArray("customGrooves") ?: return emptyList()
+        return buildList { for (index in 0 until grooves.length()) grooves.optJSONObject(index)?.let { add(JSONObject(it.toString())) } }
+    }
+
+    fun saveTrainerRound(round: JSONObject): Int {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val extras = db.rawQuery("SELECT value FROM archive_extras WHERE key='portable'", null).use { cursor -> if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else JSONObject() }
+            val trainer = extras.optJSONObject("trainerPractice")?.let { JSONObject(it.toString()) } ?: JSONObject()
+            trainer.put("rounds", mergeTrainerRounds(trainer.optJSONArray("rounds"), JSONArray().put(round)))
+            extras.put("trainerPractice", trainer)
+            db.insertWithOnConflict("archive_extras", null, ContentValues().apply { put("key", "portable"); put("value", extras.toString()) }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return trainerRoundCount()
+    }
+
+    fun sightReadingAttempts(): JSONArray {
+        val extras = readableDatabase.rawQuery("SELECT value FROM archive_extras WHERE key='portable'", null).use { cursor -> if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else JSONObject() }
+        return extras.optJSONObject("sightReading")?.optJSONArray("attempts")?.let { JSONArray(it.toString()) } ?: JSONArray()
+    }
+
+    fun sightReadingTemplates(): JSONArray {
+        val extras = readableDatabase.rawQuery("SELECT value FROM archive_extras WHERE key='portable'", null).use { cursor -> if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else JSONObject() }
+        return extras.optJSONObject("sightReading")?.optJSONArray("templates")?.let { JSONArray(it.toString()) } ?: JSONArray()
+    }
+
+    fun saveSightReadingAttempt(attempt: JSONObject): Int {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val extras = db.rawQuery("SELECT value FROM archive_extras WHERE key='portable'", null).use { cursor -> if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else JSONObject() }
+            val merged = mergeSightReading(extras.optJSONObject("sightReading"), JSONObject().put("attempts", JSONArray().put(attempt)))
+            extras.put("sightReading", merged)
+            db.insertWithOnConflict("archive_extras", null, ContentValues().apply { put("key", "portable"); put("value", extras.toString()) }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return sightReadingAttempts().length()
+    }
+
+    fun saveSightReadingTemplate(template: JSONObject): Int {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val extras = db.rawQuery("SELECT value FROM archive_extras WHERE key='portable'", null).use { cursor -> if (cursor.moveToFirst()) JSONObject(cursor.getString(0)) else JSONObject() }
+            val merged = mergeSightReading(extras.optJSONObject("sightReading"), JSONObject().put("templates", JSONArray().put(template)))
+            extras.put("sightReading", merged)
+            db.insertWithOnConflict("archive_extras", null, ContentValues().apply { put("key", "portable"); put("value", extras.toString()) }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return sightReadingTemplates().length()
+    }
+
+    fun sightVelocityCalibration(portKey: String, voice: String): Pair<Int, Int>? {
+        if (portKey.isBlank() || voice !in setOf("kick", "snare", "hihat", "tom", "crash")) return null
+        val safePort = portKey.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(80)
+        val raw = readableDatabase.rawQuery("SELECT value FROM settings WHERE key=?", arrayOf("sightDynamics:$safePort:$voice")).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: return null
+        val values = raw.split(',').mapNotNull { it.toIntOrNull() }
+        if (values.size != 2 || values[0] !in 1..126 || values[1] !in 2..127 || values[1] - values[0] < 12) return null
+        return values[0] to values[1]
+    }
+
+    fun saveSightVelocityCalibration(portKey: String, voice: String, softMedian: Int, accentedMedian: Int) {
+        if (portKey.isBlank() || voice !in setOf("kick", "snare", "hihat", "tom", "crash") || softMedian !in 1..126 || accentedMedian !in 2..127 || accentedMedian - softMedian < 12) return
+        val safePort = portKey.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(80)
+        writableDatabase.insertWithOnConflict("settings", null, ContentValues().apply {
+            put("key", "sightDynamics:$safePort:$voice"); put("value", "$softMedian,$accentedMedian")
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
     fun exportArchive(preferredBpm: Int): String {
         val lessons = JSONArray().also { rows ->
             completedLessons().forEach { id -> rows.put(JSONObject().put("id", id).put("completedAt", completedAt(id))) }
@@ -272,6 +542,7 @@ class DrumProgressStore(context: Context) : SQLiteOpenHelper(context.application
                     "personalSongs" -> mergePortableArray(previous.optJSONArray(key), incoming as? JSONArray, 200, incomingWins = false)
                     "customGrooves" -> mergePortableArray(previous.optJSONArray(key), incoming as? JSONArray, 100, incomingWins = false)
                     "trainerPractice" -> if (incoming is JSONObject) mergeTrainerPractice(previous.optJSONObject(key), incoming) else incoming
+                    "sightReading" -> if (incoming is JSONObject) mergeSightReading(previous.optJSONObject(key), incoming) else incoming
                     else -> incoming
                 }
                 previous.put(key, merged)

@@ -54,7 +54,7 @@ This is the native mobile product contract. The iOS core release targets iOS/iPa
 | DHM-061 | See level progress, session count, best score, and latest practice on Progress. |
 | DHM-062 | Review recent scored sessions with pattern, tempo, date, score, accuracy, ratings, and combo. |
 | DHM-063 | Preserve a pattern’s best score if a later score is lower. |
-| DHM-064 | Persist lessons, checkpoints, preferences, sessions, and Trainer rounds locally; recover from invalid/interrupted storage. Keep at most 50 recent scored sessions and Trainer rounds. |
+| DHM-064 | Persist lessons, checkpoints, preferences, sessions, and Trainer rounds locally; recover from invalid/interrupted storage. Keep at most 50 recent scored sessions and 1,000 Trainer summaries. |
 | DHM-070 | Pause safely when inactive and restore saved lesson/preferences on relaunch. |
 | DHM-071 | Respond to audio interruption/route changes without stale cues; require explicit resume. |
 | DHM-072 | Continue visual practice and scoring with a clear message if audio or samples fail. |

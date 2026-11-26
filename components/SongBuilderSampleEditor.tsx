@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { readCustomSampleRecords, type CustomSampleLayer, type CustomSampleRecord } from "@/lib/song-builder-samples";
+import { MAX_ROUND_ROBIN_SAMPLES, readCustomSampleRecords, type CustomSampleLayer, type CustomSampleRecord } from "@/lib/song-builder-samples";
 import { drumSampleUrl } from "@/lib/audio";
 import type { SongInstrument } from "@/lib/types";
 
 type Layer = CustomSampleLayer;
-type Props = { voice: SongInstrument; sampleIndex: number; names: { primary?: string; soft?: string; accent?: string }; onSave: (layer: Layer, name: string, blob: Blob) => Promise<void> };
+type Props = { voice: SongInstrument; sampleIndex: number; names: { primary?: string; soft?: string; accent?: string }; onSave: (layer: Layer, name: string, blob: Blob) => Promise<void>; onSaveAlternate: (layer: Layer, file: File) => Promise<void>; onDeleteAlternate: (layer: Layer, index: number) => Promise<void> };
 
 function sampleBlob(record: CustomSampleRecord | undefined, layer: Layer) {
   if (!record) return undefined;
@@ -48,7 +48,7 @@ async function makeEditedWav(source: Blob, startSeconds: number, endSeconds: num
   } finally { await context.close().catch(() => undefined); }
 }
 
-export function SongBuilderSampleEditor({ voice, sampleIndex, names, onSave }: Props) {
+export function SongBuilderSampleEditor({ voice, sampleIndex, names, onSave, onSaveAlternate, onDeleteAlternate }: Props) {
   const [layer, setLayer] = useState<Layer>("primary");
   const [record, setRecord] = useState<CustomSampleRecord>();
   const [builtInBlob, setBuiltInBlob] = useState<Blob>();
@@ -97,6 +97,25 @@ export function SongBuilderSampleEditor({ voice, sampleIndex, names, onSave }: P
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not save this sample edit."); }
     finally { setBusy(false); }
   };
+  const refreshRecord = async () => setRecord((await readCustomSampleRecords()).find(item => item.instrument === voice));
+  const importAlternates = async (files: File[]) => {
+    if (!files.length) return;
+    const availableSlots = MAX_ROUND_ROBIN_SAMPLES - (record?.alternates?.[activeLayer]?.length ?? 0);
+    if (files.length > availableSlots) { setMessage(`Choose no more than ${availableSlots} additional take${availableSlots === 1 ? "" : "s"} for this velocity layer.`); return; }
+    setBusy(true); setMessage("Adding round-robin samples…");
+    try {
+      for (const file of files) await onSaveAlternate(activeLayer, file);
+      await refreshRecord();
+      setMessage(`Added ${files.length} alternate take${files.length === 1 ? "" : "s"} to the ${activeLayer} velocity layer.`);
+    } catch (error) { await refreshRecord().catch(() => undefined); setMessage(error instanceof Error ? error.message : "Could not add alternate samples."); }
+    finally { setBusy(false); }
+  };
+  const removeAlternate = async (index: number) => {
+    setBusy(true);
+    try { await onDeleteAlternate(activeLayer, index); await refreshRecord(); setMessage("Alternate take removed."); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Could not remove alternate take."); }
+    finally { setBusy(false); }
+  };
 
   return <details className="song-builder-sample-editor"><summary>Edit custom sample · {label || "choose a sample"}</summary>
     <p>Trim silence or tails, add short fades, normalize the peak, and preview before saving. Each edited layer stays on this device.</p>
@@ -104,6 +123,7 @@ export function SongBuilderSampleEditor({ voice, sampleIndex, names, onSave }: P
     {source ? <>
       {sampleIndex>=0&&names.primary&&<p>This voice already has a saved custom sample. Saving this built-in edit replaces that custom sample for the voice.</p>}
       <audio src={editedUrl || sourceUrl} controls preload="metadata" aria-label={`${voice} ${activeLayer} sample preview`} onLoadedMetadata={event=>{const value=event.currentTarget.duration;if(Number.isFinite(value)){setDuration(value);setStart(current=>Math.min(current,value));setEnd(current=>current>0?Math.min(current,value):value);}}}/>
+      {sampleIndex < 0 && <section className="song-builder-round-robin" aria-label={`${voice} ${activeLayer} round-robin samples`}><h4>Round-robin variation</h4><p>Playback cycles through these alternate takes at this velocity layer, reducing repeated-hit sameness. Add up to {MAX_ROUND_ROBIN_SAMPLES} alternates.</p><label>Add alternate audio samples<input type="file" accept="audio/*" multiple disabled={busy || (record?.alternates?.[activeLayer]?.length ?? 0) >= MAX_ROUND_ROBIN_SAMPLES} onChange={event=>{const files=Array.from(event.currentTarget.files??[]);event.currentTarget.value="";void importAlternates(files);}}/></label>{record?.alternates?.[activeLayer]?.length ? <ul>{record.alternates[activeLayer]!.map((item,index)=><li key={`${item.name}:${index}`}><span>{item.name}</span><button type="button" disabled={busy} onClick={()=>void removeAlternate(index)}>Remove</button></li>)}</ul> : <small>No alternate takes for this layer yet.</small>}</section>}
       <div className="song-builder-tool-fields">
         <label>Trim start · {start.toFixed(3)} s<input type="range" min={0} max={duration || 1} step={0.001} value={Math.min(start,duration||0)} onChange={event=>{const value=Number(event.target.value);setStart(value);if(value>=end)setEnd(duration);setEdited(undefined);}}/></label>
         <label>Trim end · {end.toFixed(3)} s<input type="range" min={Math.min(start+0.001,duration||1)} max={duration || 1} step={0.001} value={Math.max(start+0.001,Math.min(end||duration,duration||1))} onChange={event=>{setEnd(Number(event.target.value));setEdited(undefined);}}/></label>

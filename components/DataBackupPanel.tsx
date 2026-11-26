@@ -4,7 +4,7 @@ import { AudioStorageManager } from "./AudioStorageManager";
 import { useRef, useState } from "react";
 import { createLocalBackup, parseLocalBackup, restoreLocalBackup } from "@/lib/local-backup";
 import { createProgressTransfer, mergeProgressTransfer, parseProgressTransfer, PROGRESS_TRANSFER_MAX_BYTES, type PortableProgressTransfer } from "@/lib/progress-transfer";
-import { parseTrainerPortableCoachFeedback, parseTrainerPortableCueSequences, parseTrainerState, portableTrainerRound, trainerStorageKey, updateTrainerPreferredBpm } from "@/lib/trainer";
+import { parseTrainerPortableCoachFeedback, parseTrainerPortableCueSequences, parseTrainerState, portableTrainerRound, retainTrainerRoundHistory, trainerStorageKey, updateTrainerPreferredBpm } from "@/lib/trainer";
 import { parseSavedTrainerRoutine } from "@/lib/trainer-enhancements";
 import { parseSavedTrainerCueSequences } from "@/lib/trainer-cue-sequences";
 import { readTrainerTakes } from "@/lib/trainer-take-library";
@@ -16,6 +16,7 @@ import { WEEKLY_GOAL_KEY, parseWeeklyGoalJson } from "@/lib/weekly-practice-goal
 import { readSongLibrary, writeSongLibrary } from "@/lib/song-library";
 import { readCustomGrooves, writeCustomGrooves } from "@/lib/custom-grooves";
 import { EAR_HISTORY_KEY, parseEarHistory } from "@/lib/ear-training";
+import { mergeSightAttempts, parseSightGoal, parseSightHistory, parseSightTemplates, SIGHT_GOAL_KEY, SIGHT_HISTORY_CHANGED_EVENT, SIGHT_HISTORY_KEY, SIGHT_TEMPLATES_KEY } from "@/lib/sight-reading";
 
 type Backup = ReturnType<typeof parseLocalBackup>;
 const TRAINER_ROUTINE_KEY = "drum-hero:trainer-routine:v1";
@@ -36,6 +37,8 @@ export function DataBackupPanel() {
   const [includeEarTraining, setIncludeEarTraining] = useState(true);
   const [includeDetailedTiming, setIncludeDetailedTiming] = useState(false);
   const [includeEarTrainingOnExport, setIncludeEarTrainingOnExport] = useState(false);
+  const [includeSightReading, setIncludeSightReading] = useState(true);
+  const [includeSightReadingOnExport, setIncludeSightReadingOnExport] = useState(true);
   const [includeDetailedTimingOnExport, setIncludeDetailedTimingOnExport] = useState(false);
   const [fileName, setFileName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,6 +50,11 @@ export function DataBackupPanel() {
     const library = readSongLibrary();
     const trainerState = parseTrainerState(window.localStorage.getItem(trainerStorageKey(profileId)));
     const earTraining = includeEarTrainingOnExport ? parseEarHistory(window.localStorage.getItem(learnerStorageKey(EAR_HISTORY_KEY, profileId))).slice(-100) : undefined;
+    const sightReading = includeSightReadingOnExport ? {
+      attempts: parseSightHistory(window.localStorage.getItem(learnerStorageKey(SIGHT_HISTORY_KEY, profileId))),
+      goal: parseSightGoal(window.localStorage.getItem(learnerStorageKey(SIGHT_GOAL_KEY, profileId))) ?? undefined,
+      templates: parseSightTemplates(window.localStorage.getItem(learnerStorageKey(SIGHT_TEMPLATES_KEY, profileId)))
+    } : undefined;
     const routine = parseSavedTrainerRoutine(window.localStorage.getItem(TRAINER_ROUTINE_KEY));
     const cueSequences = parseSavedTrainerCueSequences(window.localStorage.getItem(TRAINER_CUE_SEQUENCES_KEY));
     const takes = await readTrainerTakes().catch(() => []);
@@ -58,7 +66,7 @@ export function DataBackupPanel() {
       }))),
     ].slice(-100)) ?? [];
     const trainerPractice = {
-      rounds: trainerState.rounds.slice(0, 50).map(round => portableTrainerRound(round, includeDetailedTimingOnExport)),
+      rounds: retainTrainerRoundHistory(trainerState.rounds).map(round => portableTrainerRound(round, includeDetailedTimingOnExport)),
       ...(routine ? { routine } : {}),
       ...(cueSequences.length ? { cueSequences } : {}),
       ...(coachFeedback.length ? { coachFeedback } : {}),
@@ -69,7 +77,8 @@ export function DataBackupPanel() {
       personalSongs: library.songs.filter(song => song.bundled !== true),
       customGrooves: readCustomGrooves(),
       trainerPractice,
-      earTraining
+      earTraining,
+      sightReading
     }), null, 2);
     if (new TextEncoder().encode(data).byteLength > PROGRESS_TRANSFER_MAX_BYTES) {
       setMessage("This learning archive is larger than 32 MB. Export fewer personal songs or custom grooves and try again.");
@@ -86,7 +95,7 @@ export function DataBackupPanel() {
     setProgressTransfer(null);
     const timingNote = includeDetailedTimingOnExport ? "detailed Trainer timing" : "Trainer summaries";
     const earNote = includeEarTrainingOnExport ? "ear-training history" : "no ear-training history";
-    setMessage(`Learning archive downloaded with ${timingNote} and ${earNote}. It contains no audio recordings or device calibration.`);
+    setMessage(`Learning archive downloaded with ${timingNote}, ${earNote}, and ${includeSightReadingOnExport ? "sight-reading history" : "no sight-reading history"}. It contains no audio recordings or device calibration.`);
   };
 
   const chooseProgressTransfer = async (file?: File) => {
@@ -96,6 +105,7 @@ export function DataBackupPanel() {
     setIncludeWeeklyGoal(true);
     setIncludeTrainer(true);
     setIncludeEarTraining(true);
+    setIncludeSightReading(true);
     setIncludeDetailedTiming(false);
     if (!file) return;
     if (file.size > PROGRESS_TRANSFER_MAX_BYTES) {
@@ -111,6 +121,7 @@ export function DataBackupPanel() {
       setIncludeGrooves(Boolean(parsed.customGrooves?.length));
       setIncludeTrainer(Boolean(parsed.trainerPractice));
       setIncludeEarTraining(Boolean(parsed.earTraining?.length));
+      setIncludeSightReading(Boolean(parsed.sightReading));
       setIncludeDetailedTiming(Boolean(parsed.trainerPractice?.rounds.some(round => round.hits?.length)));
       setProgressTransferName(file.name);
       setMessage("Review the learning archive below, then merge it into the active learner profile.");
@@ -192,7 +203,7 @@ export function DataBackupPanel() {
         }
         const next = {
           ...current,
-          rounds: [...rounds.values()].sort((a, b) => b.playedAt.localeCompare(a.playedAt)).slice(0, 50),
+          rounds: retainTrainerRoundHistory([...rounds.values()]),
           ...(incoming.routine ? { routine: incoming.routine } : {}),
           ...(mergedCueSequences ? { cueSequences: mergedCueSequences } : {}),
           coachFeedback: [...feedback.values()].sort((a, b) => a.receivedAt.localeCompare(b.receivedAt)).slice(-100),
@@ -221,11 +232,35 @@ export function DataBackupPanel() {
         window.dispatchEvent(new Event("drum-hero:ear-training-change"));
       } catch { /* Other archive contents remain usable when ear-training storage is unavailable. */ }
     }
+    let importedSightAttempts = 0;
+    let importedSightTemplates = 0;
+    let importedSightGoal = false;
+    if (includeSightReading && progressTransfer.sightReading) {
+      try {
+        const historyKey = learnerStorageKey(SIGHT_HISTORY_KEY, profileId);
+        const currentHistory = parseSightHistory(window.localStorage.getItem(historyKey));
+        const mergedHistory = mergeSightAttempts(currentHistory, progressTransfer.sightReading.attempts);
+        importedSightAttempts = Math.max(0, mergedHistory.length - currentHistory.length);
+        window.localStorage.setItem(historyKey, JSON.stringify({ version: 1, attempts: mergedHistory }));
+        window.dispatchEvent(new Event(SIGHT_HISTORY_CHANGED_EVENT));
+        const templateKey = learnerStorageKey(SIGHT_TEMPLATES_KEY, profileId);
+        const currentTemplates = parseSightTemplates(window.localStorage.getItem(templateKey));
+        const templatesById = new Map(currentTemplates.map(item => [item.id, item]));
+        for (const item of progressTransfer.sightReading.templates ?? []) if (!templatesById.has(item.id)) templatesById.set(item.id, item);
+        const mergedTemplates = [...templatesById.values()].slice(-40);
+        importedSightTemplates = Math.max(0, mergedTemplates.length - currentTemplates.length);
+        window.localStorage.setItem(templateKey, JSON.stringify(mergedTemplates));
+        if (progressTransfer.sightReading.goal) {
+          window.localStorage.setItem(learnerStorageKey(SIGHT_GOAL_KEY, profileId), JSON.stringify(progressTransfer.sightReading.goal));
+          importedSightGoal = true;
+        }
+      } catch { /* Reading progress can be retried independently if local storage is full. */ }
+    }
     setProgressTransfer(null);
     setProgressTransferName("");
     const sessionMessage = includeGuidedSession && progressTransfer.guidedPracticeSession ? guidedSessionSaved ? "Guided session moved. " : "Guided session could not be saved on this device. " : "";
     const goalMessage = includeWeeklyGoal && progressTransfer.weeklyGoal ? weeklyGoalSaved ? "Weekly goal moved. " : "Weekly goal could not be saved on this device. " : "";
-    setMessage(`Merged ${result.addedLessons} lesson completions and ${result.addedSessions} practice sessions, added ${importedTrainerRounds} Trainer round summaries, ${importedTimingRecords} detailed timing records, ${importedEarTraining} ear-training results, ${importedCueSequences} cue sequences, ${importedCoachNotes} coach notes, ${importedSongs} personal songs and ${importedGrooves} custom grooves. ${result.ignoredLessons ? `${result.ignoredLessons} lesson IDs from another app version were skipped. ` : ""}${sessionMessage}${goalMessage}Preferred tempo set to ${progressTransfer.preferredBpm} BPM.`);
+    setMessage(`Merged ${result.addedLessons} lesson completions and ${result.addedSessions} practice sessions, added ${importedTrainerRounds} Trainer round summaries, ${importedTimingRecords} detailed timing records, ${importedEarTraining} ear-training results, ${importedCueSequences} cue sequences, ${importedCoachNotes} coach notes, ${importedSongs} personal songs and ${importedGrooves} custom grooves${includeSightReading ? `, ${importedSightAttempts} sight-reading attempts, ${importedSightTemplates} phrase templates${importedSightGoal ? " and a sight-reading goal" : ""}` : ""}. ${result.ignoredLessons ? `${result.ignoredLessons} lesson IDs from another app version were skipped. ` : ""}${sessionMessage}${goalMessage}Preferred tempo set to ${progressTransfer.preferredBpm} BPM.`);
   };
 
   const exportBackup = async () => {
@@ -283,10 +318,11 @@ export function DataBackupPanel() {
     <div><span className="eyebrow">Your data</span><h2 id="data-backup-heading">Back up or move your work</h2><p>Save lessons, practice history, Trainer settings, custom grooves, songs, local samples, and saved song takes and reference audio in one file. The downloaded file is not password-protected, so store and share it carefully.</p></div>
     <details className="portable-progress-transfer">
       <summary>Move a learning archive between web and iOS</summary>
-      <p>The archive includes completed lessons, recent scored practice summaries, Trainer round summaries, a personal routine, saved cue sequences, coach feedback notes, best scores, preferred tempo, this profile’s weekly goal and guided session, personal Song Library songs, and custom grooves. Ear-training history and detailed Trainer timing are optional. Progress merges into the currently active learner profile; songs and grooves with matching IDs are kept. A saved guided session stays paused until resumed. Audio recordings, account credentials, and device-specific calibration remain local; full recovery backups are platform-specific.</p>
+      <p>The archive includes completed lessons, recent scored practice summaries, Trainer round summaries, a personal routine, saved cue sequences, coach feedback notes, best scores, preferred tempo, this profile’s weekly goal and guided session, personal Song Library songs, custom grooves, and sight-reading attempts, goal, and saved phrase templates. Ear-training history and detailed Trainer timing are optional. Progress merges into the currently active learner profile; songs, grooves, and reading records with matching IDs are kept. A saved guided session stays paused until resumed. Audio recordings, account credentials, and device-specific calibration remain local; full recovery backups are platform-specific.</p>
       <div className="backup-review" aria-label="Optional learning archive details">
         <label><input type="checkbox" checked={includeEarTrainingOnExport} onChange={(event) => setIncludeEarTrainingOnExport(event.target.checked)} /> Include this learner’s last 100 ear-training results.</label>
         <label><input type="checkbox" checked={includeDetailedTimingOnExport} onChange={(event) => setIncludeDetailedTimingOnExport(event.target.checked)} /> Include up to 600 hit-timing records for each exported Trainer round.</label>
+        <label><input type="checkbox" checked={includeSightReadingOnExport} onChange={(event) => setIncludeSightReadingOnExport(event.target.checked)} /> Include this learner’s sight-reading history, goal, and up to 40 saved phrase templates.</label>
         <small>These detailed results can show musical timing and error locations. Review the file before sharing it.</small>
       </div>
       <div className="data-backup-actions">
@@ -296,7 +332,7 @@ export function DataBackupPanel() {
       </div>
       {progressTransfer && <div className="backup-review" aria-label="Learning archive review">
         <h3>Review {progressTransferName}</h3>
-        <p>{progressTransfer.completedLessons.length} lesson completions · {progressTransfer.practiceSessions.length} practice sessions · {progressTransfer.trainerPractice?.rounds.length ?? 0} Trainer rounds · {progressTransfer.earTraining?.length ?? 0} ear-training results · {progressTransfer.trainerPractice?.rounds.reduce((count, round) => count + (round.hits?.length ?? 0), 0) ?? 0} detailed timing records · {progressTransfer.trainerPractice?.cueSequences?.length ?? 0} cue sequences · {progressTransfer.trainerPractice?.coachFeedback?.length ?? 0} coach notes · {Object.keys(progressTransfer.bestScores).length} best scores · {progressTransfer.personalSongs?.length ?? 0} personal songs · {progressTransfer.customGrooves?.length ?? 0} custom grooves · preferred tempo {progressTransfer.preferredBpm} BPM.</p>
+        <p>{progressTransfer.completedLessons.length} lesson completions · {progressTransfer.practiceSessions.length} practice sessions · {progressTransfer.trainerPractice?.rounds.length ?? 0} Trainer rounds · {progressTransfer.earTraining?.length ?? 0} ear-training results · {progressTransfer.trainerPractice?.rounds.reduce((count, round) => count + (round.hits?.length ?? 0), 0) ?? 0} detailed timing records · {progressTransfer.trainerPractice?.cueSequences?.length ?? 0} cue sequences · {progressTransfer.trainerPractice?.coachFeedback?.length ?? 0} coach notes · {progressTransfer.sightReading?.attempts.length ?? 0} sight-reading attempts · {progressTransfer.sightReading?.templates?.length ?? 0} phrase templates · {Object.keys(progressTransfer.bestScores).length} best scores · {progressTransfer.personalSongs?.length ?? 0} personal songs · {progressTransfer.customGrooves?.length ?? 0} custom grooves · preferred tempo {progressTransfer.preferredBpm} BPM.</p>
         {progressTransfer.guidedPracticeSession && <p>Guided session: {progressTransfer.guidedPracticeSession.completedStepIds.length} completed · {progressTransfer.guidedPracticeSession.skippedStepIds.length} skipped · {progressTransfer.guidedPracticeSession.steps.length} steps.</p>}
         {progressTransfer.weeklyGoal && <p>Weekly goal: {progressTransfer.weeklyGoal.target} {progressTransfer.weeklyGoal.type === "days" ? "practice days" : progressTransfer.weeklyGoal.type === "lessons" ? "lesson completions" : `${progressTransfer.weeklyGoal.focus} sessions`}.</p>}
         <p>This will merge into the active learner profile. Existing lessons and sessions are kept; duplicate session IDs are updated, and history is capped at 50 sessions.</p>
@@ -307,6 +343,7 @@ export function DataBackupPanel() {
         {progressTransfer.trainerPractice && <label><input type="checkbox" checked={includeTrainer} onChange={(event) => setIncludeTrainer(event.target.checked)} /> Merge Trainer summaries, routine, cue sequences, and coach notes. Local calibration and recordings stay on this device.</label>}
         {progressTransfer.trainerPractice?.rounds.some(round => round.hits?.length) && <label><input type="checkbox" checked={includeDetailedTiming} onChange={(event) => setIncludeDetailedTiming(event.target.checked)} /> Include the detailed Trainer timing records shown above.</label>}
         {progressTransfer.earTraining?.length ? <label><input type="checkbox" checked={includeEarTraining} onChange={(event) => setIncludeEarTraining(event.target.checked)} /> Merge ear-training results into the active learner profile.</label> : null}
+        {progressTransfer.sightReading && <label><input type="checkbox" checked={includeSightReading} onChange={(event) => setIncludeSightReading(event.target.checked)} /> Merge sight-reading history, saved phrase templates, and the optional goal into the active learner profile.</label>}
         <button type="button" className="button" onClick={mergeImportedProgress}>Merge reviewed progress</button>
         <button type="button" className="button-secondary" onClick={() => { setProgressTransfer(null); setProgressTransferName(""); setMessage("Progress transfer cancelled."); }}>Cancel</button>
       </div>}

@@ -70,10 +70,12 @@ final class SightReadingController: ObservableObject {
     func configureAudio(learner: Double, target: Double, click: Double) { audio.setSightMix(learner: Float(learner), target: Float(target), click: Float(click)) }
     func configureClick(voice: DrumVoice, groupedAccents: Bool) { sightClickVoice = voice; self.groupedClickAccents = groupedAccents }
     private var recentFingerprints: [String] { Array((history.suffix(24).map { $0.fingerprint ?? SightExercise.generate($0.settings, seed: $0.seed).fingerprint } + SightHistory.readSeen()).suffix(32)) }
-    func fresh(_ settings: SightSettings, sourcePattern: PracticePattern? = nil) {
+    func fresh(_ settings: SightSettings, sourcePattern: PracticePattern? = nil, sourceTemplate: SightCustomTemplate? = nil) {
         stop()
         let seed = UInt32.random(in: .min ... .max)
-        exercise = sourcePattern.flatMap { SightExercise.fromPattern($0, settings: settings, seed: seed) } ?? SightExercise.generateFresh(settings, seed: seed, recentFingerprints: recentFingerprints)
+        exercise = sourcePattern.flatMap { SightExercise.fromPattern($0, settings: settings, seed: seed) }
+            ?? sourceTemplate.map { SightExercise.fromTemplate($0, settings: settings, seed: seed) }
+            ?? SightExercise.generateFresh(settings, seed: seed, recentFingerprints: recentFingerprints)
         sessionQueue = []; sessionTotal = 0; sessionIndex = 0; sessionResults = []
         reviewCursorBeat = nil
         originalExerciseForDrill = nil; transferCheckSettings = nil; transferCheck = false; assignment = nil; assignmentFeedback = ""; attempted = false; assisted = false; result = nil; confidenceRecorded = true; rated = []; performedHits = []; phase = .setup; message = exercise?.sourceLabel.map { "Fresh excerpt from \($0) ready. Start to reveal notation." } ?? "New exercise ready. Start to reveal notation."
@@ -160,9 +162,9 @@ final class SightReadingController: ObservableObject {
     }
     func stop() { generation += 1; task?.cancel(); task = nil; audio.stop(); speech.stopSpeaking(at: .immediate); referencing = false; midiCalibrating = false; midiCalibrationTargets = []; midiCalibrationOffsets = []; midiCalibrationNext = 0; liveHitMessage = "" }
     func cancel() { stop(); sessionQueue = []; sessionTotal = 0; sessionIndex = 0; sessionResults = []; phase = .setup; message = "Attempt ended. Restarting this exercise counts as practice." }
-    func start(_ settings: SightSettings, source: String, sourceProfile: String? = nil, inputCalibrated: Bool? = nil, inputCalibrationSpreadMs: Int? = nil, inputCalibrationAgeDays: Int? = nil, inputTimingCorrectionMs: Int? = nil, previewSeconds: Int = 10, countInBars: Int = 1, countInSubdivision: String = "quarter", spokenCountIn: Bool = false, targetPlayback: Bool = false, liveFeedback: Bool = false, sourcePattern: PracticePattern? = nil) {
+    func start(_ settings: SightSettings, source: String, sourceProfile: String? = nil, inputCalibrated: Bool? = nil, inputCalibrationSpreadMs: Int? = nil, inputCalibrationAgeDays: Int? = nil, inputTimingCorrectionMs: Int? = nil, previewSeconds: Int = 10, countInBars: Int = 1, countInSubdivision: String = "quarter", spokenCountIn: Bool = false, targetPlayback: Bool = false, liveFeedback: Bool = false, sourcePattern: PracticePattern? = nil, sourceTemplate: SightCustomTemplate? = nil) {
         stop()
-        if exercise == nil || exercise?.settings != settings.normalized || sourcePattern != nil && exercise?.sourceLabel != sourcePattern?.name { fresh(settings, sourcePattern: sourcePattern) }
+        if exercise == nil || exercise?.settings != settings.normalized || sourcePattern != nil && exercise?.sourceLabel != sourcePattern?.name || sourceTemplate != nil && exercise?.sourceLabel != sourceTemplate?.name { fresh(settings, sourcePattern: sourcePattern, sourceTemplate: sourceTemplate) }
         guard let exercise else { return }
         let previewLength = [0, 5, 10].contains(previewSeconds) ? previewSeconds : 10
         let countBars = min(2, max(0, countInBars))
@@ -196,7 +198,7 @@ final class SightReadingController: ObservableObject {
                 else { self.finish(exercise, source: source); return }
                 if targetPlayback && now >= self.startAt && now < self.endAt + 0.11 {
                     while nextTargetHit < exercise.hits.count && self.startAt + Double(exercise.hits[nextTargetHit].step) * exercise.stepDuration <= now {
-                        self.audio.playTarget(exercise.hits[nextTargetHit].instrument, velocity: exercise.hits[nextTargetHit].accent ? 110 : 75)
+                        self.audio.playTarget(exercise.hits[nextTargetHit].instrument, velocity: exercise.hits[nextTargetHit].velocityTarget ?? (exercise.hits[nextTargetHit].accent ? 110 : 75))
                         nextTargetHit += 1
                     }
                 }
@@ -236,22 +238,22 @@ final class SightReadingController: ObservableObject {
             }
         }
     }
-    func hit(_ voice: DrumVoice, source: String, at: Double = ProcessInfo.processInfo.systemUptime, midiArticulation: String? = nil, correctionMs: Double = 0) {
+    func hit(_ voice: DrumVoice, source: String, at: Double = ProcessInfo.processInfo.systemUptime, midiArticulation: String? = nil, correctionMs: Double = 0, velocity: Int? = nil) {
         guard selectedSource == source, phase == .playing || phase == .countIn, at >= startAt - 0.1, at <= endAt + 0.1, rated.count < 10000 else { return }
-        if source != "audio-voices" { audio.play(voice) }
+        if source != "audio-voices" { audio.play(voice, velocity: velocity ?? 86) }
         let corrected = at - correctionMs / 1000
-        performedHits.append(SightPerformedHit(instrument: voice, at: corrected - startAt))
+        performedHits.append(SightPerformedHit(instrument: voice, at: corrected - startAt, velocity: velocity))
         if let index = PracticeRules.closestUnmatchedIndex(at: corrected, in: expected, instrument: voice, midiArticulation: midiArticulation, respectArticulationTarget: false), abs(expected[index].at - corrected) <= 0.1 {
             if let targetArticulation = expected[index].midiArticulationTarget, targetArticulation != midiArticulation {
-                rated.append(RatedHit(instrument: voice, rating: .extra, step: expected[index].step, midiArticulation: midiArticulation))
+                rated.append(RatedHit(instrument: voice, rating: .extra, step: expected[index].step, midiArticulation: midiArticulation, velocity: velocity, velocityTarget: expected[index].velocityTarget))
             } else {
                 let offset = (corrected - expected[index].at) * 1000
                 expected[index].matched = true
-                rated.append(RatedHit(instrument: voice, rating: PracticeRules.classify(offsetMs: offset), offsetMs: Int(offset.rounded()), step: expected[index].step, midiArticulation: midiArticulation, midiArticulationTarget: expected[index].midiArticulationTarget))
+                rated.append(RatedHit(instrument: voice, rating: PracticeRules.classify(offsetMs: offset), offsetMs: Int(offset.rounded()), step: expected[index].step, midiArticulation: midiArticulation, midiArticulationTarget: expected[index].midiArticulationTarget, velocity: velocity, velocityTarget: expected[index].velocityTarget))
             }
         } else {
             let step = max(0, min((exercise?.totalSteps ?? 1) - 1, Int((at - startAt) / (exercise?.stepDuration ?? 1))))
-            rated.append(RatedHit(instrument: voice, rating: .extra, step: step, midiArticulation: midiArticulation))
+            rated.append(RatedHit(instrument: voice, rating: .extra, step: step, midiArticulation: midiArticulation, velocity: velocity))
         }
         if liveFeedbackEnabled && practicePass, let latest = rated.last {
             if latest.rating == .extra { liveHitMessage = "Extra \(voice.title)" }
@@ -313,7 +315,7 @@ final class SightReadingController: ObservableObject {
         let spread: Int?
         if let mean, !offsets.isEmpty { spread = Int((Double(offsets.reduce(0) { $0 + abs($1 - mean) }) / Double(offsets.count)).rounded()) }
         else { spread = nil }
-        var row = SightAttempt(seed: exercise.seed, settings: exercise.settings, source: source, inputProfile: currentInputProfile, classification: classification, targetPlayback: currentTargetPlayback, score: result.score, accuracy: result.accuracy, meanOffsetMs: mean, misses: result.miss, extras: result.extra, fluency: SightFluency.calculate(exercise: exercise, rated: rated), voiceScores: SightAnalytics.voiceScores(exercise: exercise, rated: rated), sourceLabel: exercise.sourceLabel, previewSeconds: currentPreviewSeconds, countInBars: currentCountInBars, assignmentTitle: assignment?.title, assignmentDueDate: assignment?.dueDate, assignmentMinimumAccuracy: assignment?.minimumAccuracy, fingerprint: exercise.fingerprint, timingSpreadMs: spread, earlyHits: offsets.filter { $0 < 0 }.count, lateHits: offsets.filter { $0 > 0 }.count, pulseRecovery: SightAnalytics.pulseRecovery(exercise: exercise, rated: rated), inputCalibrated: currentInputCalibrated, inputCalibrationSpreadMs: currentInputCalibrationSpreadMs, inputCalibrationAgeDays: currentInputCalibrationAgeDays, inputTimingCorrectionMs: currentInputTimingCorrectionMs)
+        var row = SightAttempt(seed: exercise.seed, settings: exercise.settings, source: source, inputProfile: currentInputProfile, classification: classification, targetPlayback: currentTargetPlayback, score: result.score, accuracy: result.accuracy, dynamicAccuracy: SightAnalytics.dynamicAccuracy(exercise: exercise, rated: rated), contextErrors: SightAnalytics.contextErrors(exercise: exercise, rated: rated), meanOffsetMs: mean, misses: result.miss, extras: result.extra, fluency: SightFluency.calculate(exercise: exercise, rated: rated), voiceScores: SightAnalytics.voiceScores(exercise: exercise, rated: rated), sourceLabel: exercise.sourceLabel, previewSeconds: currentPreviewSeconds, countInBars: currentCountInBars, assignmentTitle: assignment?.title, assignmentDueDate: assignment?.dueDate, assignmentMinimumAccuracy: assignment?.minimumAccuracy, fingerprint: exercise.fingerprint, timingSpreadMs: spread, earlyHits: offsets.filter { $0 < 0 }.count, lateHits: offsets.filter { $0 > 0 }.count, pulseRecovery: SightAnalytics.pulseRecovery(exercise: exercise, rated: rated), inputCalibrated: currentInputCalibrated, inputCalibrationSpreadMs: currentInputCalibrationSpreadMs, inputCalibrationAgeDays: currentInputCalibrationAgeDays, inputTimingCorrectionMs: currentInputTimingCorrectionMs)
         row.version = exercise.version
         history = Array((history + [row]).suffix(100))
         confidenceAttemptID = row.id; confidenceRecorded = false
@@ -403,16 +405,16 @@ final class SightReadingController: ObservableObject {
             let sources: [String] = mode == "compare" ? ["reference", "learner"] : [mode]
             for source in sources {
                 let base = ProcessInfo.processInfo.systemUptime + 0.1
-                let events: [(TimeInterval, DrumVoice)]
+                let events: [(TimeInterval, DrumVoice, Int?)]
                 if source == "reference" {
                     events = exercise.hits.compactMap { hit in
                         if let barIndex, exercise.barIndex(forBeat: Double(hit.step) * 4 / Double(exercise.subdivision)) != barIndex { return nil }
-                        return (Double(hit.step) * exercise.stepDuration - segmentStart, hit.instrument)
+                        return (Double(hit.step) * exercise.stepDuration - segmentStart, hit.instrument, hit.velocityTarget ?? (hit.accent ? 110 : 75))
                     }
                 } else {
                     events = (self?.performedHits ?? []).compactMap { hit in
                         if barIndex != nil && (hit.at < segmentStart || hit.at >= segmentStart + segmentDuration) { return nil }
-                        return (hit.at - segmentStart, hit.instrument)
+                        return (hit.at - segmentStart, hit.instrument, hit.velocity)
                     }
                 }
                 for event in events.sorted(by: { $0.0 < $1.0 }) {
@@ -420,7 +422,7 @@ final class SightReadingController: ObservableObject {
                     let delay = deadline - ProcessInfo.processInfo.systemUptime
                     if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
                     guard !Task.isCancelled, let self, self.generation == token else { return }
-                    if source == "reference" { self.audio.playTarget(event.1, velocity: 75) } else { self.audio.play(event.1) }
+                    if source == "reference" { self.audio.playTarget(event.1, velocity: event.2 ?? 75) } else { self.audio.play(event.1, velocity: event.2 ?? 86) }
                 }
                 let duration = segmentDuration / max(0.5, min(1.5, speed))
                 let remaining = base + duration + 0.25 - ProcessInfo.processInfo.systemUptime
@@ -432,15 +434,22 @@ final class SightReadingController: ObservableObject {
     }
     func recommendation(for settings: SightSettings, source: String) -> (settings: SightSettings, reason: String)? {
         let pastReads = history.filter { $0.classification == "reading" && $0.source == source }
-        let grouped = Dictionary(grouping: pastReads) { "\($0.settings.level.rawValue)|\($0.settings.meter)|\($0.settings.focusRhythm)" }
-        let due = grouped.values.compactMap { rows -> (SightSettings, Int, Date)? in
-            guard let last = rows.last, Date().timeIntervalSince(last.playedAt) >= 7 * 24 * 60 * 60 else { return nil }
-            let recent = rows.suffix(3), average = recent.reduce(0) { $0 + $1.accuracy } / max(1, recent.count)
-            return (last.settings, average, last.playedAt)
+        let grouped = Dictionary(grouping: pastReads) { "\($0.settings.level.rawValue)|\($0.settings.bpm)|\($0.settings.meter)|\($0.settings.focusRhythm)|\($0.source)" }
+        let due = grouped.values.compactMap { rows -> (SightSettings, Int, Date, Int)? in
+            let ordered = rows.sorted { $0.playedAt < $1.playedAt }
+            guard let last = ordered.last else { return nil }
+            let recent = ordered.suffix(3), average = recent.reduce(0) { $0 + $1.accuracy } / max(1, recent.count)
+            var interval = average < 55 ? 1 : average < 70 ? 2 : average < 80 ? 4 : average < 90 ? 7 : 10
+            let strongStreak = ordered.suffix(3).reversed().prefix(while: { $0.accuracy >= 90 }).count
+            if strongStreak >= 2 { interval = min(30, interval * (strongStreak >= 3 ? 3 : 2)) }
+            let mismatch = (last.confidence ?? 3) * 20 - last.accuracy
+            if mismatch >= 20 { interval = max(1, interval / 2) }
+            guard Date().timeIntervalSince(last.playedAt) >= Double(interval) * 24 * 60 * 60 else { return nil }
+            return (last.settings, average, last.playedAt, interval)
         }.sorted { $0.1 != $1.1 ? $0.1 < $1.1 : $0.2 < $1.2 }.first
         if let due {
             var review = due.0; review.bars = 2; review.style = "varied"; review.density = "light"
-            return (review.normalized, "Spaced review: \(due.0.meter) \(due.0.focusRhythm) has not been read for a week; recent accuracy was \(due.1)%.")
+            return (review.normalized, "Spaced review: \(due.0.level.rawValue) \(due.0.meter) \(due.0.focusRhythm) at \(due.0.bpm) BPM is due after \(due.3) days on \(source); recent accuracy was \(due.1)%.")
         }
         let rows = history.filter { $0.classification == "reading" && $0.source == source && $0.settings.level == settings.level && $0.settings.bpm == settings.bpm && $0.settings.bars == settings.bars && $0.settings.meter == settings.meter && $0.settings.triplets == settings.triplets && $0.settings.snareOnly == settings.snareOnly && $0.settings.focusVoice == settings.focusVoice && $0.settings.focusRhythm == settings.focusRhythm && $0.settings.style == settings.style }
         guard rows.count >= 3 else { return nil }
@@ -484,6 +493,10 @@ struct SightReadingView: View {
     @State private var cueLevel = "full"
     @State private var exerciseOrigin = "generated"
     @State private var repertoirePatternID = ""
+    @State private var customTemplates = SightHistory.readTemplates()
+    @State private var selectedTemplateID = ""
+    @State private var templateName = "My reading phrase"
+    @State private var templateStatus = ""
     @State private var showSticking = false
     @State private var hideCursorDuringPlay = false
     @State private var scoreReveal = "full"
@@ -511,6 +524,11 @@ struct SightReadingView: View {
     @State private var reviewSpeed = 1.0
     @State private var midiReadinessRemaining: [DrumVoice] = []
     @State private var midiReadinessVerified: [DrumVoice] = []
+    @State private var velocityCalibrationVoice: DrumVoice = .snare
+    @State private var velocityCalibrationStage: String?
+    @State private var velocityCalibrationSamples: [Int] = []
+    @State private var velocityCalibrationSoftMedian: Int?
+    @State private var velocityCalibrationStatus = ""
     @FocusState private var keyboardFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("drumHero.nativeInputOffset.touch") private var touchCorrection = 0.0
@@ -531,6 +549,7 @@ struct SightReadingView: View {
         }
     }
     private var selectedSourcePattern: PracticePattern? { repertoirePatterns.first { $0.id == repertoirePatternID } }
+    private var selectedCustomTemplate: SightCustomTemplate? { customTemplates.first { $0.id == selectedTemplateID } }
     private var effectiveCueLevel: String {
         guard cueLevel == "adaptive" else { return cueLevel }
         let samples = controller.history.filter { $0.classification == "reading" && $0.settings.level == settings.level && $0.settings.meter == settings.meter && $0.source == source }.suffix(3)
@@ -548,7 +567,69 @@ struct SightReadingView: View {
         let spread = NativeMIDICalibration.spread(for: selectedMidiSourceID).map { " · ±\(Int($0.rounded())) ms tap variation" } ?? ""
         return "calibrated \(age) · \(Int(midiCorrection)) ms correction\(spread)\(midiCalibrationAgeDays.map { $0 > 30 ? " · recalibration recommended" : "" } ?? "")"
     }
+    @MainActor private func medianVelocity(_ values: [Int]) -> Int {
+        let sorted = values.sorted()
+        return sorted[sorted.count / 2]
+    }
+    @MainActor private func saveCurrentTemplate() {
+        guard let exercise = controller.exercise,
+              let template = SightCustomTemplate.from(exercise: exercise, name: templateName) else {
+            templateStatus = "Generate a phrase with at least one note, then save its first measure."
+            return
+        }
+        customTemplates = Array((customTemplates + [template]).suffix(40))
+        do {
+            try SightHistory.writeTemplates(customTemplates)
+            selectedTemplateID = template.id
+            exerciseOrigin = "template"
+            settings.level = template.level; settings.meter = template.meter; settings.mixedMeters = false
+            settings = settings.normalized
+            controller.fresh(settings, sourceTemplate: template)
+            templateStatus = "Saved the first measure as \(template.name). It can now be reused as a new reading phrase."
+        } catch { templateStatus = "Could not save this phrase template." }
+    }
+    @MainActor private func receiveSightMIDIHit(_ voice: DrumVoice, at: TimeInterval, velocity: Int, sourceID: String, articulation: String?) {
+        if let stage = velocityCalibrationStage, sourceID == selectedMidiSourceID {
+            guard voice == velocityCalibrationVoice else { velocityCalibrationStatus = "Strike only the selected \(velocityCalibrationVoice.title) pad during this calibration."; return }
+            velocityCalibrationSamples.append(velocity)
+            guard velocityCalibrationSamples.count >= 5 else {
+                velocityCalibrationStatus = "\(stage == "soft" ? "Soft" : "Accented") strikes · \(velocityCalibrationSamples.count)/5"
+                return
+            }
+            let measured = medianVelocity(velocityCalibrationSamples)
+            velocityCalibrationSamples = []
+            if stage == "soft" {
+                velocityCalibrationSoftMedian = measured
+                velocityCalibrationStage = "accent"
+                velocityCalibrationStatus = "Soft level saved. Strike five comfortable accented hits on \(velocityCalibrationVoice.title)."
+            } else if let soft = velocityCalibrationSoftMedian,
+                      NativeMIDIVelocityCalibration.save(soft, accent: measured, for: sourceID, voice: velocityCalibrationVoice) {
+                velocityCalibrationStage = nil; velocityCalibrationSoftMedian = nil
+                velocityCalibrationStatus = "\(velocityCalibrationVoice.title) dynamics calibrated for this MIDI device."
+            } else {
+                velocityCalibrationStage = "soft"; velocityCalibrationSoftMedian = nil
+                velocityCalibrationStatus = "The accent level must be clearly stronger than the soft level. Repeat the calibration."
+            }
+            return
+        }
+        if let expected = midiReadinessRemaining.first {
+            if voice == expected {
+                midiReadinessVerified.append(voice); midiReadinessRemaining.removeFirst()
+                controller.message = midiReadinessRemaining.first.map { "\(voice.title) confirmed. Now strike \($0.title)." } ?? "All mapped drum voices responded. MIDI is ready for this device."
+            } else { controller.message = "Detected \(voice.title); strike the requested \(expected.title) pad next." }
+            return
+        }
+        if controller.midiCalibrating { controller.recordMIDITimingHit(voice, at: at, sourceID: sourceID); return }
+        let scoredVelocity = settings.dynamicsFocus ? NativeMIDIVelocityCalibration.normalized(velocity, for: sourceID, voice: voice) : velocity
+        controller.hit(voice, source: "midi", at: at, midiArticulation: articulation, correctionMs: NativeMIDICalibration.correction(for: sourceID), velocity: scoredVelocity)
+    }
     @MainActor private func startSelectedExercise() {
+        if settings.dynamicsFocus {
+            guard source == "midi" else { controller.message = "Dynamics reading requires MIDI input with velocity sensitivity."; return }
+            guard midi.connectedSources.contains(selectedMidiSourceID) else { controller.message = "Connect MIDI before reading dynamics."; return }
+            let missing = DrumVoice.allCases.filter { NativeMIDIVelocityCalibration.range(for: selectedMidiSourceID, voice: $0) == nil }
+            guard missing.isEmpty else { controller.message = "Calibrate soft and accented MIDI strikes for: \(missing.map(\.title).joined(separator: ", "))."; return }
+        }
         if let articulation = settings.articulationFocus {
             guard source == "midi" else { controller.message = "Choose MIDI input to score articulation, or clear the articulation focus."; return }
             guard (midi.articulationNotes[articulation] ?? -1) >= 0 else { controller.message = "Map a MIDI note to \(articulation.replacingOccurrences(of: "-", with: " ")) before starting."; return }
@@ -561,7 +642,7 @@ struct SightReadingView: View {
         let run = {
             controller.configureAudio(learner: sightLearnerLevel, target: sightTargetLevel, click: sightClickLevel)
             controller.configureClick(voice: clickVoice, groupedAccents: groupedClickAccents)
-            controller.start(settings, source: source, sourceProfile: source == "midi" ? "midi:\(selectedMidiSourceID)" : source == "audio-voices" ? "microphone-kit-classifier" : source, inputCalibrated: calibrated, inputCalibrationSpreadMs: spread, inputCalibrationAgeDays: age, inputTimingCorrectionMs: correction, previewSeconds: previewSeconds, countInBars: countInBars, countInSubdivision: countInSubdivision, spokenCountIn: spokenCountIn, targetPlayback: playTargetDrums, liveFeedback: liveFeedback, sourcePattern: exerciseOrigin == "repertoire" ? selectedSourcePattern : nil)
+            controller.start(settings, source: source, sourceProfile: source == "midi" ? "midi:\(selectedMidiSourceID)" : source == "audio-voices" ? "microphone-kit-classifier" : source, inputCalibrated: calibrated, inputCalibrationSpreadMs: spread, inputCalibrationAgeDays: age, inputTimingCorrectionMs: correction, previewSeconds: previewSeconds, countInBars: countInBars, countInSubdivision: countInSubdivision, spokenCountIn: spokenCountIn, targetPlayback: playTargetDrums, liveFeedback: liveFeedback, sourcePattern: exerciseOrigin == "repertoire" ? selectedSourcePattern : nil, sourceTemplate: exerciseOrigin == "template" ? selectedCustomTemplate : nil)
             keyboardFocused = true
         }
         guard source == "audio-voices" else { microphone.stop(); run(); return }
@@ -585,282 +666,724 @@ struct SightReadingView: View {
         }
     }
     @MainActor private func cancelSightAttempt() { controller.cancel(); microphone.stop() }
-    var body: some View {
-        GeometryReader { geometry in
-        ScrollViewReader { scoreScroll in
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Toggle("Performance view", isOn: $focusMode)
-                if !focusMode { Text("Read a fresh phrase, prepare silently for \(previewSeconds) seconds, use a \(countInBars)-bar count-in, then play once.") }
-                if controller.active {
-                    Text("\(settings.level.rawValue) · \(settings.bpm) BPM · \(settings.mixedMeters ? controller.exercise?.meters.joined(separator: " → ") ?? "Mixed meter" : settings.meter) · \(settings.bars) bars · \(settings.style) · \(settings.focusRhythm) · \(settings.focusVoice)").font(.caption)
-                    if let sourceLabel = controller.exercise?.sourceLabel { Text("Repertoire excerpt · \(sourceLabel)").font(.caption).foregroundStyle(.secondary) }
-                } else if !focusMode {
-                    setup.disabled(controller.referencing)
+    @ViewBuilder private var liveFeedbackDisplay: some View {
+        if liveFeedback && !controller.liveHitMessage.isEmpty {
+            Text(controller.liveHitMessage).font(.headline).frame(maxWidth: .infinity).accessibilityAddTraits(.updatesFrequently)
+        }
+    }
+
+    private func loopMeasureRangeSection(for exercise: SightExercise) -> some View {
+        let barOptions = Array(0..<exercise.settings.bars)
+        let safeStart = min(max(0, rangeStart), max(0, exercise.settings.bars - 1))
+        let endUpperBound = min(exercise.settings.bars, safeStart + max(1, 80 / rangeRepeats))
+        let endOptions = Array(safeStart..<endUpperBound)
+        return GroupBox("Loop a measure range as practice") {
+            VStack(alignment: .leading) {
+                Picker("Start bar", selection: $rangeStart) {
+                    ForEach(barOptions, id: \.self) { bar in Text("Bar \(bar + 1)").tag(bar) }
                 }
-                HStack {
-                    if controller.active {
-                        Button(controller.midiCalibrating ? "Cancel MIDI timing check" : "Cancel attempt") { cancelSightAttempt() }
-                        Button(focusMode ? "Exit performance view" : "Performance view") { focusMode.toggle() }
+                .onChange(of: rangeStart) { _, value in
+                    rangeEnd = min(max(value, rangeEnd), value + 80 / rangeRepeats - 1)
+                }
+                Picker("End bar", selection: $rangeEnd) {
+                    ForEach(endOptions, id: \.self) { bar in Text("Bar \(bar + 1)").tag(bar) }
+                }
+                Stepper("Repeats: \(rangeRepeats)", value: $rangeRepeats, in: 2...4)
+                    .onChange(of: rangeRepeats) { _, value in
+                        rangeEnd = min(max(rangeStart, rangeEnd), rangeStart + 80 / value - 1)
                     }
-                    else {
-                        Button(controller.phase == .results ? "Retry as practice" : "Start sight reading") {
-                            if source == "midi" && midi.connectedSources.isEmpty { controller.message = "Connect MIDI first."; return }
-                            startSelectedExercise()
-                        }.disabled(controller.referencing)
-                        Button("New exercise") { controller.fresh(settings, sourcePattern: exerciseOrigin == "repertoire" ? selectedSourcePattern : nil) }.disabled(controller.referencing)
-                        if !focusMode { Button("Start \(sessionLength)-exercise set") { controller.startSession(settings, count: sessionLength) }.disabled(controller.referencing) }
-                    }
+                Button("Practice bars \(rangeStart + 1)–\(max(rangeStart, rangeEnd) + 1), \(rangeRepeats) repeats") {
+                    controller.startRangeDrill(rangeStart, max(rangeStart, rangeEnd), repeats: rangeRepeats)
+                    settings = controller.exercise?.settings ?? settings
+                    lengthPreset = nil
                 }
-                Text(status).accessibilityIdentifier("sight-status")
-                if !focusMode { learningPathPanel }
-                    if !focusMode, !controller.active, let parent = controller.originalExerciseForDrill {
-                    Button("Return to full phrase") { controller.returnToFullPhrase(); settings = parent.settings; lengthPreset = nil }
+            }
+        }
+    }
+
+    private func errorSummary(exercise: SightExercise, bar: Int, voice: DrumVoice) -> String {
+        var misses = 0
+        var extras = 0
+        for hit in controller.rated {
+            guard hit.instrument == voice, let step = hit.step else { continue }
+            let beat = Double(step) * 4.0 / Double(exercise.subdivision)
+            guard exercise.barIndex(forBeat: beat) == bar else { continue }
+            if hit.rating == .miss { misses += 1 }
+            if hit.rating == .extra { extras += 1 }
+        }
+        return "\(voice.title): \(misses) misses, \(extras) extras"
+    }
+
+    private func ratedHits(in exercise: SightExercise, bar: Int) -> [RatedHit] {
+        controller.rated.filter { hit in
+            guard let step = hit.step else { return false }
+            return exercise.barIndex(forBeat: Double(step) * 4.0 / Double(exercise.subdivision)) == bar
+        }.sorted { ($0.step ?? 0) < ($1.step ?? 0) }
+    }
+
+    private func confidenceSummary(_ confidence: Int, accuracy: Int) -> String {
+        let confidencePercent = confidence * 20
+        let difference = confidencePercent - accuracy
+        let comparison = difference >= 0
+            ? "\(difference) points more confident than the score"
+            : "\(-difference) points less confident than the score"
+        return "Confidence: \(confidence)/5 (\(confidencePercent)%) · \(comparison)."
+    }
+
+    private func inputCalibrationSummary(for attempt: SightAttempt) -> String {
+        let calibration = attempt.inputCalibrated == true
+            ? "calibrated \(attempt.inputCalibrationAgeDays.map { "\($0) days ago" } ?? "previously")"
+            : "not calibrated"
+        let correction = attempt.inputTimingCorrectionMs.map { " · \($0) ms correction" } ?? ""
+        let spread = attempt.inputCalibrationSpreadMs.map { " · ±\($0) ms tap variation" } ?? ""
+        let recommendation = (attempt.inputCalibrationAgeDays ?? 0) > 30 ? " · recalibration recommended" : ""
+        return "Input check: \(calibration)\(correction)\(spread)\(recommendation)."
+    }
+
+    private func timingConsistencySummary(for attempt: SightAttempt) -> String? {
+        guard let spread = attempt.timingSpreadMs else { return nil }
+        let early = attempt.earlyHits ?? 0
+        let late = attempt.lateHits ?? 0
+        return "Timing consistency: \(spread) ms average spread · \(early) early · \(late) late"
+    }
+
+    private func contextErrorSummary(_ errors: [SightContextError]) -> String {
+        let items = errors.map { error in
+            let context = error.context.replacingOccurrences(of: "-", with: " ")
+            return "\(context) · \(error.count)"
+        }
+        return "Where the reading broke down · " + items.joined(separator: " · ")
+    }
+
+    private func adaptiveStepSummary(next: SightSettings?, previewSeconds: Int?) -> String {
+        let settingsSummary: String
+        if let next {
+            settingsSummary = "Try \(next.focusRhythm) rhythms at \(next.density) density and \(next.bpm) BPM"
+        } else {
+            settingsSummary = "Keep the current rhythm and tempo"
+        }
+        let previewSummary = previewSeconds.map { " with a \($0)-second preview" } ?? ""
+        return settingsSummary + previewSummary + "."
+    }
+
+    private func assignmentSummary(_ assignment: SightAssignment, accuracy: Int) -> String {
+        let target = accuracy >= (assignment.minimumAccuracy ?? 0) ? "Assignment target met" : "Assignment target not met"
+        let requirement = assignment.minimumAccuracy.map { " · \($0)% required" } ?? ""
+        let dueDate = assignment.dueDate.map { " · due \($0)" } ?? ""
+        return "\(target) · \(assignment.title)\(requirement)\(dueDate)"
+    }
+
+    private func sightTouchPad(_ voice: DrumVoice, index: Int) -> some View {
+        let label: String
+        if effectiveCueLevel == "standard" { label = "Pad \(index + 1)" }
+        else { label = voice.title }
+        return Button(label) {
+            controller.hit(voice, source: source, correctionMs: touchCorrection)
+        }
+        .accessibilityLabel("\(voice.title) drum pad")
+        .frame(minWidth: 44, minHeight: 60)
+        .disabled(controller.phase != .playing || source == "midi" || source == "audio-voices")
+    }
+
+    private func noteReviewRow(_ note: RatedHit, exercise: SightExercise, bar: Int) -> some View {
+        let step = note.step ?? 0
+        let localStep = step - exercise.startStepForBar(bar)
+        let beat = Double(localStep) * 4.0 / Double(exercise.subdivision) + 1.0
+        let timing = note.offsetMs.map { offset in
+            " · \(abs(offset)) ms \(offset < 0 ? "early" : offset > 0 ? "late" : "on time")"
+        } ?? ""
+        let title = "\(note.rating.rawValue.capitalized) · \(note.instrument.title) · beat \(beat.formatted(.number.precision(.fractionLength(0...2))))\(timing)"
+        let needsPractice = note.rating == .miss || note.rating == .extra || abs(note.offsetMs ?? 0) > 50
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+            if needsPractice {
+                Button("Replay bar \(bar + 1) with this note highlighted") {
+                    controller.playReview(mode: "compare", speed: reviewSpeed, barIndex: bar, highlightStep: step)
                 }
-                if !focusMode, !controller.active {
-                    GroupBox("Teacher assignment") {
-                        VStack(alignment: .leading) {
-                            TextField("Assignment title", text: $assignmentTitle).textFieldStyle(.roundedBorder)
-                            TextField("Due date (YYYY-MM-DD, optional)", text: $assignmentDueDate).textFieldStyle(.roundedBorder)
-                            Stepper("Minimum accuracy: \(assignmentMinimumAccuracy)%", value: $assignmentMinimumAccuracy, in: 50...100)
-                            Button("Create seeded assignment") {
-                                if let code = controller.createAssignmentCode(settings: settings, title: assignmentTitle, dueDate: assignmentDueDate, minimumAccuracy: assignmentMinimumAccuracy) { shareAssignmentCode = code }
-                                else { shareAssignmentCode = "" }
-                            }
-                            if !shareAssignmentCode.isEmpty { ShareLink(item: "DH-SA1:\(shareAssignmentCode)") { Label("Share assignment code", systemImage: "square.and.arrow.up") } }
-                            if let exercise = controller.exercise {
-                                Button("Prepare printable score") { printableURL = makePrintablePDF(exercise, showSticking: showSticking) }
-                                if let printableURL { ShareLink(item: printableURL) { Label("Print or share PDF", systemImage: "printer") } }
-                            }
-                            Text("Assignments carry a fixed seed, due date, and accuracy target. Students can send a result code back for review.").font(.caption)
+                .disabled(controller.referencing)
+                Button("Practice this bar twice at \(max(40, exercise.settings.bpm - 10)) BPM") {
+                    controller.startBarDrill(bar)
+                    settings = controller.exercise?.settings ?? settings
+                    lengthPreset = nil
+                }
+            }
+        }
+    }
+
+    private func barReviewSection(exercise: SightExercise, bar: Int) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(DrumVoice.allCases) { voice in
+                    Text(errorSummary(exercise: exercise, bar: bar, voice: voice))
+                }
+                ForEach(Array(ratedHits(in: exercise, bar: bar).enumerated()), id: \.offset) { item in
+                    noteReviewRow(item.element, exercise: exercise, bar: bar)
+                }
+            }
+        } label: {
+            Text("Bar \(bar + 1) — misses and extras")
+        }
+    }
+
+    private func articulationSummary(exercise: SightExercise, articulation: String) -> String? {
+        let targets = exercise.hits.filter { $0.midiArticulationTarget == articulation }
+        guard !targets.isEmpty else { return nil }
+        let correct = targets.reduce(into: 0) { count, target in
+            let matched = controller.rated.contains { row in
+                row.step == target.step && row.instrument == target.instrument &&
+                    row.midiArticulationTarget == articulation &&
+                    (row.rating == .great || row.rating == .good)
+            }
+            if matched { count += 1 }
+        }
+        let accuracy = correct * 100 / targets.count
+        let name = articulation.replacingOccurrences(of: "-", with: " ")
+        return "Articulation · \(correct)/\(targets.count) \(name) · \(accuracy)%"
+    }
+
+    private func advanceTempoLadder() {
+        var next = settings
+        next.bpm = min(200, next.bpm + 5)
+        settings = next.normalized
+        controller.fresh(settings)
+    }
+
+    @ViewBuilder private var tempoLadderSection: some View {
+        if tempoLadder, let result = controller.result {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tempo ladder advances by five BPM after an 85% pass.").font(.caption)
+                if result.accuracy >= 85 && settings.bpm < 200 {
+                    let nextBPM = settings.bpm + 5
+                    let nextTempoLabel = "Next tempo: \(nextBPM) BPM"
+                    Button(nextTempoLabel, action: advanceTempoLadder)
+                } else if result.accuracy >= 85 {
+                    Text("Tempo ladder complete at 200 BPM.")
+                } else {
+                    Text("Retry this phrase and reach 85% to advance.").font(.caption)
+                }
+            }
+        }
+    }
+
+    private func sessionProgressSummary(completed: Int, total: Int, average: Int?, complete: Bool) -> String {
+        let result: String
+        if complete { result = average.map { "\($0)% average accuracy" } ?? "no first-read results" }
+        else { result = average.map { "\($0)% average accuracy so far" } ?? "this pass did not count as a first read" }
+        if complete { return "Set complete · \(completed) first reads · \(result)" }
+        return "\(completed) of \(total) first reads complete · \(result)"
+    }
+
+    @ViewBuilder private var sessionProgressSection: some View {
+        if controller.sessionTotal > 0 {
+            let stages = ["Warm-up", "Build", "Review", "Goal", "Stretch"]
+            let stageIndex = controller.sessionIndex - 1
+            let stage: String? = controller.sessionLabel == "Goal study path" && stages.indices.contains(stageIndex) ? stages[stageIndex] : nil
+            let average: Int? = controller.sessionResults.isEmpty
+                ? nil
+                : controller.sessionResults.reduce(0) { partial, item in partial + item.accuracy } / controller.sessionResults.count
+            let complete = controller.sessionQueueIsEmpty
+            let title = "\(controller.sessionLabel) · exercise \(controller.sessionIndex) of \(controller.sessionTotal)"
+            GroupBox(title) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let stage { Text("Study stage: \(stage).") }
+                    Text(sessionProgressSummary(completed: controller.sessionResults.count, total: controller.sessionTotal,
+                                                 average: average, complete: complete))
+                    if !complete {
+                        Button("Next exercise in set") {
+                            controller.nextSessionExercise()
+                            settings = controller.exercise?.settings ?? settings
                         }
                     }
                 }
-                if !focusMode { DisclosureGroup("Import a student assignment") {
-                    TextField("Assignment code", text: $assignmentCode).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button("Load shared assignment") {
-                        if let loaded = controller.loadAssignment(assignmentCode) { settings = loaded; lengthPreset = nil; printableURL = nil; shareAssignmentCode = "" }
-                        else if controller.assignmentFeedback.isEmpty { controller.message = "Assignment code is invalid." }
-                    }
-                    if !controller.assignmentFeedback.isEmpty { Text(controller.assignmentFeedback).accessibilityIdentifier("sight-assignment-feedback") }
-                } }
-                if !focusMode, !controller.active, let recommendation = controller.recommendation(for: settings, source: source) {
-                    GroupBox("Suggested next step") {
-                        Text(recommendation.reason)
-                        Button(suggestionLabel(recommendation.settings)) { settings = recommendation.settings; controller.fresh(recommendation.settings) }
-                    }
-                }
-                if let exercise = controller.exercise, controller.phase != .setup {
-                    HStack { Text("Notation zoom"); Slider(value: $zoom, in: 0.75...2) }
-                    let measuresPerLine = geometry.size.width >= 700 ? 4 : 2
-                    let measureWidth = max(CGFloat(190), (geometry.size.width - 32) / CGFloat(measuresPerLine)) * CGFloat(zoom)
-                    let measureHeight = CGFloat(170) * CGFloat(zoom)
-                    let activeBeat: Double? = controller.phase == .playing ? controller.beat : controller.reviewCursorBeat
-                    let systemCount = (exercise.settings.bars + measuresPerLine - 1) / measuresPerLine
-                    ScrollViewReader { horizontalScroll in
-                        ScrollView(.horizontal) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                ForEach(0..<systemCount, id: \.self) { system in
-                                    let firstBar = system * measuresPerLine
-                                    let lastBar = min(exercise.settings.bars, firstBar + measuresPerLine)
-                                    SightStaffSystem(
-                                        exercise: exercise,
-                                        bars: Array(firstBar..<lastBar),
-                                        beat: activeBeat,
-                                        measureWidth: measureWidth,
-                                        measureHeight: measureHeight,
-                                        rated: controller.phase == .results && controller.confidenceRecorded ? controller.rated : [],
-                                        showSticking: showSticking,
-                                        showCursor: !hideCursorDuringPlay || controller.phase != .playing,
-                                        revealWindow: controller.phase == .playing ? scoreReveal : "full"
-                                    )
-                                }
-                            }
-                        }
-                        .onChange(of: exercise.barIndex(forBeat: controller.beat)) { _, bar in
-                            if controller.phase == .playing { horizontalScroll.scrollTo("sight-bar-\(bar)", anchor: .center) }
+            }
+        }
+    }
+
+    @ViewBuilder private var resultSubmissionLink: some View {
+        if let code = controller.submissionCode() {
+            let item = "DH-SUB1:\(code)"
+            ShareLink(item: item) {
+                Label("Send result to teacher", systemImage: "square.and.arrow.up")
+            }
+        }
+    }
+
+    @ViewBuilder private var confidenceReflectionPanel: some View {
+        if controller.result != nil && !controller.confidenceRecorded {
+            GroupBox("Before seeing your score") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("How confident did you feel while reading this phrase?")
+                    HStack {
+                        ForEach(1...5, id: \.self) { value in
+                            Button("\(value)") { controller.submitConfidence(value) }
+                                .accessibilityLabel("Confidence \(value) out of 5")
                         }
                     }
-                    if effectiveCueLevel == "full" { Text("Legend: Kick · Space, Snare · F, Hi-hat · J, Tom · K, Crash · L. Cross heads: cymbals. > accent; rests: silence. Accents are cues, not scored dynamics.").font(.caption) }
-                    else if effectiveCueLevel == "compact" { Text("Voice is encoded by staff position. > marks an accent; rests are silence.").font(.caption) }
-                    if exercise.meters.contains("7/8") { Text("7/8 groups as 2+2+3 eighths · quarter-note BPM") }
-                    if exercise.meters.contains("5/4") { Text("5/4 groups as 3+2 quarters") }
-                    DisclosureGroup("Accessible counted notation") {
-                        Text(exercise.accessibleDescription)
-                        Button("Speak notes (assisted attempt)") { controller.speakNotes(exercise) }
-                    }
+                    Text("1 = not sure · 5 = certain").font(.caption)
+                    Button("Skip reflection") { controller.submitConfidence(nil) }
+                    Text("This is saved with the attempt but does not affect the score or reading trends.").font(.caption)
                 }
-                HStack { ForEach(Array(DrumVoice.allCases.enumerated()), id: \.element.id) { index, voice in Button(effectiveCueLevel == "standard" ? "Pad \(index + 1)" : voice.title) { controller.hit(voice, source: source, correctionMs: touchCorrection) }.accessibilityLabel("\(voice.title) drum pad").frame(minWidth: 44, minHeight: 60).disabled(controller.phase != .playing || source == "midi" || source == "audio-voices") } }
-                if liveFeedback && !controller.liveHitMessage.isEmpty { Text(controller.liveHitMessage).font(.headline).frame(maxWidth: .infinity).accessibilityLiveRegion(.polite) }
-                if controller.result != nil && !controller.confidenceRecorded {
-                    GroupBox("Before seeing your score") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("How confident did you feel while reading this phrase?")
-                            HStack { ForEach(1...5, id: \.self) { value in Button("\(value)") { controller.submitConfidence(value) }.accessibilityLabel("Confidence \(value) out of 5") } }
-                            Text("1 = not sure · 5 = certain").font(.caption)
-                            Button("Skip reflection") { controller.submitConfidence(nil) }
-                            Text("This is saved with the attempt but does not affect the score or reading trends.").font(.caption)
+            }
+        }
+    }
+
+    private func resultSummarySection(_ result: PracticeResult) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Sight-reading results").font(.title2).accessibilityAddTraits(.isHeader)
+            Text("\(controller.classification) · \(result.accuracy)% accuracy · \(result.score) score")
+            Text("\(result.miss) misses · \(result.extra) extras")
+            if let row = controller.history.last {
+                if let dynamicAccuracy = row.dynamicAccuracy {
+                    Text("Dynamic reading accuracy · \(dynamicAccuracy)% · calibration is specific to this MIDI device and drum voice.")
+                }
+                if let contextErrors = row.contextErrors, !contextErrors.isEmpty {
+                    Text(contextErrorSummary(contextErrors)).font(.caption)
+                }
+            }
+            if let exercise = controller.exercise,
+               let articulation = exercise.settings.articulationFocus,
+               let summary = articulationSummary(exercise: exercise, articulation: articulation) {
+                Text(summary)
+            }
+            if let assignment = controller.assignment {
+                Text(assignmentSummary(assignment, accuracy: result.accuracy))
+                    .accessibilityIdentifier("sight-assignment-result")
+            }
+            if let fluency = controller.history.last?.fluency, !fluency.isEmpty {
+                let text = fluency.keys.sorted().map { key in "\(key): \(fluency[key] ?? 0)%" }.joined(separator: " · ")
+                Text("Reading fluency · " + text).font(.caption)
+            }
+            let offsets = controller.rated.compactMap(\.offsetMs)
+            if !offsets.isEmpty {
+                let totalOffset = offsets.reduce(0) { partial, value in partial + value }
+                let meanOffset = totalOffset / max(1, offsets.count)
+                Text("Average timing: \(meanOffset) ms (negative = early, positive = late)")
+            }
+            if let row = controller.history.last {
+                if let summary = timingConsistencySummary(for: row) { Text(summary) }
+                if let recovery = row.pulseRecovery {
+                    Text("Pulse recovery after errors: \(recovery)% of the next two beats stayed in time.")
+                }
+                if let confidence = row.confidence {
+                    Text(confidenceSummary(confidence, accuracy: result.accuracy))
+                }
+                if row.source == "midi" || row.source == "audio-voices" {
+                    Text(inputCalibrationSummary(for: row))
+                }
+            }
+        }
+    }
+
+    private func resultPracticeSection(_ result: PracticeResult) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if adaptiveMode, controller.classification == "reading", let exercise = controller.exercise {
+                let next = SightSettings.adaptiveNext(from: exercise.settings, accuracy: result.accuracy,
+                                                       timingSpreadMs: controller.history.last?.timingSpreadMs)
+                let nextPreview = SightSettings.adaptivePreviewSeconds(current: previewSeconds,
+                                                                        accuracy: result.accuracy,
+                                                                        timingSpreadMs: controller.history.last?.timingSpreadMs)
+                GroupBox("Adaptive next step") {
+                    if next != nil || nextPreview != nil {
+                        Text(adaptiveStepSummary(next: next, previewSeconds: nextPreview))
+                        Button("Continue with adaptive exercise") {
+                            let updatedSettings = next ?? exercise.settings
+                            settings = updatedSettings
+                            previewSeconds = nextPreview ?? previewSeconds
+                            controller.fresh(updatedSettings)
                         }
+                    } else {
+                        Text("Hold this setting steady; your accuracy and timing are in the practice range.")
                     }
                 }
-                if controller.confidenceRecorded, let result = controller.result {
-                    Text("Sight-reading results").font(.title2).accessibilityAddTraits(.isHeader)
-                    Text("\(controller.classification) · \(result.accuracy)% accuracy · \(result.score) score")
-                    Text("\(result.miss) misses · \(result.extra) extras")
-                    if let exercise = controller.exercise, let articulation = exercise.settings.articulationFocus {
-                        let targets = exercise.hits.filter { $0.midiArticulationTarget == articulation }
-                        let correct = targets.filter { target in controller.rated.contains { $0.step == target.step && $0.instrument == target.instrument && $0.midiArticulationTarget == articulation && ($0.rating == .great || $0.rating == .good) } }.count
-                        if !targets.isEmpty { Text("Articulation · \(correct)/\(targets.count) \(articulation.replacingOccurrences(of: "-", with: " ")) · \(correct * 100 / targets.count)%") }
-                    }
-                    if let assignment = controller.assignment {
-                        Text("\(result.accuracy >= (assignment.minimumAccuracy ?? 0) ? "Assignment target met" : "Assignment target not met") · \(assignment.title)\(assignment.minimumAccuracy.map { " · \($0)% required" } ?? "")\(assignment.dueDate.map { " · due \($0)" } ?? "")").accessibilityIdentifier("sight-assignment-result")
-                    }
-                    if let fluency = controller.history.last?.fluency, !fluency.isEmpty {
-                        Text("Reading fluency · " + fluency.keys.sorted().map { "\($0): \(fluency[$0] ?? 0)%" }.joined(separator: " · ")).font(.caption)
-                    }
-                    let offsets = controller.rated.compactMap(\.offsetMs)
-                    if !offsets.isEmpty { Text("Average timing: \(offsets.reduce(0, +) / offsets.count) ms (negative = early, positive = late)") }
-                    if let row = controller.history.last {
-                        if let spread = row.timingSpreadMs { Text("Timing consistency: \(spread) ms average spread · \(row.earlyHits ?? 0) early · \(row.lateHits ?? 0) late") }
-                        if let recovery = row.pulseRecovery { Text("Pulse recovery after errors: \(recovery)% of the next two beats stayed in time.") }
-                        if let confidence = row.confidence { Text("Confidence: \(confidence)/5 (\(confidence * 20)%) · \(confidence * 20 - result.accuracy >= 0 ? "\(confidence * 20 - result.accuracy) points more confident than the score" : "\(result.accuracy - confidence * 20) points less confident than the score").") }
-                        if row.source == "midi" || row.source == "audio-voices" { Text("Input check: \(row.inputCalibrated == true ? "calibrated \(row.inputCalibrationAgeDays.map { "\($0) days ago" } ?? "previously")" : "not calibrated")\(row.inputTimingCorrectionMs.map { " · \($0) ms correction" } ?? "")\(row.inputCalibrationSpreadMs.map { " · ±\($0) ms tap variation" } ?? "")\(row.inputCalibrationAgeDays.map { $0 > 30 ? " · recalibration recommended" : "" } ?? "").") }
-                    }
-                    if adaptiveMode, controller.classification == "reading", let exercise = controller.exercise {
-                        let next = SightSettings.adaptiveNext(from: exercise.settings, accuracy: result.accuracy, timingSpreadMs: controller.history.last?.timingSpreadMs)
-                        let nextPreview = SightSettings.adaptivePreviewSeconds(current: previewSeconds, accuracy: result.accuracy, timingSpreadMs: controller.history.last?.timingSpreadMs)
-                        GroupBox("Adaptive next step") {
-                            if next != nil || nextPreview != nil {
-                                Text("\(next.map { "Try \($0.focusRhythm) rhythms at \($0.density) density and \($0.bpm) BPM" } ?? "Keep the current rhythm and tempo")\(nextPreview.map { " with a \($0)-second preview" } ?? "") .")
-                                Button("Continue with adaptive exercise") {
-                                    let updatedSettings = next ?? exercise.settings
-                                    settings = updatedSettings; previewSeconds = nextPreview ?? previewSeconds; controller.fresh(updatedSettings)
-                                }
-                            } else { Text("Hold this setting steady; your accuracy and timing are in the practice range.") }
+            }
+            if let exercise = controller.exercise {
+                loopMeasureRangeSection(for: exercise)
+                ForEach(0..<exercise.settings.bars, id: \.self) { bar in
+                    barReviewSection(exercise: exercise, bar: bar)
+                }
+            }
+            tempoLadderSection
+            if controller.originalExerciseForDrill == nil {
+                Button("Practice weakest bar twice") {
+                    controller.startWeakestBarDrill()
+                    settings = controller.exercise?.settings ?? settings
+                    lengthPreset = nil
+                }
+            }
+            if result.miss + result.extra > 0 && !controller.transferCheck {
+                Button("Practice the main error pattern") {
+                    controller.startErrorFocusDrill()
+                    settings = controller.exercise?.settings ?? settings
+                    lengthPreset = nil
+                }
+            }
+            if controller.transferCheckSettings != nil && !controller.transferCheck {
+                Button("Check transfer on a new phrase") {
+                    controller.startTransferCheck()
+                    settings = controller.exercise?.settings ?? settings
+                }
+            }
+            sessionProgressSection
+            resultSubmissionLink
+            Picker("Review speed", selection: $reviewSpeed) {
+                Text("0.5×").tag(0.5)
+                Text("0.75×").tag(0.75)
+                Text("1×").tag(1.0)
+                Text("1.25×").tag(1.25)
+            }
+            Button(controller.referencing ? "Stop playback" : "Play reference") {
+                if controller.referencing { controller.stop() }
+                else { controller.playReview(mode: "reference", speed: reviewSpeed) }
+            }
+            Button("Play my pass") { controller.playReview(mode: "learner", speed: reviewSpeed) }
+                .disabled(controller.referencing)
+            Button("Compare reference and my pass") { controller.playReview(mode: "compare", speed: reviewSpeed) }
+                .disabled(controller.referencing)
+        }
+    }
+
+    @ViewBuilder private var teacherAssignmentPanel: some View {
+        if !focusMode, !controller.active {
+            GroupBox("Teacher assignment") {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Assignment title", text: $assignmentTitle).textFieldStyle(.roundedBorder)
+                    TextField("Due date (YYYY-MM-DD, optional)", text: $assignmentDueDate).textFieldStyle(.roundedBorder)
+                    Stepper("Minimum accuracy: \(assignmentMinimumAccuracy)%", value: $assignmentMinimumAccuracy, in: 50...100)
+                    Button("Create seeded assignment", action: createTeacherAssignment)
+                    if !shareAssignmentCode.isEmpty {
+                        ShareLink(item: "DH-SA1:\(shareAssignmentCode)") {
+                            Label("Share assignment code", systemImage: "square.and.arrow.up")
                         }
                     }
                     if let exercise = controller.exercise {
-                        GroupBox("Loop a measure range as practice") {
-                            Picker("Start bar", selection: $rangeStart) { ForEach(0..<exercise.settings.bars, id: \.self) { Text("Bar \($0 + 1)").tag($0) } }
-                                .onChange(of: rangeStart) { _, value in rangeEnd = min(max(value, rangeEnd), value + 80 / rangeRepeats - 1) }
-                            Picker("End bar", selection: $rangeEnd) { ForEach(min(rangeStart, exercise.settings.bars - 1)..<min(exercise.settings.bars, min(rangeStart, exercise.settings.bars - 1) + 80 / rangeRepeats), id: \.self) { Text("Bar \($0 + 1)").tag($0) } }
-                            Stepper("Repeats: \(rangeRepeats)", value: $rangeRepeats, in: 2...4)
-                                .onChange(of: rangeRepeats) { _, value in rangeEnd = min(max(rangeStart, rangeEnd), rangeStart + 80 / value - 1) }
-                            Button("Practice bars \(rangeStart + 1)–\(max(rangeStart, rangeEnd) + 1), \(rangeRepeats) repeats") { controller.startRangeDrill(rangeStart, max(rangeStart, rangeEnd), repeats: rangeRepeats); settings = controller.exercise?.settings ?? settings; lengthPreset = nil }
+                        Button("Prepare printable score") {
+                            printableURL = makePrintablePDF(exercise, showSticking: showSticking)
                         }
-                        ForEach(0..<exercise.settings.bars, id: \.self) { bar in
-                            DisclosureGroup("Bar \(bar + 1) — misses and extras") {
-                                ForEach(DrumVoice.allCases) { voice in
-                                    let rows = controller.rated.filter { $0.instrument == voice && exercise.barIndex(forBeat: Double($0.step ?? 0) * 4 / Double(exercise.subdivision)) == bar }
-                                    Text("\(voice.title): \(rows.filter { $0.rating == .miss }.count) misses, \(rows.filter { $0.rating == .extra }.count) extras")
-                                }
-                                let notes = controller.rated.filter { exercise.barIndex(forBeat: Double($0.step ?? 0) * 4 / Double(exercise.subdivision)) == bar }.sorted { ($0.step ?? 0) < ($1.step ?? 0) }
-                                ForEach(Array(notes.enumerated()), id: \.offset) { element in
-                                    let note = element.element
-                                    let localStep = (note.step ?? 0) - exercise.startStepForBar(bar)
-                                    let beat = Double(localStep) * 4 / Double(exercise.subdivision) + 1
-                                    let timing = note.offsetMs.map { " · \(abs($0)) ms \($0 < 0 ? "early" : $0 > 0 ? "late" : "on time")" } ?? ""
-                                    Text("\(note.rating.rawValue.capitalized) · \(note.instrument.title) · beat \(beat.formatted(.number.precision(.fractionLength(0...2))))\(timing)")
-                                    if note.rating == .miss || note.rating == .extra || abs(note.offsetMs ?? 0) > 50 {
-                                        Button("Replay bar \(bar + 1) with this note highlighted") {
-                                            controller.playReview(mode: "compare", speed: reviewSpeed, barIndex: bar, highlightStep: note.step ?? 0)
-                                        }.disabled(controller.referencing)
-                                        Button("Practice this bar twice at \(max(40, exercise.settings.bpm - 10)) BPM") { controller.startBarDrill(bar); settings = controller.exercise?.settings ?? settings; lengthPreset = nil }
-                                    }
-                                }
+                        if let printableURL {
+                            ShareLink(item: printableURL) {
+                                Label("Print or share PDF", systemImage: "printer")
                             }
                         }
                     }
-                    if tempoLadder {
-                        Text("Tempo ladder advances by five BPM after an 85% pass.").font(.caption)
-                        if result.accuracy >= 85 && settings.bpm < 200 {
-                            Button("Next tempo: \(settings.bpm + 5) BPM") { var next = settings; next.bpm = min(200, next.bpm + 5); settings = next.normalized; controller.fresh(settings) }
-                        } else if result.accuracy >= 85 { Text("Tempo ladder complete at 200 BPM.") }
-                        else { Text("Retry this phrase and reach 85% to advance.").font(.caption) }
+                    Text("Assignments carry a fixed seed, due date, and accuracy target. Students can send a result code back for review.")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var assignmentImportPanel: some View {
+        if !focusMode {
+            DisclosureGroup("Import a student assignment") {
+                TextField("Assignment code", text: $assignmentCode)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Load shared assignment", action: loadStudentAssignment)
+                if !controller.assignmentFeedback.isEmpty {
+                    Text(controller.assignmentFeedback).accessibilityIdentifier("sight-assignment-feedback")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var recommendationPanel: some View {
+        if !focusMode, !controller.active,
+           let recommendation = controller.recommendation(for: settings, source: source) {
+            GroupBox("Suggested next step") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(recommendation.reason)
+                    Button(suggestionLabel(recommendation.settings)) {
+                        settings = recommendation.settings
+                        controller.fresh(recommendation.settings)
                     }
-                    if controller.originalExerciseForDrill == nil { Button("Practice weakest bar twice") { controller.startWeakestBarDrill(); settings = controller.exercise?.settings ?? settings; lengthPreset = nil } }
-                    if result.miss + result.extra > 0 && !controller.transferCheck { Button("Practice the main error pattern") { controller.startErrorFocusDrill(); settings = controller.exercise?.settings ?? settings; lengthPreset = nil } }
-                    if controller.transferCheckSettings != nil && !controller.transferCheck { Button("Check transfer on a new phrase") { controller.startTransferCheck(); settings = controller.exercise?.settings ?? settings } }
-                    if controller.sessionTotal > 0 {
-                        let stages = ["Warm-up", "Build", "Review", "Goal", "Stretch"]
-                        let stage = controller.sessionLabel == "Goal study path" ? stages.indices.contains(controller.sessionIndex - 1) ? stages[controller.sessionIndex - 1] : nil : nil
-                        GroupBox("\(controller.sessionLabel) · exercise \(controller.sessionIndex) of \(controller.sessionTotal)") {
-                            let average = controller.sessionResults.isEmpty ? nil : controller.sessionResults.reduce(0) { $0 + $1.accuracy } / controller.sessionResults.count
-                            if let stage { Text("Study stage: \(stage).") }
-                            if controller.sessionQueueIsEmpty {
-                                Text("Set complete · \(controller.sessionResults.count) first reads · \(average.map { "\($0)% average accuracy" } ?? "no first-read results")")
-                            } else {
-                                Text("\(controller.sessionResults.count) of \(controller.sessionTotal) first reads complete · \(average.map { "\($0)% average accuracy so far" } ?? "this pass did not count as a first read")")
-                                Button("Next exercise in set") { controller.nextSessionExercise(); settings = controller.exercise?.settings ?? settings }
-                            }
+                }
+            }
+        }
+    }
+
+    private func createTeacherAssignment() {
+        if let code = controller.createAssignmentCode(settings: settings, title: assignmentTitle,
+                                                     dueDate: assignmentDueDate,
+                                                     minimumAccuracy: assignmentMinimumAccuracy) {
+            shareAssignmentCode = code
+        } else {
+            shareAssignmentCode = ""
+        }
+    }
+
+    private func loadStudentAssignment() {
+        if let loaded = controller.loadAssignment(assignmentCode) {
+            settings = loaded
+            lengthPreset = nil
+            printableURL = nil
+            shareAssignmentCode = ""
+        } else if controller.assignmentFeedback.isEmpty {
+            controller.message = "Assignment code is invalid."
+        }
+    }
+
+    private func activeExerciseSummary() -> String {
+        let meterLabel: String
+        if settings.mixedMeters {
+            meterLabel = controller.exercise?.meters.joined(separator: " → ") ?? "Mixed meter"
+        } else {
+            meterLabel = settings.meter
+        }
+        let parts = [
+            settings.level.rawValue,
+            "\(settings.bpm) BPM",
+            meterLabel,
+            "\(settings.bars) bars",
+            settings.style,
+            settings.focusRhythm,
+            settings.focusVoice
+        ]
+        return parts.joined(separator: " · ")
+    }
+
+    private func beginNewExercise() {
+        controller.fresh(settings,
+                         sourcePattern: exerciseOrigin == "repertoire" ? selectedSourcePattern : nil,
+                         sourceTemplate: exerciseOrigin == "template" ? selectedCustomTemplate : nil)
+    }
+
+    private func beginExerciseSet() {
+        controller.startSession(settings, count: sessionLength)
+    }
+
+    @ViewBuilder private var phaseControls: some View {
+        if controller.active {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(activeExerciseSummary()).font(.caption)
+                if let sourceLabel = controller.exercise?.sourceLabel {
+                    Text("Repertoire excerpt · \(sourceLabel)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button(controller.midiCalibrating ? "Cancel MIDI timing check" : "Cancel attempt") {
+                        cancelSightAttempt()
+                    }
+                    Button(focusMode ? "Exit performance view" : "Performance view") {
+                        focusMode.toggle()
+                    }
+                }
+            }
+        } else if !focusMode {
+            setup.disabled(controller.referencing)
+            HStack {
+                Button(controller.phase == .results ? "Retry as practice" : "Start sight reading") {
+                    if source == "midi" && midi.connectedSources.isEmpty {
+                        controller.message = "Connect MIDI first."
+                        return
+                    }
+                    startSelectedExercise()
+                }
+                .disabled(controller.referencing)
+                Button("New exercise", action: beginNewExercise).disabled(controller.referencing)
+                if !focusMode {
+                    let title = "Start \(sessionLength)-exercise set"
+                    Button(title, action: beginExerciseSet).disabled(controller.referencing)
+                }
+            }
+        }
+    }
+
+    private func scoreNotationPanel(_ exercise: SightExercise, availableWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack { Text("Notation zoom"); Slider(value: $zoom, in: 0.75...2) }
+            let measuresPerLine = availableWidth >= 700 ? 4 : 2
+            let widthPerMeasure = max(CGFloat(190), (availableWidth - 32) / CGFloat(measuresPerLine))
+            let measureWidth = widthPerMeasure * CGFloat(zoom)
+            let measureHeight = CGFloat(170) * CGFloat(zoom)
+            let activeBeat: Double? = controller.phase == .playing ? controller.beat : controller.reviewCursorBeat
+            let systemCount = (exercise.settings.bars + measuresPerLine - 1) / measuresPerLine
+            ScrollViewReader { horizontalScroll in
+                ScrollView(.horizontal) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(0..<systemCount, id: \.self) { system in
+                            let firstBar = system * measuresPerLine
+                            let lastBar = min(exercise.settings.bars, firstBar + measuresPerLine)
+                            SightStaffSystem(
+                                exercise: exercise,
+                                bars: Array(firstBar..<lastBar),
+                                beat: activeBeat,
+                                measureWidth: measureWidth,
+                                measureHeight: measureHeight,
+                                rated: controller.phase == .results && controller.confidenceRecorded ? controller.rated : [],
+                                showSticking: showSticking,
+                                showCursor: !hideCursorDuringPlay || controller.phase != .playing,
+                                revealWindow: controller.phase == .playing ? scoreReveal : "full"
+                            )
                         }
                     }
-                    if let code = controller.submissionCode() { ShareLink(item: "DH-SUB1:\(code)") { Label("Send result to teacher", systemImage: "square.and.arrow.up") } }
-                    Picker("Review speed", selection: $reviewSpeed) { Text("0.5×").tag(0.5); Text("0.75×").tag(0.75); Text("1×").tag(1.0); Text("1.25×").tag(1.25) }
-                    Button(controller.referencing ? "Stop playback" : "Play reference") { if controller.referencing { controller.stop() } else { controller.playReview(mode: "reference", speed: reviewSpeed) } }
-                    Button("Play my pass") { controller.playReview(mode: "learner", speed: reviewSpeed) }.disabled(controller.referencing)
-                    Button("Compare reference and my pass") { controller.playReview(mode: "compare", speed: reviewSpeed) }.disabled(controller.referencing)
                 }
-                if !focusMode { goalPanel; history }
-            }.padding()
-        }
-        .navigationTitle("Sight reading")
-        .toolbar(focusMode ? .hidden : .visible, for: .navigationBar)
-        .focusable().focused($keyboardFocused)
-        .onKeyPress(phases: .down, perform: handleKeyboardPress)
-        .task {
-            controller.configureAudio(learner: sightLearnerLevel, target: sightTargetLevel, click: sightClickLevel)
-            controller.configureClick(voice: clickVoice, groupedAccents: groupedClickAccents)
-            if repertoirePatternID.isEmpty { repertoirePatternID = repertoirePatterns.first?.id ?? "" }
-            while !Task.isCancelled {
-                if source == "midi" && controller.active && !midi.hasLiveSources { cancelSightAttempt(); controller.message = "MIDI disconnected. Restart as practice after reconnecting." }
-                if source == "audio-voices" && controller.active && !microphone.isListening { cancelSightAttempt(); controller.message = "Microphone input stopped. Restart after reconnecting the input." }
-                try? await Task.sleep(for: .milliseconds(300))
+                .onChange(of: exercise.barIndex(forBeat: controller.beat)) { _, bar in
+                    guard controller.phase == .playing else { return }
+                    let barID = "sight-bar-\(bar)"
+                    horizontalScroll.scrollTo(barID, anchor: .center)
+                }
+            }
+            scoreLegend(for: exercise)
+            if exercise.meters.contains("7/8") { Text("7/8 groups as 2+2+3 eighths · quarter-note BPM") }
+            if exercise.meters.contains("5/4") { Text("5/4 groups as 3+2 quarters") }
+            DisclosureGroup("Accessible counted notation") {
+                Text(exercise.accessibleDescription)
+                Button("Speak notes (assisted attempt)") { controller.speakNotes(exercise) }
             }
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active && (controller.active || controller.referencing) { cancelSightAttempt() } }
-        .onChange(of: selectedMidiSourceID) { _, _ in midi.stop(); if controller.midiCalibrating { cancelSightAttempt() } }
-        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notice in
-            if let type = notice.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-               type == AVAudioSession.InterruptionType.began.rawValue, controller.active || controller.referencing { cancelSightAttempt() }
+    }
+
+    @ViewBuilder private func scoreLegend(for exercise: SightExercise) -> some View {
+        if effectiveCueLevel == "full" {
+            let dynamicsCue = exercise.settings.dynamicsFocus
+                ? " Parentheses mark ghost strokes; dynamics use calibrated MIDI velocity."
+                : " Accents are cues, not scored dynamics."
+            Text("Legend: Kick · Space, Snare · F, Hi-hat · J, Tom · K, Crash · L. Cross heads: cymbals. > accent; rests: silence." + dynamicsCue)
+                .font(.caption)
+        } else if effectiveCueLevel == "compact" {
+            let dynamicsCue = exercise.settings.dynamicsFocus ? " Parentheses mark ghost strokes." : ""
+            Text("Voice is encoded by staff position. > marks an accent; rests are silence." + dynamicsCue)
+                .font(.caption)
         }
-        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { notice in
-            if let reason = notice.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-               reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue, controller.active || controller.referencing { cancelSightAttempt() }
+    }
+
+    @ViewBuilder private var completedResults: some View {
+        if controller.confidenceRecorded, let result = controller.result {
+            resultSummarySection(result)
+            resultPracticeSection(result)
         }
-        .onDisappear(perform: cleanupSightReading)
-        .onChange(of: source) { _, value in if value != "audio-voices" && !controller.active { microphone.stop() } }
-        .onChange(of: settings) { _, value in if !controller.active { settings = value.normalized; if controller.exercise?.settings != value.normalized { controller.fresh(settings, sourcePattern: exerciseOrigin == "repertoire" ? selectedSourcePattern : nil) } } }
-        .onChange(of: controller.exercise?.settings.bars) { _, bars in if let bars { rangeStart = min(rangeStart, max(0, bars - 1)); rangeEnd = min(max(rangeStart, rangeEnd), max(0, bars - 1)) } }
-        .onChange(of: exerciseOrigin) { _, value in
-            if value == "repertoire" {
-                var sourceSettings = settings
-                sourceSettings.articulationFocus = nil
-                sourceSettings = sourceSettings.normalized
-                settings = sourceSettings
-                if let pattern = selectedSourcePattern {
-                    controller.fresh(sourceSettings, sourcePattern: pattern)
-                    settings = controller.exercise?.settings ?? sourceSettings
-                }
-            } else if value == "generated" {
-                controller.fresh(settings)
+    }
+
+    private var readingHeaderContent: AnyView {
+        AnyView(VStack(alignment: .leading, spacing: 10) {
+            Toggle("Performance view", isOn: $focusMode)
+            if !focusMode {
+                Text("Read a fresh phrase, prepare silently for \(previewSeconds) seconds, use a \(countInBars)-bar count-in, then play once.")
             }
+            phaseControls
+            Text(status).accessibilityIdentifier("sight-status")
+            if !focusMode { learningPathPanel }
+            if !focusMode, !controller.active, let parent = controller.originalExerciseForDrill {
+                Button("Return to full phrase") {
+                    controller.returnToFullPhrase()
+                    settings = parent.settings
+                    lengthPreset = nil
+                }
+            }
+        })
+    }
+
+    private var assignmentContent: AnyView {
+        AnyView(VStack(alignment: .leading, spacing: 12) {
+            teacherAssignmentPanel
+            assignmentImportPanel
+            recommendationPanel
+        })
+    }
+
+    private func scoreContent(availableWidth: CGFloat) -> AnyView {
+        if let exercise = controller.exercise, controller.phase != .setup {
+            return AnyView(scoreNotationPanel(exercise, availableWidth: availableWidth))
         }
-        .onChange(of: repertoirePatternID) { _, _ in if exerciseOrigin == "repertoire", let pattern = selectedSourcePattern { controller.fresh(settings, sourcePattern: pattern); settings = controller.exercise?.settings ?? settings } }
-        .onChange(of: sightLearnerLevel) { _, _ in controller.configureAudio(learner: sightLearnerLevel, target: sightTargetLevel, click: sightClickLevel) }
-        .onChange(of: sightTargetLevel) { _, _ in controller.configureAudio(learner: sightLearnerLevel, target: sightTargetLevel, click: sightClickLevel) }
-        .onChange(of: sightClickLevel) { _, _ in controller.configureAudio(learner: sightLearnerLevel, target: sightTargetLevel, click: sightClickLevel) }
-        .onChange(of: clickVoice) { _, _ in controller.configureClick(voice: clickVoice, groupedAccents: groupedClickAccents) }
-        .onChange(of: groupedClickAccents) { _, _ in controller.configureClick(voice: clickVoice, groupedAccents: groupedClickAccents) }
-        .onChange(of: settings.bpm) { _, _ in updateBarsForTargetLength() }
-        .onChange(of: settings.meter) { _, _ in updateBarsForTargetLength() }
-        .onChange(of: controller.phase) { _, phase in
-            if phase == .preview { scoreScroll.scrollTo("sight-system-0", anchor: .center) }
+        return AnyView(EmptyView())
+    }
+
+    private var attemptContent: AnyView {
+        AnyView(VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                ForEach(DrumVoice.allCases.indices, id: \.self) { index in
+                    sightTouchPad(DrumVoice.allCases[index], index: index)
+                }
+            }
+            liveFeedbackDisplay
+            confidenceReflectionPanel
+            completedResults
+        })
+    }
+
+    private var progressContent: AnyView {
+        if !focusMode {
+            return AnyView(VStack(alignment: .leading, spacing: 12) {
+                goalPanel
+                history
+            })
         }
-        .onChange(of: controller.exercise?.barIndex(forBeat: controller.beat) ?? 0) { _, bar in
-            if controller.phase == .playing { scoreScroll.scrollTo("sight-system-\(bar / (geometry.size.width >= 700 ? 4 : 2))", anchor: .center) }
+        return AnyView(EmptyView())
+    }
+
+    private func sightPageContent(availableWidth: CGFloat) -> AnyView {
+        AnyView(
+            VStack(alignment: .leading, spacing: 18) {
+                readingHeaderContent
+                assignmentContent
+                scoreContent(availableWidth: availableWidth)
+                attemptContent
+                progressContent
+            }
+            .padding()
+        )
+    }
+
+    private func prepareSightReading() async {
+        controller.configureAudio(learner: sightLearnerLevel, target: sightTargetLevel, click: sightClickLevel)
+        controller.configureClick(voice: clickVoice, groupedAccents: groupedClickAccents)
+        if repertoirePatternID.isEmpty { repertoirePatternID = repertoirePatterns.first?.id ?? "" }
+        if selectedTemplateID.isEmpty { selectedTemplateID = customTemplates.first?.id ?? "" }
+        while !Task.isCancelled {
+            if source == "midi" && controller.active && !midi.hasLiveSources {
+                cancelSightAttempt()
+                controller.message = "MIDI disconnected. Restart as practice after reconnecting."
+            }
+            if source == "audio-voices" && controller.active && !microphone.isListening {
+                cancelSightAttempt()
+                controller.message = "Microphone input stopped. Restart after reconnecting the input."
+            }
+            try? await Task.sleep(for: .milliseconds(300))
         }
-        }
+    }
+
+    private func sightReadingScreenContent(availableWidth: CGFloat) -> AnyView {
+        let scroll = AnyView(ScrollView { sightPageContent(availableWidth: availableWidth) })
+        let navigation = AnyView(
+            scroll
+                .navigationTitle("Sight reading")
+                .toolbar(focusMode ? .hidden : .visible, for: .navigationBar)
+                .focusable().focused($keyboardFocused)
+                .onKeyPress(phases: .down, action: handleKeyboardPress)
+                .task { await prepareSightReading() }
+        )
+        let sessionEvents = AnyView(
+            navigation
+                .onChange(of: scenePhase) { _, phase in handleScenePhaseChange(phase) }
+                .onChange(of: selectedMidiSourceID) { _, _ in handleSelectedMIDISourceChange() }
+                .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification), perform: handleAudioInterruption)
+                .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification), perform: handleAudioRouteChange)
+                .onDisappear(perform: cleanupSightReading)
+        )
+        let exerciseEvents = AnyView(
+            sessionEvents
+                .onChange(of: source) { _, value in handleInputSourceChange(value) }
+                .onChange(of: settings) { _, value in handleSightSettingsChange(value) }
+                .onChange(of: controller.exercise?.settings.bars) { _, bars in handleSightBarsChange(bars) }
+                .onChange(of: exerciseOrigin) { _, value in handleExerciseOriginChange(value) }
+                .onChange(of: repertoirePatternID) { _, _ in handleRepertoirePatternChange() }
+                .onChange(of: selectedTemplateID) { _, _ in handleTemplateSelectionChange() }
+        )
+        return AnyView(
+            exerciseEvents
+                .onChange(of: sightLearnerLevel) { _, _ in configureSightAudio() }
+                .onChange(of: sightTargetLevel) { _, _ in configureSightAudio() }
+                .onChange(of: sightClickLevel) { _, _ in configureSightAudio() }
+                .onChange(of: clickVoice) { _, _ in configureSightClick() }
+                .onChange(of: groupedClickAccents) { _, _ in configureSightClick() }
+                .onChange(of: settings.bpm) { _, _ in updateBarsForTargetLength() }
+                .onChange(of: settings.meter) { _, _ in updateBarsForTargetLength() }
+        )
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            sightReadingScreenContent(availableWidth: geometry.size.width)
         }
     }
     private var status: String {
@@ -883,16 +1406,108 @@ struct SightReadingView: View {
         let bars = settings.normalized.bars(forDuration: lengthPreset)
         if settings.bars != bars { settings.bars = bars }
     }
+    private func handleSightSettingsChange(_ value: SightSettings) {
+        guard !controller.active else { return }
+        let normalized = value.normalized
+        settings = normalized
+        guard controller.exercise?.settings != normalized else { return }
+        let pattern = exerciseOrigin == "repertoire" ? selectedSourcePattern : nil
+        let template = exerciseOrigin == "template" ? selectedCustomTemplate : nil
+        controller.fresh(normalized, sourcePattern: pattern, sourceTemplate: template)
+    }
+    private func handleExerciseOriginChange(_ value: String) {
+        switch value {
+        case "repertoire":
+            var sourceSettings = settings
+            sourceSettings.articulationFocus = nil
+            sourceSettings = sourceSettings.normalized
+            settings = sourceSettings
+            if let pattern = selectedSourcePattern {
+                controller.fresh(sourceSettings, sourcePattern: pattern)
+                settings = controller.exercise?.settings ?? sourceSettings
+            }
+        case "generated":
+            controller.fresh(settings)
+        case "template":
+            guard let template = selectedCustomTemplate else { return }
+            settings.level = template.level
+            settings.meter = template.meter
+            settings.mixedMeters = false
+            settings = settings.normalized
+            controller.fresh(settings, sourceTemplate: template)
+        default:
+            break
+        }
+    }
+    private func handleSelectedMIDISourceChange() {
+        midi.stop()
+        if controller.midiCalibrating { cancelSightAttempt() }
+    }
+    private func handleAudioInterruption(_ notice: Notification) {
+        guard let type = notice.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return }
+        if type == AVAudioSession.InterruptionType.began.rawValue, controller.active || controller.referencing {
+            cancelSightAttempt()
+        }
+    }
+    private func handleAudioRouteChange(_ notice: Notification) {
+        guard let reason = notice.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt else { return }
+        if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue, controller.active || controller.referencing {
+            cancelSightAttempt()
+        }
+    }
+    private func handleRepertoirePatternChange() {
+        guard exerciseOrigin == "repertoire", let pattern = selectedSourcePattern else { return }
+        controller.fresh(settings, sourcePattern: pattern)
+        settings = controller.exercise?.settings ?? settings
+    }
+    private func handleTemplateSelectionChange() {
+        guard exerciseOrigin == "template", let template = selectedCustomTemplate else { return }
+        settings.level = template.level
+        settings.meter = template.meter
+        settings.mixedMeters = false
+        settings = settings.normalized
+        controller.fresh(settings, sourceTemplate: template)
+    }
+    private func configureSightAudio() {
+        controller.configureAudio(learner: sightLearnerLevel, target: sightTargetLevel, click: sightClickLevel)
+    }
+    private func configureSightClick() {
+        controller.configureClick(voice: clickVoice, groupedAccents: groupedClickAccents)
+    }
+    private func handleSightBarsChange(_ bars: Int?) {
+        guard let bars else { return }
+        rangeStart = min(rangeStart, max(0, bars - 1))
+        rangeEnd = min(max(rangeStart, rangeEnd), max(0, bars - 1))
+    }
+    private func handleScenePhaseChange(_ phase: ScenePhase) {
+        if phase != .active && (controller.active || controller.referencing) { cancelSightAttempt() }
+    }
+    private func handleInputSourceChange(_ value: String) {
+        if value != "audio-voices" && !controller.active { microphone.stop() }
+    }
     private var setup: some View {
         GroupBox("Exercise setup") {
             VStack(alignment: .leading) {
-                Picker("Exercise source", selection: $exerciseOrigin) { Text("Generated phrase").tag("generated"); if !repertoirePatterns.isEmpty { Text("Song library excerpt").tag("repertoire") } }
+                Picker("Exercise source", selection: $exerciseOrigin) { Text("Generated phrase").tag("generated"); if !repertoirePatterns.isEmpty { Text("Song library excerpt").tag("repertoire") }; if !customTemplates.isEmpty { Text("Saved custom template").tag("template") } }
                 if exerciseOrigin == "repertoire" {
                     if repertoirePatterns.isEmpty { Text("No supported song parts are available in this library.").font(.caption) }
                     else {
                         Picker("Repertoire excerpt", selection: $repertoirePatternID) { ForEach(repertoirePatterns) { Text($0.name).tag($0.id) } }
                         Text("A seeded, contiguous excerpt is cut from the selected song part. Its original notation remains unscored until you play it.").font(.caption)
                     }
+                }
+                if exerciseOrigin == "template" {
+                    if customTemplates.isEmpty { Text("Save a measure from a generated phrase to make a reusable template.").font(.caption) }
+                    else {
+                        Picker("Saved phrase", selection: $selectedTemplateID) { ForEach(customTemplates) { Text("\($0.name) · \($0.meter)").tag($0.id) } }
+                        Text("A saved one-measure phrase repeats across the selected exercise length.").font(.caption)
+                    }
+                }
+                GroupBox("Custom phrase templates") {
+                    TextField("Template name", text: $templateName).textFieldStyle(.roundedBorder)
+                    Button("Save the current first measure") { saveCurrentTemplate() }.disabled(controller.active || controller.exercise == nil)
+                    if !customTemplates.isEmpty { Text("\(customTemplates.count) saved templates · select one under Exercise source to reuse it.").font(.caption) }
+                    if !templateStatus.isEmpty { Text(templateStatus).font(.caption).accessibilityAddTraits(.updatesFrequently) }
                 }
                 Picker("Level", selection: $settings.level) { ForEach(LearnerLevel.allCases) { Text($0.rawValue).tag($0) } }
                 Stepper("Tempo: \(settings.bpm) quarter-note BPM", value: $settings.bpm, in: 40...200)
@@ -930,6 +1545,10 @@ struct SightReadingView: View {
                 if settings.level != .beginner { Toggle("Change meter between bars", isOn: $settings.mixedMeters) }
                 if settings.level == .beginner { Toggle("Snare only", isOn: $settings.snareOnly) }
                 if settings.level == .advanced && settings.meter != "7/8" && !settings.mixedMeters { Toggle("Triplets", isOn: $settings.triplets) }
+                if settings.level == .advanced {
+                    Toggle("Read ghost, normal, and accented dynamics with MIDI", isOn: Binding(get: { settings.dynamicsFocus }, set: { value in settings.dynamicsFocus = value; if value { source = "midi" } }))
+                    if settings.dynamicsFocus { Text("Calibrate soft and accented MIDI velocities per voice. Dynamic accuracy is reported separately from note and timing scores.").font(.caption) }
+                }
                 Picker("Rhythm focus", selection: $settings.focusRhythm) {
                     Text("Mixed").tag("mixed"); Text("Quarters").tag("quarters"); Text("Eighths").tag("eighths")
                     if settings.level != .beginner { Text("Sixteenths").tag("sixteenths") }
@@ -997,14 +1616,8 @@ struct SightReadingView: View {
                             .font(.caption).accessibilityIdentifier("sight-input-health")
                         Button("Connect selected MIDI device") {
                             guard !selectedMidiSourceID.isEmpty else { return }
-                            midi.connectSelectedSource(selectedMidiSourceID) { voice, at, _, sourceID, articulation in
-                                if let expected = midiReadinessRemaining.first {
-                                    if voice == expected {
-                                        midiReadinessVerified.append(voice); midiReadinessRemaining.removeFirst()
-                                        controller.message = midiReadinessRemaining.first.map { "\(voice.title) confirmed. Now strike \($0.title)." } ?? "All mapped drum voices responded. MIDI is ready for this device."
-                                    } else { controller.message = "Detected \(voice.title); strike the requested \(expected.title) pad next." }
-                                } else if controller.midiCalibrating { controller.recordMIDITimingHit(voice, at: at, sourceID: sourceID) }
-                                else { controller.hit(voice, source: "midi", at: at, midiArticulation: articulation, correctionMs: NativeMIDICalibration.correction(for: sourceID)) }
+                            midi.connectSelectedSource(selectedMidiSourceID) { voice, at, velocity, sourceID, articulation in
+                                receiveSightMIDIHit(voice, at: at, velocity: velocity, sourceID: sourceID, articulation: articulation)
                             }
                         }
                         ForEach(DrumVoice.allCases) { voice in
@@ -1012,7 +1625,18 @@ struct SightReadingView: View {
                                 Stepper("\(voice.title) MIDI note: \(midi.noteNumbers[voice] ?? 0)", value: Binding(get: { midi.noteNumbers[voice] ?? 0 }, set: { _ = midi.setNote($0, for: voice) }), in: 0...127)
                                 Button("Learn") { midi.learnNextNote(for: voice) }.disabled(midi.connectedSources.isEmpty)
                             }
+                            if settings.dynamicsFocus {
+                                HStack {
+                                    Text("\(voice.title) dynamics: \(NativeMIDIVelocityCalibration.range(for: selectedMidiSourceID, voice: voice) == nil ? "needs calibration" : "calibrated")").font(.caption)
+                                    Spacer()
+                                    Button(velocityCalibrationVoice == voice && velocityCalibrationStage != nil ? "Cancel" : "Calibrate") {
+                                        if velocityCalibrationVoice == voice && velocityCalibrationStage != nil { velocityCalibrationStage = nil; velocityCalibrationSamples = []; velocityCalibrationSoftMedian = nil }
+                                        else { velocityCalibrationVoice = voice; velocityCalibrationStage = "soft"; velocityCalibrationSamples = []; velocityCalibrationSoftMedian = nil; velocityCalibrationStatus = "Strike five soft \(voice.title) hits." }
+                                    }.disabled(!midi.connectedSources.contains(selectedMidiSourceID) || controller.active)
+                                }
+                            }
                         }
+                        if settings.dynamicsFocus { Text(velocityCalibrationStatus.isEmpty ? "Calibrate five soft hits, then five accented hits for each voice. Your device-specific velocity range maps those to ghost, normal, and accented strokes." : velocityCalibrationStatus).font(.caption).accessibilityAddTraits(.updatesFrequently) }
                         Button("Restore default pad mapping") { midi.restoreDefaultNotes() }
                         if let articulation = settings.articulationFocus {
                             let note = midi.articulationNotes[articulation] ?? -1
@@ -1369,6 +1993,10 @@ struct SightStaff: View {
                             if hit.instrument == .hihat || hit.instrument == .crash {
                                 var cross = Path(); cross.move(to: CGPoint(x: x - 4, y: y - 4)); cross.addLine(to: CGPoint(x: x + 4, y: y + 4)); cross.move(to: CGPoint(x: x - 4, y: y + 4)); cross.addLine(to: CGPoint(x: x + 4, y: y - 4)); context.stroke(cross, with: .color(.primary), lineWidth: 1.7)
                             } else { context.fill(Path(ellipseIn: CGRect(x: x - 5, y: y - 3, width: 10, height: 6)), with: .color(.primary)) }
+                            if hit.ghost == true {
+                                context.draw(Text("(").font(.system(size: 10 * scale, weight: .bold)), at: CGPoint(x: x - 9 * scale, y: y))
+                                context.draw(Text(")").font(.system(size: 10 * scale, weight: .bold)), at: CGPoint(x: x + 9 * scale, y: y))
+                            }
                             if hit.accent { context.draw(Text(">").font(.caption), at: CGPoint(x: x, y: top - 48 * scale)) }
                             if let articulation = hit.midiArticulationTarget {
                                 let mark: String = ["closed-hat": "CH", "open-hat": "OH", "pedal-hat": "PH", "foot-splash": "FS", "ride": "RY", "crash": "CR", "rimshot": "RS", "side-stick": "SS"][articulation] ?? ""

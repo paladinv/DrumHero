@@ -28,6 +28,8 @@ For each form, score musical clarity, transition quality, tempo suitability, and
 
 Also check count-in and loop behavior, audible transitions, whether section labels match the drumming, and whether a learner can edit or recover from a mistake without losing work. Imported backing tracks are user-supplied; assess only the original synthesized forms unless the reviewer has permission to review the supplied audio.
 
+For imported-stem package review, confirm that export is blocked until each stem has a source or attribution and a license or permission note. Check that those notes travel with the package and remain editable after import. A completed metadata gate does not establish that the claimed license is valid; a reviewer must check the source terms before accepting a set as rights-cleared.
+
 ## Learning guidance
 
 - Does each suggested exercise match the stated skill and difficulty?

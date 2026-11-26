@@ -1,9 +1,10 @@
 "use client";
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { CHALLENGE_LABELS, adaptDrummerSettings, challengeInstruction, improvisationSoundInstrument, suggestImprovisationPractice, virtualDrummerResponse, sessionPhraseCount } from '@/lib/improvisation';
 import { ImprovisationAssignments } from './ImprovisationAssignments';
-import { ImprovisationCloudAssignments } from './ImprovisationCloudAssignments';
+import { ImprovisationCloudAssignments, type CloudFeedback } from './ImprovisationCloudAssignments';
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { createDrumAudio, type DrumAudio } from '@/lib/audio';
 import { createPracticeBass, type PracticeBass } from '@/lib/practice-accompaniment';
@@ -23,9 +24,11 @@ import { ImprovisationPhrasePreview } from './ImprovisationPhrasePreview';
 import { createImprovisationResponsePack } from '@/lib/improvisation-response-pack';
 import { ImprovisationChallengeBuilder } from './ImprovisationChallengeBuilder';
 import { ImprovisationBackingTrack } from './ImprovisationBackingTrack';
-import { ImprovisationRemoteDuet, type RemoteDuetHandle } from './ImprovisationRemoteDuet';
+import { ImprovisationRemoteDuet, type RemoteDuetHandle, type RemotePlayer } from './ImprovisationRemoteDuet';
 import { ImprovisationKitEditor } from './ImprovisationKitEditor';
 import { ImprovisationVocabulary } from './ImprovisationVocabulary';
+import { ImprovisationMotifNotebook } from './ImprovisationMotifNotebook';
+import { createImprovisationSongProject, IMPROVISATION_SONG_TRANSFER_KEY } from '@/lib/improvisation-song-builder';
 
 
 const pads: Array<{ instrument: Instrument; label: string; code: string; key: string }> = [
@@ -43,6 +46,7 @@ export function ImprovisationStudio() {
 
 function ImprovisationSession({ profileId }: { profileId: string }) {
   const { t, formatNumber, locale } = useLocalization();
+  const router = useRouter();
   const [settings, setSettings] = useState<ImprovisationSettings>(DEFAULT_IMPROVISATION_SETTINGS);
   const [focused, setFocused] = useState(false), [checking, setChecking] = useState(false), [checkLoading, setCheckLoading] = useState(false);
   const [checkHit, setCheckHit] = useState<{ instrument: Instrument; velocity?: number; latency: number; articulation?: MidiArticulation } | null>(null);
@@ -51,13 +55,15 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
   const [assignment, setAssignment] = useState<{ id: string; stepId: string } | null>(null);
   const roundAssignment = useRef<{ id: string; stepId: string } | null>(null);
   const [input, setInput] = useState<ImprovisationInput>('keyboard');
-  const [remotePlayer, setRemotePlayer] = useState<1 | 2 | null>(null);
+  const [remotePlayer, setRemotePlayer] = useState<RemotePlayer | null>(null);
   const remoteDuet = useRef<RemoteDuetHandle>(null), remotePrepared = useRef(false), remoteStartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [position, setPosition] = useState(idlePosition);
   const [message, setMessage] = useState('');
   const [devices, setDevices] = useState<Array<{ id: string; name: string }>>([]);
+  const [midiOutputs, setMidiOutputs] = useState<Array<{ id: string; name: string }>>([]), [midiClockOutputId, setMidiClockOutputId] = useState(''), [midiClockEnabled, setMidiClockEnabled] = useState(false), [showTimingOverlay, setShowTimingOverlay] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState(''), [selectedDuetDevice, setSelectedDuetDevice] = useState('');
   const [history, setHistory] = useState<ImprovisationSummary[]>([]);
+  const [teacherFeedback, setTeacherFeedback] = useState<CloudFeedback[]>([]);
   const [result, setResult] = useState<ImprovisationSummary | null>(null);
   const [hitCount, setHitCount] = useState(0);
   const [liveHits, setLiveHits] = useState<ImprovisationHit[]>([]);
@@ -79,6 +85,8 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
   const audio = useRef<DrumAudio | null>(null), bass = useRef<PracticeBass | null>(null);
   const scheduled = useRef(new Set<string>());
   const midi = useRef<MIDIAccess | null>(null);
+  const midiClockTimer = useRef<number | null>(null), midiClockOutputIdRef = useRef(''), midiClockEnabledRef = useRef(false);
+  useEffect(() => { midiClockOutputIdRef.current = midiClockOutputId; midiClockEnabledRef.current = midiClockEnabled; }, [midiClockOutputId, midiClockEnabled]);
   const midiGeneration = useRef(0), generation = useRef(0);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const historyRef = useRef<ImprovisationSummary[]>([]);
@@ -89,8 +97,38 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
 
   useEffect(() => { if (!focused) return; const exit = (event: KeyboardEvent) => { if (event.key === 'Escape') setFocused(false); }; window.addEventListener('keydown', exit); return () => window.removeEventListener('keydown', exit); }, [focused]);
 
+  const stopMidiClock = useCallback(() => {
+    if (midiClockTimer.current !== null) window.clearTimeout(midiClockTimer.current);
+    midiClockTimer.current = null;
+    if (!midiClockEnabledRef.current || !midiClockOutputIdRef.current) return;
+    try { midi.current?.outputs.get(midiClockOutputIdRef.current)?.send([0xfc]); } catch { /* The selected output may have disconnected. */ }
+  }, []);
+  const startMidiClock = useCallback((bpm: number, startAt: number, continuePlayback = false) => {
+    stopMidiClock();
+    if (!midiClockEnabledRef.current || !midiClockOutputIdRef.current) return;
+    const output = midi.current?.outputs.get(midiClockOutputIdRef.current);
+    if (!output || output.state === 'disconnected') { setMessage(t('Choose a connected MIDI output to send clock.')); return; }
+    try { output.send([continuePlayback ? 0xfb : 0xfa], startAt); }
+    catch { setMessage(t('The selected MIDI clock output could not start.')); return; }
+    let nextPulseAt = startAt + 60_000 / Math.max(40, bpm) / 24;
+    const schedule = () => {
+      const activeOutput = midi.current?.outputs.get(midiClockOutputIdRef.current);
+      if (!activeOutput || activeOutput.state === 'disconnected') { stopMidiClock(); setMessage(t('The MIDI clock output disconnected.')); return; }
+      const horizon = performance.now() + 90;
+      try {
+        while (nextPulseAt < horizon) {
+          activeOutput.send([0xf8], nextPulseAt);
+          const current = transport.current?.position(nextPulseAt);
+          const phraseSettings = current ? improvisationPhraseSettings(transport.current!.settings, current.phrase) : null;
+          nextPulseAt += 60_000 / Math.max(40, phraseSettings?.bpm ?? bpm) / 24;
+        }
+      } catch { stopMidiClock(); setMessage(t('MIDI clock sending stopped because the output is unavailable.')); return; }
+      midiClockTimer.current = window.setTimeout(schedule, 20);
+    };
+    midiClockTimer.current = window.setTimeout(schedule, 0);
+  }, [stopMidiClock, t]);
   const silence = useCallback(() => { if (typeof window !== 'undefined') window.speechSynthesis?.cancel(); spoken.current = ''; audio.current?.silence(); bass.current?.silence(); scheduled.current.clear(); }, []);
-  const closeAudio = useCallback(() => { silence(); audio.current?.close(); audio.current = null; void bass.current?.close(); bass.current = null; }, [silence]);
+  const closeAudio = useCallback(() => { stopMidiClock(); silence(); audio.current?.close(); audio.current = null; void bass.current?.close(); bass.current = null; }, [silence, stopMidiClock]);
   const cancelCalibration = useCallback((notice?: string) => {
     if (calibrationTimer.current) clearTimeout(calibrationTimer.current);
     calibrationTimer.current = null; calibrationRun.current = null; setCalibration(null); closeAudio();
@@ -143,10 +181,11 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
     }
   }, [profileId, t]);
   const disconnectMidi = useCallback(() => {
+    stopMidiClock();
     midiGeneration.current++;
     if (midi.current) { midi.current.onstatechange = null; midi.current.inputs.forEach(device => { device.onmidimessage = null; }); }
     midi.current = null;
-  }, []);
+  }, [stopMidiClock]);
   const persist = useCallback((next: ImprovisationSummary[]) => {
     historyRef.current = next; setHistory(next);
     try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, sessions: next })); }
@@ -175,8 +214,8 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
     const clock = transport.current;
     if (!clock) return;
     if (broadcast && remotePlayer) remoteDuet.current?.sendControl('pause');
-    const now = performance.now(); clock.pause(now); silence(); setPosition(clock.position(now));
-  }, [silence, remotePlayer]);
+    const now = performance.now(); clock.pause(now); stopMidiClock(); silence(); setPosition(clock.position(now));
+  }, [silence, remotePlayer, stopMidiClock]);
   const pauseCurrent = useEffectEvent(pause);
   const prepareRemoteAudio = async () => {
     try {
@@ -216,9 +255,9 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
       profile = getTrainerDeviceProfile(saved, source === 'midi' ? `midi:${deviceId}` : source); latency = profile.latencyMs; map = source === 'midi' ? JSON.stringify([profile.midiMap, profile.midiArticulations, profile.midiVelocityRanges]) : '';
     } catch { /* Unavailable storage uses an uncorrected timestamp. */ }
     if (source === 'midi') {
-      const duet = clock?.settings.mode === 'duet' || (!clock && settings.mode === 'duet');
+      const sharedMode = clock?.settings.mode === 'duet' || clock?.settings.mode === 'ensemble' || (!clock && (settings.mode === 'duet' || settings.mode === 'ensemble'));
       const activePlayer = clock?.position(timestamp - latency).activePlayer;
-      const ownsDevice = checking && duet ? [selectedDevice, selectedDuetDevice].includes(deviceId ?? '') : remotePlayer && duet ? activePlayer === remotePlayer && deviceId === selectedDevice : deviceId === (duet && activePlayer === 2 ? selectedDuetDevice : selectedDevice);
+      const ownsDevice = checking && sharedMode ? [selectedDevice, selectedDuetDevice].includes(deviceId ?? '') : remotePlayer !== null && sharedMode ? activePlayer === remotePlayer && deviceId === selectedDevice : deviceId === (sharedMode && activePlayer === 2 ? selectedDuetDevice : selectedDevice);
       if (!ownsDevice) return;
     }
     const calibrating = calibrationRun.current;
@@ -263,7 +302,7 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
     if (checking) { setCheckHit({ instrument, velocity, latency, articulation }); audio.current?.hit(improvisationSoundInstrument({ instrument, articulation }), false, velocity); return; }
     if (!clock) return;
     const player = clock.position(timestamp - latency).activePlayer;
-    if (remotePlayer && clock.settings.mode === 'duet' && player !== remotePlayer) return;
+    if (remotePlayer !== null && (clock.settings.mode === 'duet' || clock.settings.mode === 'ensemble') && player !== remotePlayer) return;
     if (clock.settings.mode === 'ensemble' && player !== null) {
       const role = clock.settings.ensemblePlayers[player - 1]?.role;
       if (role === 'listen' || (role && role !== 'open' && role !== instrument)) return;
@@ -275,7 +314,7 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
     inputContexts.current.add(contextFingerprint(source, deviceId ?? '', latency, map));
     const recorded = articulation ? { ...captured, articulation } : captured;
     hits.current.push(recorded); setHitCount(hits.current.length); setLiveHits(previous => [...previous, recorded].slice(-384));
-    if (remotePlayer && player === remotePlayer) remoteDuet.current?.sendHit({ ...recorded, player: remotePlayer });
+    if (remotePlayer !== null && player === remotePlayer) remoteDuet.current?.sendHit({ ...recorded, player: remotePlayer });
     audio.current?.hit(improvisationSoundInstrument(recorded), false, hitVelocity);
   }, [input, selectedDevice, selectedDuetDevice, profileId, silence, t, checking, settings.mode, settings.bpm, remotePlayer, completeCalibration, completeMidiDynamicsCalibration]);
   const receiveHitRef = useRef(receiveHit);
@@ -295,7 +334,7 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
   useEffect(() => { warnUnmapped.current = (id, note) => { if (input === 'midi' && (id === selectedDevice || (settings.mode === 'duet' && id === selectedDuetDevice))) setMessage(t('MIDI note {note} has no saved mapping. Map it in Trainer before practicing.', { note })); }; }, [input, selectedDevice, selectedDuetDevice, settings.mode, t]);
 
   const connectMidi = async () => {
-    if (!navigator.requestMIDIAccess) { setMessage(t('Web MIDI is unavailable. Choose keyboard, touch, or unscored practice.')); return; }
+    if (!navigator.requestMIDIAccess) { setMessage(t('Web MIDI is unavailable. Choose keyboard, touch, or unscored practice; external MIDI clock is unavailable.')); return; }
     disconnectMidi(); const token = midiGeneration.current;
     try {
       const access = await navigator.requestMIDIAccess({ sysex: false });
@@ -303,7 +342,10 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
       midi.current = access;
       const bind = (initial = false) => {
         const connected = [...access.inputs.values()].filter(device => device.state === 'connected');
+        const outputs = [...access.outputs.values()].filter(device => device.state === 'connected');
         setDevices(connected.map(device => ({ id: device.id, name: device.name || t('MIDI input') })));
+        setMidiOutputs(outputs.map(device => ({ id: device.id, name: device.name || t('MIDI output') })));
+        setMidiClockOutputId(current => outputs.some(device => device.id === current) ? current : initial ? outputs[0]?.id ?? '' : '');
         setSelectedDevice(current => connected.some(device => device.id === current) ? current : initial ? connected[0]?.id ?? '' : '');
         setSelectedDuetDevice(current => connected.some(device => device.id === current) ? current : initial ? connected[1]?.id ?? connected[0]?.id ?? '' : '');
         access.inputs.forEach(device => {
@@ -321,6 +363,7 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
       access.onstatechange = event => {
         const port = event.port;
         if (port?.type === 'input' && port.state === 'disconnected') midiDisconnectedRef.current(port.id);
+        if (port?.type === 'output' && port.state === 'disconnected' && port.id === midiClockOutputIdRef.current) { stopMidiClock(); setMidiClockOutputId(''); setMessage(t('The MIDI clock output disconnected.')); }
         bind();
       };
       setMessage(t('MIDI connected. Saved Trainer mappings and timing corrections are used.'));
@@ -352,7 +395,7 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
     const reject = (notice: string) => { setMessage(notice); if (localStartAtEpoch !== undefined) remoteDuet.current?.sendControl('stop'); };
     if (calibrationRun.current || calibration?.active) { reject(t('Finish or stop input calibration before starting.')); return; }
     const requested = normalizeImprovisationSettings(override ?? settings);
-    if (input === 'midi' && [selectedDevice, ...(requested.mode === 'duet' && !remotePlayer ? [selectedDuetDevice] : [])].some(id => !devices.some(device => device.id === id))) { reject(t('Connect and select MIDI inputs for each active player before starting.')); return; }
+    if (input === 'midi' && [selectedDevice, ...(requested.mode === 'duet' && remotePlayer === null ? [selectedDuetDevice] : [])].some(id => !devices.some(device => device.id === id))) { reject(t('Connect and select MIDI inputs for each active player before starting.')); return; }
     if (requested.challenge !== 'none' && requested.mode !== 'trading') { reject(t('Call-and-response challenges use trading mode. Choose trading or open improvisation.')); return; }
     if (requested.challenge !== 'none' && requested.prompt !== 'free') { reject(t('Choose Free exploration for a call-and-response challenge so its targets stay consistent.')); return; }
     if (requested.challenge !== 'none' && requested.exchangePlan.some(exchange => exchange.prompt && exchange.prompt !== 'free')) { reject(t('Use Free exploration for every exchange in a call-and-response challenge.')); return; }
@@ -392,7 +435,8 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
       if (!ready) throw new Error('Samples unavailable');
       const launch = () => {
         if (token !== generation.current) return;
-        const clock = new ImprovisationTransport(config); clock.start(performance.now() + 50); transport.current = clock;
+        const clock = new ImprovisationTransport(config), scheduledStart = performance.now() + 50; clock.start(scheduledStart); transport.current = clock;
+        startMidiClock(config.bpm, scheduledStart);
         setPosition(clock.position(performance.now())); remotePrepared.current = false;
       };
       const delay = localStartAtEpoch === undefined ? 0 : Math.max(0, localStartAtEpoch - Date.now());
@@ -404,9 +448,9 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
     }
   };
   const resume = (localStartAtEpoch?: number, broadcast = true) => {
-    if (input === 'midi' && [selectedDevice, ...(settings.mode === 'duet' && !remotePlayer ? [selectedDuetDevice] : [])].some(id => !devices.some(device => device.id === id))) { setMessage(t('Reconnect MIDI or choose another input before resuming.')); return; }
+    if (input === 'midi' && [selectedDevice, ...(settings.mode === 'duet' && remotePlayer === null ? [selectedDuetDevice] : [])].some(id => !devices.some(device => device.id === id))) { setMessage(t('Reconnect MIDI or choose another input before resuming.')); return; }
     if (broadcast && remotePlayer && localStartAtEpoch === undefined) { remoteDuet.current?.sendResume(); localStartAtEpoch = Date.now() + 1500; }
-    silence(); audio.current?.setClickLevel(settings.clickLevel); const now = localStartAtEpoch === undefined ? performance.now() + 50 : performance.now() + 50 + Math.max(0, localStartAtEpoch - Date.now()); transport.current?.resume(now); setPosition(transport.current?.position(performance.now()) ?? idlePosition); setMessage('');
+    silence(); audio.current?.setClickLevel(settings.clickLevel); const now = localStartAtEpoch === undefined ? performance.now() + 50 : performance.now() + 50 + Math.max(0, localStartAtEpoch - Date.now()); transport.current?.resume(now); startMidiClock(settings.bpm, now, true); setPosition(transport.current?.position(performance.now()) ?? idlePosition); setMessage('');
   };
   const finish = useCallback(() => {
     const clock = transport.current; if (!clock) return;
@@ -575,9 +619,9 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
       setMessage(t('Strike {voice} softly · MIDI note {note}.', { voice: t(first.instrument), note: first.note }));
     } catch { setMessage(t('Could not read the selected kit mapping. Open Trainer and save the MIDI map again.')); }
   };
-  const receivePeerHit = (hit: { instrument: Instrument; atMs: number; player: 1 | 2; velocity?: number; articulation?: MidiArticulation }, roomId: string) => {
+    const receivePeerHit = (hit: { instrument: Instrument; atMs: number; player: RemotePlayer; velocity?: number; articulation?: MidiArticulation }, roomId: string) => {
     const clock = transport.current;
-    if (!clock || !remotePlayer || hit.player === remotePlayer || hits.current.length >= 100000) return false;
+    if (!clock || remotePlayer === null || hit.player === remotePlayer || hits.current.length >= 100000) return false;
     const elapsed = clock.position(performance.now()).elapsedMs;
     if (hit.atMs < elapsed - 2500 || hit.atMs > elapsed + 2500) return false;
     const expected = improvisationPosition({ ...clock.settings, openEnded: true }, hit.atMs);
@@ -676,11 +720,19 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
           if (next === 'unscored') { unscoredUsed.current = true; hits.current = []; setLiveHits([]); setHitCount(0); setMessage(t('This session will be saved as unscored practice.')); }
           setInput(next);
         }}><option value="keyboard">{t('Keyboard')}</option><option value="touch">{t('Touch pads')}</option><option value="midi">{t('MIDI kit')}</option><option value="unscored">{t('Acoustic / unscored')}</option></select></label>
-        {input === 'midi' && <><button className="button-secondary" type="button" onClick={() => void connectMidi()} disabled={remoteInputLocked || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active) || (active && position.phase !== 'paused')}>{t('Connect MIDI')}</button><label>{settings.mode === 'duet' && remotePlayer === null ? t('Player 1 MIDI input') : t('MIDI input')}<select value={selectedDevice} disabled={remoteInputLocked || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active) || (active && position.phase !== 'paused')} onChange={event => setSelectedDevice(event.target.value)}><option value="">{t('Choose a MIDI input')}</option>{devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label>{settings.mode === 'duet' && remotePlayer === null && <label>{t('Player 2 MIDI input')}<select value={selectedDuetDevice} disabled={Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active) || (active && position.phase !== 'paused')} onChange={event => setSelectedDuetDevice(event.target.value)}><option value="">{t('Choose a MIDI input')}</option>{devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label>}</>}
+        {input === 'midi' && <><button className="button-secondary" type="button" onClick={() => void connectMidi()} disabled={remoteInputLocked || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active) || (active && position.phase !== 'paused')}>{t('Connect MIDI')}</button><label>{settings.mode === 'duet' && remotePlayer === null ? t('Player 1 MIDI input') : t('MIDI input')}<select value={selectedDevice} disabled={remoteInputLocked || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active) || (active && position.phase !== 'paused')} onChange={event => setSelectedDevice(event.target.value)}><option value="">{t('Choose a MIDI input')}</option>{devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label>{settings.mode === 'duet' && remotePlayer === null && <label>{t('Player 2 MIDI input')}<select value={selectedDuetDevice} disabled={Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active) || (active && position.phase !== 'paused')} onChange={event => setSelectedDuetDevice(event.target.value)}><option value="">{t('Choose a MIDI input')}</option>{devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label>}
+        </>}
       </div>
+      <fieldset className={styles.settings}>
+        <legend>{t('External MIDI clock')}</legend>
+        {input !== 'midi' && <button className="button-secondary" type="button" onClick={() => void connectMidi()} disabled={active || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active)}>{t('Connect MIDI for clock output')}</button>}
+        <label>{t('MIDI clock output')}<select value={midiClockOutputId} disabled={active || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active)} onChange={event => setMidiClockOutputId(event.target.value)}><option value="">{t('Choose a MIDI output')}</option>{midiOutputs.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
+        <label className={styles.check}><input type="checkbox" checked={midiClockEnabled} disabled={!midiClockOutputId || active} onChange={event => setMidiClockEnabled(event.target.checked)} />{t('Send MIDI clock to external gear')}</label>
+        <small>{t('Clock sends MIDI Start or Continue, 24 pulses per quarter note, and Stop. It follows planned phrase tempo changes; connect your external gear before starting.')}</small>
+      </fieldset>
       <p className={styles.note}>{t('{meter} · one-bar count-in. Choose your entry and develop your own musical idea. Shuffle, blues, and jazz use triplet timing targets.', { meter: settings.meter })}</p>
       {input === 'unscored' ? <p>{t('Play your acoustic kit along with the session. No microphone is used and no automated feedback is saved.')}</p> : <p>{t('Saved Trainer note maps and input timing corrections apply.')} <Link href="/trainer?setup=1">{t('Calibrate input in Trainer')}</Link></p>}
-      {settings.mode === 'duet' && <ImprovisationRemoteDuet ref={remoteDuet} settings={settings} disabled={active || checkLoading || checking || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active)} onRoleChange={player => { setRemotePlayer(player); if (player === null) { const wasPrepared = remotePrepared.current; remotePrepared.current = false; if (wasPrepared) closeAudio(); } }} onPrepare={prepareRemoteAudio} onStart={(next, at) => void start(next, at)} onPeerHit={receivePeerHit} onControl={(control, at) => { if (control === 'pause') pause(false); else if (control === 'stop') stop(false); else resume(at, false); }} />}
+      {(settings.mode === 'duet' || settings.mode === 'ensemble') && <ImprovisationRemoteDuet ref={remoteDuet} settings={settings} disabled={active || checkLoading || checking || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active)} onRoleChange={player => { setRemotePlayer(player); if (player === null) { const wasPrepared = remotePrepared.current; remotePrepared.current = false; if (wasPrepared) closeAudio(); } }} onPrepare={prepareRemoteAudio} onStart={(next, at) => void start(next, at)} onPeerHit={receivePeerHit} onControl={(control, at) => { if (control === 'pause') pause(false); else if (control === 'stop') stop(false); else resume(at, false); }} />}
       <ImprovisationBackingTrack phase={position.phase} elapsedMs={position.elapsedMs} sessionBpm={improvisationPhraseSettings(settings, position.phrase).bpm} disabled={active || checkLoading || checking} />
       <details className={styles.preflight}><summary>{t('Pre-session sound and input check')}</summary>
       <p>{t('Use headphones or speakers at a comfortable level. Test every drum and calibrate input timing. MIDI kits can also save a soft-to-hard velocity range for each mapped pad.')}</p>
@@ -712,18 +764,24 @@ function ImprovisationSession({ profileId }: { profileId: string }) {
       {settings.challenge === 'none' && <p>{t(settings.response === 'copy' ? 'Listen for the idea and echo it in your response.' : settings.response === 'contrast' ? 'Answer with a contrasting rhythm, register, or density.' : 'Keep an idea from the drummer and change one part of it.')}</p>}
       <p aria-live="polite">{running && position.warning ? nextLabel : ''}</p>
       <p>{t('Captured player hits: {count}', { count: formatNumber(hitCount) })}</p>
-      <ImprovisationNotation settings={settings} drummerSettings={adaptation.settings} position={position} hits={liveHits} completedTake={reviewTake} />
+      <label className={styles.timingToggle}><input type="checkbox" checked={showTimingOverlay} disabled={input === 'unscored'} onChange={event => setShowTimingOverlay(event.target.checked)} />{t('Show live timing on the score')}</label>
+      {showTimingOverlay && <p className={styles.reviewLegend}>{t('Colored notes and signed offsets show distance from the nearest timing position. The overlay is descriptive and does not score creative choices.')}</p>}
+      <ImprovisationNotation settings={settings} drummerSettings={adaptation.settings} position={position} hits={liveHits} completedTake={reviewTake} showTimingOverlay={showTimingOverlay} teacherAnnotations={teacherFeedback.filter(comment => reviewTake && comment.session_played_at === reviewTake.createdAt && (comment.phrase_index === null || comment.phrase_index === position.phrase + 1)).map(comment => ({ bar_index: comment.bar_index, beat_index: comment.beat_index, subdivision_index: comment.subdivision_index, voice: comment.voice, body: comment.body }))} />
       {settings.adaptiveDrummer && settings.mode === 'trading' && <p>{position.phase === 'partner' && position.phrase >= 2 ? t(adaptationLabel) : t('The virtual drummer uses your last two scored turns to shape a later phrase.')}</p>}
       <div className={styles.pads} role="group" aria-label={t('Drum pads')}>{pads.map(pad => <button data-improvisation-pad type="button" key={pad.instrument} disabled={(!checking && !calibration?.active && (position.phase !== 'player' || remotePlayer !== null && position.activePlayer !== remotePlayer || settings.mode === 'ensemble' && (activeEnsemble?.role === 'listen' || activeEnsemble?.role !== undefined && activeEnsemble.role !== 'open' && activeEnsemble.role !== pad.instrument))) || (input !== 'keyboard' && input !== 'touch')} onPointerDown={event => { if (input !== 'touch' || event.button !== 0) return; event.preventDefault(); receiveHit(pad.instrument, 'touch'); }} onClick={event => { if (input === 'keyboard' || event.detail === 0) receiveHit(pad.instrument, input === 'touch' ? 'touch' : 'keyboard'); }}><span>{t(pad.label)}</span><kbd>{pad.key}</kbd></button>)}</div>
     </section>
     {result && <ImprovisationRecap result={result} headingRef={resultHeading} disabled={active} canExportPack={Boolean(reviewTake?.hits.length && result.input !== 'unscored')} onExportPack={exportResponsePack} onUpdate={updateResult} onRepeat={(phrase, slower) => { setPathStep(null); void start(repeatPhraseSettings(result.settings, phrase, slower)); }} />}
-    {reviewTake && <ImprovisationReplay key={reviewTake.id} take={reviewTake} disabled={active || checkLoading || checking} saved={takes.some(take => take.id === reviewTake.id)} onSave={name => {
+    {reviewTake && <ImprovisationReplay key={reviewTake.id} take={reviewTake} disabled={active || checkLoading || checking} saved={takes.some(take => take.id === reviewTake.id)} teacherAnnotations={teacherFeedback.filter(comment => comment.session_played_at === reviewTake.createdAt).map(comment => ({ phrase_index: comment.phrase_index, bar_index: comment.bar_index, beat_index: comment.beat_index, subdivision_index: comment.subdivision_index, voice: comment.voice, body: comment.body }))} onSendToSongBuilder={take => {
+      try { sessionStorage.setItem(IMPROVISATION_SONG_TRANSFER_KEY, JSON.stringify(createImprovisationSongProject(take))); router.push('/song-builder?fromImprovisation=1'); }
+      catch (error) { setMessage(error instanceof Error ? error.message : t('Could not prepare this take for Song Builder.')); }
+    }} onSave={name => {
       if (takes.length >= 12 || takes.reduce((total, take) => total + take.hits.length, 0) + reviewTake.hits.length > 50000) { setMessage(t('Delete a saved take before saving more drum events.')); return; }
       persistTakes([...takes, { id: reviewTake.id, name, createdAt: reviewTake.createdAt, settings: reviewTake.settings, phrases: reviewTake.phrases, hits: reviewTake.hits, ...(reviewTake.drummerSettings ? { drummerSettings: reviewTake.drummerSettings } : {}) }]);
     }} />}
     <ImprovisationAssignments workspace={workspace} settings={settings} history={history} disabled={active || checkLoading || checking || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active)} activeAssignment={assignment} onSave={persistWorkspace} onLoad={(next, selected) => { loadSetup(next); setAssignment(selected); setMessage(t('Playlist step loaded. Start when ready; changing its setup removes completion credit.')); }} />
-    <ImprovisationCloudAssignments workspace={workspace} history={history} disabled={active || checkLoading || checking || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active)} onSave={persistWorkspace} />
+    <ImprovisationCloudAssignments workspace={workspace} history={history} disabled={active || checkLoading || checking || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active)} onSave={persistWorkspace} onFeedbackLoaded={setTeacherFeedback} />
     <ImprovisationLibrary history={history} takes={takes} workspace={workspace} settings={settings} disabled={active || Boolean(calibration?.active) || Boolean(midiDynamicsCalibration?.active)} onWorkspace={persistWorkspace} onLoad={loadSetup} onReview={take => { setReviewTake(take); requestAnimationFrame(() => document.querySelector<HTMLElement>('#improvisation-replay h2')?.focus()); }} onDeleteTake={id => { persistTakes(takes.filter(take => take.id !== id)); if (reviewTake?.id === id) setReviewTake(null); }} onUpdate={updateResult} onDeleteSession={id => { persist(historyRef.current.filter(entry => entry.id !== id)); if (result?.id === id) setResult(null); if (reviewTake?.id === id && !takes.some(take => take.id === id)) setReviewTake(null); }} />
+    <ImprovisationMotifNotebook profileId={profileId} takes={takes} currentTake={reviewTake} />
   </div>;
 }
 

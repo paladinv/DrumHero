@@ -189,7 +189,7 @@ Section reviews, tempo ramps, readiness estimates, arrangement snapshots, checkl
 - In selected-song shares, reply to anchored arrangement comments; owners and editors can resolve or reopen threads after applying the comment-thread migration.
 - **UC-S29 — Operate the score accessibly:** Navigate measures, fit a single measure to a narrow screen, and edit measure, beat, drum voice, and edit action with labeled controls usable by keyboard and screen readers.
 - **UC-S30 — Seek from score to recording:** For a nearby local take whose saved drum-part fingerprint matches the reviewed attempt, choose a score hit to seek to its approximate time and replay at a slower speed.
-- **UC-S31 — Compare MusicXML visually:** Inspect parsed source hit timing beside the mapped drum staff one measure at a time before importing.
+- **UC-S31 — Compare MusicXML visually:** Inspect parsed source hit timing beside the mapped drum staff across one to eight contiguous measures in a shared meter and tempo before importing.
 - **UC-S32 — Refresh a score and retain practice:** Import an updated MusicXML file into an existing song, review changed measures and voices, then keep local notes, song identity, and prior practice records.
 - **UC-S33 — Review practice across arrangement versions:** Compare attempts from different saved part revisions when input and tempo are similar, with timing and calibrated dynamics shown as separate evidence.
 - **UC-S34 — Assign a shared review:** Route a snapshot-specific review request to a collaborator, add a due date, and filter the pending inbox to assigned or overdue requests.

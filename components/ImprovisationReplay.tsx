@@ -10,8 +10,9 @@ import { useLocalization } from './LocalizationProvider';
 import styles from './ImprovisationStudio.module.css';
 
 type Material = ImprovisationTake & { demo?: boolean };
+type ReplayTeacherAnnotation = { phrase_index: number | null; bar_index: number | null; beat_index: number | null; subdivision_index: number | null; voice: string | null; body: string };
 function monotonicNow() { return performance.now(); }
-export function ImprovisationReplay({ take, disabled, onSave, saved }: { take: Material; disabled: boolean; saved: boolean; onSave: (name: string) => void }) {
+export function ImprovisationReplay({ take, disabled, onSave, onSendToSongBuilder, teacherAnnotations = [], saved }: { take: Material; disabled: boolean; saved: boolean; onSave: (name: string) => void; onSendToSongBuilder?: (take: ImprovisationTake) => void; teacherAnnotations?: ReplayTeacherAnnotation[] }) {
   const { t } = useLocalization();
   const [phrase, setPhrase] = useState(0), [bar, setBar] = useState(0), [speed, setSpeed] = useState(1), [loopBar, setLoopBar] = useState(false), [name, setName] = useState(take.name);
   const [playing, setPlaying] = useState(false), [status, setStatus] = useState('');
@@ -45,14 +46,20 @@ export function ImprovisationReplay({ take, disabled, onSave, saved }: { take: M
   const { stepsPerBar, stepsPerPulse } = meterParts(phraseSettings);
   const totalSteps = phraseSettings.bars * stepsPerBar;
   const grid = improvisationScoreGrid(phraseSettings);
-  const frameFor = (label: string, notes: typeof referenceHits | typeof response, played: boolean, activeSegment: number) => {
+  const frameFor = (label: string, notes: typeof referenceHits | typeof response, played: boolean, activeSegment: number, annotations: ReplayTeacherAnnotation[] = []) => {
     const events: DrumNotationEvent[] = notes.map(note => {
       const step = 'step' in note ? note.step + (played ? 0 : pocketMs / stepDuration(phraseSettings)) : note.atMs / stepDuration(phraseSettings);
       const safeStep = Math.max(0, Math.min(totalSteps - 0.001, step));
       return { step: safeStep, instrument: note.instrument, source: played ? 'played' : 'reference', flagCount: notationFlagCount(phraseSettings, safeStep), velocity: 'velocity' in note ? note.velocity : undefined, velocityTarget: 'velocityTarget' in note ? note.velocityTarget : undefined, articulation: 'articulation' in note ? note.articulation : undefined };
     });
     const current = playback && playback.segment === activeSegment ? playback.atMs / stepDuration(phraseSettings) : undefined;
-    const frame: DrumNotationFrame = { name: label, meter: phraseSettings.meter, bars: phraseSettings.bars, stepsPerBar, totalSteps, stepsPerPulse, flagCount: phraseSettings.subdivision === 'sixteenth' ? 2 : 1, grid, events, showRests: true, ...(current === undefined ? {} : { playheadStep: current, playheadTransitionMs: 0 }), autoFollow: current !== undefined, emptyCountLabel: t('No note at this count') };
+    const scoreAnnotations = annotations.map(annotation => {
+      const bar = annotation.bar_index === null ? 0 : Math.max(0, Math.min(phraseSettings.bars - 1, annotation.bar_index - 1));
+      const beat = annotation.beat_index === null ? 0 : Math.max(0, Math.min(meterParts(phraseSettings).numerator - 1, annotation.beat_index - 1));
+      const subdivision = annotation.subdivision_index === null ? 0 : Math.max(0, Math.min(stepsPerPulse - 1, annotation.subdivision_index - 1));
+      return { step: bar * stepsPerBar + beat * stepsPerPulse + subdivision, body: annotation.body, ...(annotation.voice ? { voice: annotation.voice } : {}) };
+    });
+    const frame: DrumNotationFrame = { name: label, meter: phraseSettings.meter, bars: phraseSettings.bars, stepsPerBar, totalSteps, stepsPerPulse, flagCount: phraseSettings.subdivision === 'sixteenth' ? 2 : 1, grid, events, ...(scoreAnnotations.length ? { annotations: scoreAnnotations } : {}), showRests: true, ...(current === undefined ? {} : { playheadStep: current, playheadTransitionMs: 0 }), autoFollow: current !== undefined, emptyCountLabel: t('No note at this count') };
     return frame;
   };
   const handlePlay = async (which: 'partner' | 'response' | 'compare') => {
@@ -97,7 +104,8 @@ export function ImprovisationReplay({ take, disabled, onSave, saved }: { take: M
     setStatus(t('MIDI file exported. It contains drum notes and no microphone audio.'));
   };
   const partnerFrame = frameFor(take.settings.mode === 'guided' || take.settings.mode === 'ensemble' ? t('Example phrase') : t('Virtual drummer'), referenceHits, false, -1);
-  const responseFrame = frameFor(take.demo ? t('Demonstration') : responseLabel, response, true, 1);
+  const responseAnnotations = teacherAnnotations.filter(annotation => annotation.phrase_index === null || annotation.phrase_index === phrase + 1);
+  const responseFrame = frameFor(take.demo ? t('Demonstration') : responseLabel, response, true, 1, responseAnnotations);
   const partnerPlayback = playback && (playback.segment === -1 || playback.segment === 0) ? playback.atMs / stepDuration(phraseSettings) : undefined;
   if (partnerPlayback !== undefined) { partnerFrame.playheadStep = partnerPlayback; partnerFrame.playheadTransitionMs = 0; partnerFrame.autoFollow = true; }
   const responsePlayback = playback?.segment === 1 ? playback.atMs / stepDuration(phraseSettings) : undefined;
@@ -122,6 +130,6 @@ export function ImprovisationReplay({ take, disabled, onSave, saved }: { take: M
       {!take.demo && <button className="button-secondary" disabled={disabled || !take.hits.length} onClick={exportMidi}>{t('Export take as MIDI')}</button>}
       {playing && <button className="button-secondary" onClick={() => { stop(); setPlayback(null); setPlaying(false); setPart(''); setStatus(t('Replay stopped.')); }}>{t('Stop replay')}</button>}
     </div><p role="status">{playing ? `${part} · ${status}` : status}</p>
-    {!take.demo && <div className={styles.settings}><label>{t('Take name')}<input maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label><button className="button-secondary" disabled={disabled || saved || !name.trim() || !take.hits.length || take.hits.length > 10000} onClick={() => onSave(name.trim())}>{t(saved ? 'Take saved' : 'Save this take')}</button></div>}
+    {!take.demo && <div className={styles.settings}><label>{t('Take name')}<input maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label><button className="button-secondary" disabled={disabled || saved || !name.trim() || !take.hits.length || take.hits.length > 10000} onClick={() => onSave(name.trim())}>{t(saved ? 'Take saved' : 'Save this take')}</button><button className="button-secondary" disabled={disabled || !take.hits.length} onClick={() => onSendToSongBuilder?.(take)}>{t('Edit this take in Song Builder')}</button></div>}
   </section>;
 }

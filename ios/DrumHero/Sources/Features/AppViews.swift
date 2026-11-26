@@ -625,6 +625,22 @@ struct TrainerView: View {
     @State private var ratings: [TrainerRating] = []
     @State private var pendingRating = false
     @State private var savedRound = false
+
+    init(content: MobileContentDocument, initialPatternId: String? = nil, initialBpm: Int? = nil,
+         initialAdaptation: String = "standard", assessmentSince: Date? = nil,
+         assessmentInputProfile: String? = nil, assessmentAdaptation: String? = nil,
+         assessmentCorrectionMs: Double? = nil, assessmentTimingCalibrated: Bool? = nil) {
+        self.content = content
+        self.initialPatternId = initialPatternId
+        self.initialBpm = initialBpm
+        self.initialAdaptation = initialAdaptation
+        self.assessmentSince = assessmentSince
+        self.assessmentInputProfile = assessmentInputProfile
+        self.assessmentAdaptation = assessmentAdaptation
+        self.assessmentCorrectionMs = assessmentCorrectionMs
+        self.assessmentTimingCalibrated = assessmentTimingCalibrated
+    }
+
     private var patterns: [PracticePattern] {
         let custom = (try? JSONDecoder().decode([PracticePattern].self, from: Data(portableCustomGroovesJSON.utf8))) ?? []
         return content.rudiments + content.grooves + custom
@@ -1020,14 +1036,14 @@ struct TrainerView: View {
         let descriptor = FetchDescriptor<PracticeSessionRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
         if let all = try? modelContext.fetch(descriptor) { for stale in all.dropFirst(50) { modelContext.delete(stale) } }
         let rounds = FetchDescriptor<TrainerRoundRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
-        if let all = try? modelContext.fetch(rounds) { for stale in all.dropFirst(50) { modelContext.delete(stale) } }
+        if let all = try? modelContext.fetch(rounds) { for stale in all.dropFirst(1_000) { modelContext.delete(stale) } }
         savedRound = true
     }
 
     private func saveRound(_ round: TrainerRoundRecord) {
         modelContext.insert(round)
         let rounds = FetchDescriptor<TrainerRoundRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)])
-        if let all = try? modelContext.fetch(rounds) { for stale in all.dropFirst(50) { modelContext.delete(stale) } }
+        if let all = try? modelContext.fetch(rounds) { for stale in all.dropFirst(1_000) { modelContext.delete(stale) } }
     }
 
     private func resetRound() {
@@ -1168,6 +1184,7 @@ struct MobileProgressBackup: Codable {
     let personalSongs: [MobileBackupSong]
     let sightReadingAttempts: [SightAttempt]?
     let sightReadingGoal: SightGoal?
+    let sightReadingTemplates: [SightCustomTemplate]?
     let assessment: AssessmentStore?
 
     init(lessonProgress: [LessonProgressRecord], practiceSessions: [PracticeSessionRecord], patternBests: [PatternBestRecord],
@@ -1182,6 +1199,7 @@ struct MobileProgressBackup: Codable {
         self.personalSongs = personalSongs.compactMap { try? MobileBackupSong($0) }
         self.sightReadingAttempts = SightHistory.read()
         self.sightReadingGoal = SightHistory.readGoal()
+        self.sightReadingTemplates = SightHistory.readTemplates()
         self.assessment = AssessmentHistory.read()
     }
 
@@ -1198,6 +1216,7 @@ struct MobileProgressBackup: Codable {
         self.personalSongs = personalSongs
         self.sightReadingAttempts = []
         self.sightReadingGoal = nil
+        self.sightReadingTemplates = []
         self.assessment = nil
     }
 
@@ -1207,7 +1226,7 @@ struct MobileProgressBackup: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case app, schemaVersion, exportedAt, lessonProgress, practiceSessions, patternBests, trainerRounds, personalSongs, sightReadingAttempts, sightReadingGoal, assessment
+        case app, schemaVersion, exportedAt, lessonProgress, practiceSessions, patternBests, trainerRounds, personalSongs, sightReadingAttempts, sightReadingGoal, sightReadingTemplates, assessment
     }
 
     init(from decoder: Decoder) throws {
@@ -1222,6 +1241,7 @@ struct MobileProgressBackup: Codable {
         assessment = try values.decodeIfPresent(AssessmentStore.self, forKey: .assessment)
         sightReadingAttempts = try values.decodeIfPresent([SightAttempt].self, forKey: .sightReadingAttempts)
         sightReadingGoal = try values.decodeIfPresent(SightGoal.self, forKey: .sightReadingGoal)
+        sightReadingTemplates = try values.decodeIfPresent([SightCustomTemplate].self, forKey: .sightReadingTemplates)
         // Older backups do not include songs. Version 2 must include the field
         // so a truncated file cannot silently clear the local Song Library.
         personalSongs = schemaVersion >= 2
@@ -1233,6 +1253,9 @@ struct MobileProgressBackup: Codable {
         guard app == "drum-hero-ios", [1, 2].contains(schemaVersion) else { throw MobileBackupError.unsupportedFormat }
         if let rows = sightReadingAttempts { guard rows.count <= 100, rows.allSatisfy(\.valid), Set(rows.map(\.id)).count == rows.count else { throw MobileBackupError.invalidRecords } }
         if let goal = sightReadingGoal { guard goal.valid else { throw MobileBackupError.invalidRecords } }
+        if let templates = sightReadingTemplates {
+            guard templates.count <= 40, templates.allSatisfy(\.valid), Set(templates.map(\.id)).count == templates.count else { throw MobileBackupError.invalidRecords }
+        }
         if let assessment { guard assessment.valid(try AssessmentContent.load()) else { throw MobileBackupError.invalidRecords } }
         let lessonIDs = Set(content.lessons.map(\.id))
         let patternIDs = Set(content.practicePatterns.map(\.id))
@@ -1251,7 +1274,7 @@ struct MobileProgressBackup: Codable {
               patternBests.count <= content.practicePatterns.count,
               Set(patternBests.map(\.patternID)).count == patternBests.count,
               patternBests.allSatisfy({ patternIDs.contains($0.patternID) && validName($0.patternName) && (0...100).contains($0.score) }),
-              trainerRounds.count <= 50,
+              trainerRounds.count <= 1_000,
               Set(trainerRounds.map(\.id)).count == trainerRounds.count,
               trainerRounds.allSatisfy({ item in
                   !item.id.isEmpty && item.id.count <= 120 && patternIDs.contains(item.patternID) && validName(item.patternName) &&
@@ -1378,6 +1401,7 @@ struct MobileProgressBackup: Codable {
             try modelContext.save()
             if let rows = sightReadingAttempts { try SightHistory.write(rows) }
             if let goal = sightReadingGoal { try SightHistory.writeGoal(goal) }
+            if let templates = sightReadingTemplates { try SightHistory.writeTemplates(templates) }
             if let assessment { try AssessmentHistory.write(assessment) }
         } catch {
             modelContext.rollback()
@@ -1723,6 +1747,70 @@ private func mergePortableArchiveItems(_ current: [PortableArchiveJSON], _ incom
     return orderedIDs.prefix(limit).compactMap { byID[$0] }
 }
 
+private struct PortableSightReading: Codable {
+    var attempts: [PortableArchiveJSON]?
+    var goal: PortableArchiveJSON?
+    var templates: [PortableArchiveJSON]?
+}
+
+private func makePortableSightReading() -> PortableSightReading? {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let attemptsData = try? encoder.encode(Array(SightHistory.read().suffix(100)))
+    let attempts = attemptsData.flatMap { try? JSONDecoder().decode([PortableArchiveJSON].self, from: $0) } ?? []
+    let goal = SightHistory.readGoal().flatMap(PortableArchiveJSON.from)
+    let templates = SightHistory.readPortableTemplates().flatMap { try? JSONDecoder().decode([PortableArchiveJSON].self, from: $0) } ?? []
+    guard !attempts.isEmpty || goal != nil || !templates.isEmpty else { return nil }
+    return PortableSightReading(attempts: attempts.isEmpty ? nil : attempts, goal: goal, templates: templates.isEmpty ? nil : templates)
+}
+
+private func decodePortableSightAttempts(_ rows: [PortableArchiveJSON]?) -> [SightAttempt]? {
+    guard let rows else { return nil }
+    guard let data = try? JSONEncoder().encode(rows) else { return nil }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try? decoder.decode([SightAttempt].self, from: data)
+}
+
+private func decodePortableSightGoal(_ raw: PortableArchiveJSON?) -> SightGoal? {
+    guard let raw, let data = try? JSONEncoder().encode(raw), let goal = try? JSONDecoder().decode(SightGoal.self, from: data), goal.valid else { return nil }
+    return goal
+}
+
+private func isValidPortableSightTemplate(_ raw: PortableArchiveJSON) -> Bool {
+    guard case .object(let object) = raw,
+          case .string(let id)? = object["id"], !id.isEmpty, id.count <= 100,
+          case .string(let name)? = object["name"], !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 80,
+          case .string(let level)? = object["level"], ["Beginner", "Intermediate", "Advanced"].contains(level),
+          case .string(let meter)? = object["meter"], ["4/4", "3/4", "5/4", "7/8"].contains(meter),
+          case .number(let subdivisionValue)? = object["subdivision"], subdivisionValue.rounded() == subdivisionValue,
+          case .number(let beats)? = object["beats"],
+          case .string(let createdAt)? = object["createdAt"], parsePortableTransferDate(createdAt) != nil,
+          case .array(let hits)? = object["hits"], (1...120).contains(hits.count) else { return false }
+    let subdivision = Int(subdivisionValue)
+    guard (4...16).contains(subdivision), [4, 8, 12, 16].contains(subdivision),
+          level != "Beginner" || meter == "4/4",
+          level == "Advanced" || subdivision < 12,
+          meter != "7/8" || subdivision.isMultiple(of: 8),
+          abs(beats - (meter == "7/8" ? 3.5 : Double(meter.first?.wholeNumberValue ?? 4))) < 0.0001 else { return false }
+    let stepCount = Int((beats * Double(subdivision) / 4).rounded())
+    var unique = Set<String>(), perStep: [Int: Int] = [:]
+    for hit in hits {
+        guard case .object(let note) = hit,
+              case .number(let stepValue)? = note["step"], stepValue.rounded() == stepValue,
+              case .string(let voice)? = note["instrument"], ["kick", "snare", "hihat", "tom", "crash"].contains(voice) else { return false }
+        let step = Int(stepValue)
+        guard (0..<stepCount).contains(step), unique.insert("\(step)/\(voice)").inserted else { return false }
+        if let accent = note["accent"], case .bool = accent {} else if note["accent"] != nil { return false }
+        if let articulation = note["midiArticulationTarget"] {
+            guard case .string(let target) = articulation, ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot", "side-stick"].contains(target) else { return false }
+        }
+        perStep[step, default: 0] += 1
+        if perStep[step, default: 0] > 3 { return false }
+    }
+    return true
+}
+
 private struct MobileProgressTransfer: Codable {
     static let formatID = "drum-hero-learning-archive-v1"
     static let legacyFormatID = "drum-hero-progress-transfer-v1"
@@ -1741,13 +1829,14 @@ private struct MobileProgressTransfer: Codable {
     var customGrooves: [PortableArchiveJSON]?
     var trainerPractice: MobileTrainerPractice?
     var earTraining: [PortableArchiveJSON]?
+    var sightReading: PortableSightReading?
 
     init(lessonProgress: [LessonProgressRecord], practiceSessions: [PracticeSessionRecord], bests: [PatternBestRecord], preferredBpm: Int,
          guidedPracticeSession: PortableGuidedPracticeSession? = nil, weeklyGoal: PortableWeeklyGoal? = nil,
          personalSongs: [MobileSong] = [], customGrooves: [PortableArchiveJSON] = [], trainerRounds: [TrainerRoundRecord] = [],
          trainerRoutine: PortableArchiveJSON? = nil, trainerCueSequences: [PortableArchiveJSON]? = nil,
          trainerCoachFeedback: [MobileTrainerCoachFeedback] = [], trainerTiming: [String: [PortableArchiveJSON]] = [:],
-         earTraining: [PortableArchiveJSON] = []) {
+         earTraining: [PortableArchiveJSON] = [], sightReading: PortableSightReading? = makePortableSightReading()) {
         let formatter = ISO8601DateFormatter()
         application = "Drum Hero"
         format = Self.formatID
@@ -1769,12 +1858,13 @@ private struct MobileProgressTransfer: Codable {
         self.weeklyGoal = weeklyGoal
         self.personalSongs = personalSongs.prefix(200).compactMap { PortableArchiveJSON.from($0) }
         self.customGrooves = Array(customGrooves.prefix(100))
-        let portableRounds = trainerRounds.prefix(50).map { record -> MobileTrainerPortableRound in
+        let portableRounds = trainerRounds.prefix(1_000).map { record -> MobileTrainerPortableRound in
             var round = MobileTrainerPortableRound(record)
             if let hits = trainerTiming[round.id], validPortableTrainerTiming(hits) { round.hits = hits }
             return round
         }
         self.earTraining = earTraining.isEmpty ? nil : Array(earTraining.suffix(100))
+        self.sightReading = sightReading
         if !portableRounds.isEmpty || trainerRoutine != nil || trainerCueSequences?.isEmpty == false || !trainerCoachFeedback.isEmpty {
             trainerPractice = MobileTrainerPractice(rounds: portableRounds, routine: trainerRoutine,
                 cueSequences: trainerCueSequences, coachFeedback: Array(trainerCoachFeedback.suffix(100)))
@@ -1787,7 +1877,7 @@ private struct MobileProgressTransfer: Codable {
               validDate(exportedAt), (40...200).contains(preferredBpm),
               completedLessons.count <= 100, practiceSessions.count <= 100,
               (personalSongs?.count ?? 0) <= 200, (customGrooves?.count ?? 0) <= 100,
-              (trainerPractice?.rounds.count ?? 0) <= 50, (trainerPractice?.cueSequences?.count ?? 0) <= 30,
+              (trainerPractice?.rounds.count ?? 0) <= 1_000, (trainerPractice?.cueSequences?.count ?? 0) <= 30,
               (trainerPractice?.coachFeedback?.count ?? 0) <= 100,
               guidedPracticeSession?.isValid() ?? true, weeklyGoal?.isValid() ?? true,
               bestScores.count <= 256, bestScores.allSatisfy({ !$0.key.isEmpty && $0.key.count <= 160 && (0...100).contains($0.value) }),
@@ -1810,6 +1900,12 @@ private struct MobileProgressTransfer: Codable {
                       (item.result.map { (0...100).contains($0.score) && (0...100).contains($0.accuracy) } ?? (item.mode == "self")) && validPortableTrainerTiming(item.hits)
               }),
               validPortableEarHistory(earTraining),
+              (sightReading?.attempts?.count ?? 0) <= 100, (sightReading?.templates?.count ?? 0) <= 40,
+              (decodePortableSightAttempts(sightReading?.attempts)?.allSatisfy(\.valid) ?? (sightReading?.attempts == nil)),
+              Set((decodePortableSightAttempts(sightReading?.attempts) ?? []).map(\.id)).count == (sightReading?.attempts?.count ?? 0),
+              (sightReading?.goal == nil || decodePortableSightGoal(sightReading?.goal) != nil),
+              Set((sightReading?.templates ?? []).compactMap { raw -> String? in if case .object(let object) = raw, case .string(let id)? = object["id"] { return id }; return nil }).count == (sightReading?.templates?.count ?? 0),
+              (sightReading?.templates ?? []).allSatisfy(isValidPortableSightTemplate),
               Set((trainerPractice?.coachFeedback ?? []).map(\.id)).count == (trainerPractice?.coachFeedback?.count ?? 0),
               (trainerPractice?.coachFeedback ?? []).allSatisfy({ item in
                   !item.id.isEmpty && item.id.count <= 200 && !item.takeId.isEmpty && item.takeId.count <= 200 &&
@@ -1827,7 +1923,7 @@ private struct MobileProgressTransfer: Codable {
         let validGrooves: [(PortableArchiveJSON, PracticePattern)] = (customGrooves ?? []).compactMap { raw in
             guard let data = try? JSONEncoder().encode(raw), let groove = try? JSONDecoder().decode(PracticePattern.self, from: data),
                 groove.id.hasPrefix("custom-") && !groove.name.isEmpty && (40...200).contains(groove.defaultBpm) &&
-                [4, 8, 12, 16, 20].contains(groove.subdivision) && groove.totalSteps <= 512 &&
+                (4...240).contains(groove.subdivision) && groove.subdivision % 4 == 0 && groove.totalSteps <= 2_048 &&
                 groove.hits.allSatisfy({ $0.step >= 0 && $0.step < groove.totalSteps }) else { return nil }
             return (raw, groove)
         }
@@ -1843,7 +1939,10 @@ private struct MobileProgressTransfer: Codable {
             ignoredSongs: (personalSongs?.count ?? 0) - validSongs.count,
             customGrooves: validGrooves.map { $0.1 },
             rawCustomGrooves: validGrooves.map { $0.0 },
-            ignoredGrooves: (customGrooves?.count ?? 0) - validGrooves.count
+            ignoredGrooves: (customGrooves?.count ?? 0) - validGrooves.count,
+            sightAttempts: decodePortableSightAttempts(sightReading?.attempts) ?? [],
+            sightGoal: decodePortableSightGoal(sightReading?.goal),
+            sightTemplates: sightReading?.templates ?? []
         )
     }
 }
@@ -1866,6 +1965,9 @@ private struct MobileProgressTransferReview {
     var customGrooves: [PracticePattern]
     var rawCustomGrooves: [PortableArchiveJSON]
     var ignoredGrooves: Int
+    var sightAttempts: [SightAttempt]
+    var sightGoal: SightGoal?
+    var sightTemplates: [PortableArchiveJSON]
 }
 
 private struct MobileProgressTransferDocument: FileDocument {
@@ -1996,7 +2098,7 @@ struct ProgressViewScreen: View {
                     }
                 }
                 Section("Move learning progress between web and iOS") {
-                    Text("Move completed lessons, Practice Pad results, Trainer summaries and optional hit timing, ear-training results, personal routines, saved cue sequences, coach notes, personal songs, custom grooves, preferred tempo, a paused guided session, and a weekly goal between web and iOS. Audio recordings and device calibration stay local; inspect exported files before sharing.")
+                    Text("Move completed lessons, Practice Pad results, Trainer summaries and optional hit timing, ear-training results, sight-reading history and custom reading templates, personal routines, saved cue sequences, coach notes, personal songs, custom grooves, preferred tempo, a paused guided session, and a weekly goal between web and iOS. Audio recordings and device calibration stay local; inspect exported files before sharing.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("Export learning archive", systemImage: "square.and.arrow.up") {
                         do {
@@ -2078,7 +2180,7 @@ struct ProgressViewScreen: View {
                 }
                 .fileExporter(isPresented: $isTransferExporting, document: transferDocument, contentType: .json, defaultFilename: "drum-hero-learning-archive") { result in
                     switch result {
-                    case .success: backupMessage = "Learning archive exported. Import it on web or iOS to merge progress and review personal songs and custom grooves."
+                    case .success: backupMessage = "Learning archive exported. Import it on web, iOS, or Android to merge progress, reading history, custom templates, personal songs, and custom grooves."
                     case .failure(let error): backupMessage = error.localizedDescription
                     }
                 }
@@ -2089,7 +2191,7 @@ struct ProgressViewScreen: View {
                     Button("Cancel", role: .cancel) { pendingTransfer = nil }
                 } message: {
                     if let transfer = pendingTransfer {
-                        Text("Merges up to \(transfer.lessons.count) lesson completions, \(transfer.sessions.count) scored sessions, and \(transfer.bestScores.count) best scores; adds \(transfer.transfer.trainerPractice?.rounds.count ?? 0) Trainer summaries with \(transfer.transfer.trainerPractice?.rounds.reduce(0) { $0 + ($1.hits?.count ?? 0) } ?? 0) detailed timing records, \(transfer.transfer.earTraining?.count ?? 0) ear-training results, personal routines, cue sequences, and coach notes; adds \(transfer.personalSongs.count) compatible personal songs and \(transfer.customGrooves.count) custom grooves when their IDs are new. Audio recordings and calibration remain local. Imported timing and ear results are retained for export. \(transfer.ignoredSongs) songs with unsupported voices or data and \(transfer.ignoredGrooves) invalid grooves will be skipped. Existing records stay; matching session IDs are updated. \(transfer.ignoredLessons + transfer.ignoredSessions + transfer.ignoredBests) progress records use IDs this app version does not recognize and will be skipped. Preferred tempo will be set to \(transfer.transfer.preferredBpm) BPM. \(transfer.transfer.guidedPracticeSession == nil ? "" : "The saved guided session will be replaced.") \(transfer.transfer.weeklyGoal == nil ? "" : "The weekly goal will be replaced.")")
+                        Text("Merges up to \(transfer.lessons.count) lesson completions, \(transfer.sessions.count) scored sessions, and \(transfer.bestScores.count) best scores; adds \(transfer.transfer.trainerPractice?.rounds.count ?? 0) Trainer summaries with \(transfer.transfer.trainerPractice?.rounds.reduce(0) { $0 + ($1.hits?.count ?? 0) } ?? 0) detailed timing records, \(transfer.transfer.earTraining?.count ?? 0) ear-training results, personal routines, cue sequences, and coach notes; adds \(transfer.personalSongs.count) compatible personal songs and \(transfer.customGrooves.count) custom grooves when their IDs are new. Also merges \(transfer.sightAttempts.count) sight-reading attempts and \(transfer.sightTemplates.count) custom reading templates. Audio recordings and calibration remain local. Imported timing, ear results, reading history, and templates are retained for export. \(transfer.ignoredSongs) songs with unsupported voices or data and \(transfer.ignoredGrooves) invalid grooves will be skipped. Existing records stay; matching session IDs are updated. \(transfer.ignoredLessons + transfer.ignoredSessions + transfer.ignoredBests) progress records use IDs this app version does not recognize and will be skipped. Preferred tempo will be set to \(transfer.transfer.preferredBpm) BPM. \(transfer.transfer.guidedPracticeSession == nil ? "" : "The saved guided session will be replaced.") \(transfer.transfer.weeklyGoal == nil ? "" : "The weekly goal will be replaced.")")
                     }
                 }
                 .alert("Replace local progress?", isPresented: $confirmingImport) {
@@ -2138,7 +2240,8 @@ struct ProgressViewScreen: View {
             confirmingTransfer = true
             let sessionNote = transfer.guidedPracticeSession == nil ? "" : " A paused guided session is included."
             let goalNote = transfer.weeklyGoal == nil ? "" : " A weekly goal is included."
-            backupMessage = "Learning archive loaded for review. Your current data has not changed.\(sessionNote)\(goalNote)"
+            let sightNote = transfer.sightReading?.attempts?.count ?? 0
+            backupMessage = "Learning archive loaded for review. Your current data has not changed.\(sessionNote)\(goalNote)\(sightNote > 0 ? " \(sightNote) sight-reading attempts are included." : "")"
         } catch { backupMessage = error.localizedDescription }
     }
 
@@ -2226,7 +2329,7 @@ struct ProgressViewScreen: View {
                 }
             }
             let allTrainerRounds = try modelContext.fetch(FetchDescriptor<TrainerRoundRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)]))
-            for stale in allTrainerRounds.dropFirst(50) { modelContext.delete(stale) }
+            for stale in allTrainerRounds.dropFirst(1_000) { modelContext.delete(stale) }
 
             let existingSongIDs = Set(try modelContext.fetch(FetchDescriptor<PersonalSongRecord>()).map(\.id))
             var songIDs = existingSongIDs
@@ -2277,6 +2380,17 @@ struct ProgressViewScreen: View {
                 portableEarTrainingJSON = earJSON
             }
 
+            if !transfer.sightAttempts.isEmpty {
+                try SightHistory.write(SightHistory.merge(SightHistory.read(), transfer.sightAttempts))
+            }
+            if let goal = transfer.sightGoal { try SightHistory.writeGoal(goal) }
+            if !transfer.sightTemplates.isEmpty {
+                let currentTemplates = SightHistory.readPortableTemplates()
+                    .flatMap { try? JSONDecoder().decode([PortableArchiveJSON].self, from: $0) } ?? []
+                let mergedTemplates = mergePortableArchiveItems(currentTemplates, transfer.sightTemplates, limit: 40)
+                SightHistory.writePortableTemplates(try JSONEncoder().encode(mergedTemplates))
+            }
+
             let allSessions = try modelContext.fetch(FetchDescriptor<PracticeSessionRecord>(sortBy: [SortDescriptor(\.playedAt, order: .reverse)]))
             for stale in allSessions.dropFirst(50) { modelContext.delete(stale) }
             try modelContext.save()
@@ -2291,7 +2405,7 @@ struct ProgressViewScreen: View {
             }
             let guidedMessage = transfer.transfer.guidedPracticeSession == nil ? "" : " Guided session saved for web resume."
             let goalMessage = transfer.transfer.weeklyGoal == nil ? "" : " Weekly goal saved."
-            backupMessage = "Merged \(addedLessons) lesson completions, \(addedSessions) scored sessions, and \(addedTrainerRounds) Trainer summaries; added \(addedSongs) personal songs, updated best scores, and set preferred tempo to \(preferredBpm) BPM. Existing records were kept.\(guidedMessage)\(goalMessage)"
+            backupMessage = "Merged \(addedLessons) lesson completions, \(addedSessions) scored sessions, and \(addedTrainerRounds) Trainer summaries; imported \(transfer.sightAttempts.count) sight-reading attempts; added \(addedSongs) personal songs, updated best scores, and set preferred tempo to \(preferredBpm) BPM. Existing records were kept.\(guidedMessage)\(goalMessage)"
         } catch {
             modelContext.rollback()
             backupMessage = "Could not merge this learning archive: \(error.localizedDescription)"

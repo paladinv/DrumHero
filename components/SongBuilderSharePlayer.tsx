@@ -82,7 +82,7 @@ export function SongBuilderSharePlayer() {
     setError("");
     try {
       const performedBars = humanizeArrangementBars(bars, 0, 1729, 0);
-      const blob = await arrangementWav(performedBars, 50, DEFAULT_DRUM_MIX);
+      const blob = await arrangementWav(performedBars, 50, DEFAULT_DRUM_MIX, {}, { effects: song.effects });
       const nextUrl = URL.createObjectURL(blob);
       setAudioUrl(current => { if (current) URL.revokeObjectURL(current); return nextUrl; });
     } catch (reason) {

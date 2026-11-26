@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import type { PracticePattern } from "@/lib/types";
 
-type PatternKind = "groove" | "fill" | "rudiment" | "song" | "custom";
+type PatternKind = "groove" | "fill" | "rudiment" | "song" | "custom" | "published";
 type PatternBrowserState = { favorites: string[]; recent: string[] };
 
 function storageKey(profileId: string) {
@@ -23,6 +23,7 @@ function readState(key: string): PatternBrowserState {
 }
 
 function kindOf(pattern: PracticePattern, rudimentIds: Set<string>): PatternKind {
+  if ("style" in pattern && pattern.style === "Published catalog") return "published";
   if (rudimentIds.has(pattern.id)) return "rudiment";
   if (pattern.id.startsWith("song:")) return "song";
   if (pattern.id.startsWith("custom-")) return "custom";
@@ -39,13 +40,14 @@ function meterOf(pattern: PracticePattern) {
   return `${pattern.beats}/4`;
 }
 
-export const TrainerPatternBrowser = memo(function TrainerPatternBrowser({ patterns, selectedId, profileId, rudimentIds, disabled, nameFor, onSelect }: {
+export const TrainerPatternBrowser = memo(function TrainerPatternBrowser({ patterns, selectedId, profileId, rudimentIds, disabled, nameFor, catalogDetails = {}, onSelect }: {
   patterns: PracticePattern[];
   selectedId: string;
   profileId: string;
   rudimentIds: Set<string>;
   disabled: boolean;
   nameFor: (pattern: PracticePattern) => string;
+  catalogDetails?: Record<string, { sourceAttribution: string; rightsLicense: string; sourceUrl: string | null }>;
   onSelect: (pattern: PracticePattern) => void;
 }) {
   const key = storageKey(profileId);
@@ -102,7 +104,7 @@ export const TrainerPatternBrowser = memo(function TrainerPatternBrowser({ patte
   return <section className="trainer-pattern-browser" aria-label="Find a practice pattern">
     <label>Find a pattern<input type="search" value={query} disabled={disabled} onChange={event => setQuery(event.target.value)} placeholder="Search grooves, fills, styles…" /></label>
     <div className="trainer-pattern-filters">
-      <label>Type<select value={kind} disabled={disabled} onChange={event => setKind(event.target.value as typeof kind)}><option value="all">All types</option><option value="groove">Grooves</option><option value="fill">Fills</option><option value="rudiment">Rudiments</option><option value="song">Song parts</option><option value="custom">Custom patterns</option></select></label>
+      <label>Type<select value={kind} disabled={disabled} onChange={event => setKind(event.target.value as typeof kind)}><option value="all">All types</option><option value="groove">Grooves</option><option value="fill">Fills</option><option value="rudiment">Rudiments</option><option value="song">Song parts</option><option value="custom">Custom patterns</option><option value="published">Published patterns</option></select></label>
       <label>Style<select value={styleFilter} disabled={disabled} onChange={event => setStyleFilter(event.target.value)}><option value="all">All styles</option>{styles.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
       <label>Level<select value={level} disabled={disabled} onChange={event => setLevel(event.target.value)}><option value="all">All levels</option>{levels.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
       <label>Meter<select value={meter} disabled={disabled} onChange={event => setMeter(event.target.value)}><option value="all">All meters</option>{meters.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
@@ -116,6 +118,7 @@ export const TrainerPatternBrowser = memo(function TrainerPatternBrowser({ patte
       {visible.slice(0, 80).map(item => <li key={item.id}>
         <button type="button" className={`trainer-pattern-choice${item.id === selectedId ? " is-selected" : ""}`} aria-pressed={item.id === selectedId} disabled={disabled} onClick={() => choose(item)}>
           <strong>{nameFor(item)}</strong><span>{kindOf(item, rudimentIds)} · {item.level} · {meterOf(item)}</span>
+          {catalogDetails[item.id] && <small>{catalogDetails[item.id].sourceAttribution} · {catalogDetails[item.id].rightsLicense}{catalogDetails[item.id].sourceUrl ? <> · {catalogDetails[item.id].sourceUrl}</> : null}</small>}
         </button>
         <button type="button" className="trainer-pattern-favorite" aria-label={`${saved.favorites.includes(item.id) ? "Remove from" : "Add to"} favorite patterns: ${nameFor(item)}`} aria-pressed={saved.favorites.includes(item.id)} disabled={disabled} onClick={() => toggleFavorite(item.id)}>{saved.favorites.includes(item.id) ? "★" : "☆"}</button>
       </li>)}

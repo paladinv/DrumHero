@@ -4,7 +4,7 @@ import { normalizeDrumMix, normalizeSongBuilderSettings, type SongBuilderSetting
 import type { SongInstrument } from "./types";
 
 export type EmbeddedCustomSampleLayer = { name: string; type: string; base64: string };
-export type EmbeddedCustomSample = EmbeddedCustomSampleLayer & { soft?: EmbeddedCustomSampleLayer; accent?: EmbeddedCustomSampleLayer };
+export type EmbeddedCustomSample = EmbeddedCustomSampleLayer & { soft?: EmbeddedCustomSampleLayer; accent?: EmbeddedCustomSampleLayer; alternates?: Partial<Record<"primary" | "soft" | "accent", EmbeddedCustomSampleLayer[]>> };
 export type SongBuilderProjectFile = {
   format: "drum-hero-song";
   version: 1;
@@ -54,7 +54,20 @@ export function readSongProjectFile(input: unknown): SongBuilderProjectFile | nu
       if (sample.soft !== undefined && !soft) return null;
       const accent = sample.accent === undefined ? undefined : readLayer(sample.accent);
       if (sample.accent !== undefined && !accent) return null;
-      customSamples[voice as SongInstrument] = { ...primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}) };
+      const alternates: NonNullable<EmbeddedCustomSample["alternates"]> = {};
+      if (sample.alternates !== undefined) {
+        if (!sample.alternates || typeof sample.alternates !== "object" || Array.isArray(sample.alternates)) return null;
+        for (const layer of ["primary", "soft", "accent"] as const) {
+          const items = sample.alternates[layer];
+          if (items === undefined) continue;
+          if (!Array.isArray(items) || items.length > 4) return null;
+          const parsed = items.map(readLayer);
+          if (parsed.some(item => !item)) return null;
+          if (parsed.length && ((layer === "soft" && !soft) || (layer === "accent" && !accent))) return null;
+          if (parsed.length) alternates[layer] = parsed as EmbeddedCustomSampleLayer[];
+        }
+      }
+      customSamples[voice as SongInstrument] = { ...primary, ...(soft ? { soft } : {}), ...(accent ? { accent } : {}), ...(Object.keys(alternates).length ? { alternates } : {}) };
     }
   }
   let workspace: SongBuilderProjectFile['workspace'];

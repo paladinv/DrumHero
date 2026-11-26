@@ -17,13 +17,17 @@ export type DrumNotationEvent = {
   velocityTarget?: number;
   sticking?: "R" | "L";
   articulation?: string;
+  tuplet?: { actualNotes: number; normalNotes: number };
+  grace?: true;
   flagCount?: number;
   review?: "matched" | "missed" | "early" | "late" | "violation";
+  timingOffsetMs?: number;
   count?: number;
 };
 
 export type DrumNotationGridMark = { step: number; label?: string; beat?: boolean };
 export type DrumNotationRegion = { start: number; end: number; label: string; kind: "rest" };
+export type DrumNotationAnnotation = { step: number; body: string; voice?: string };
 export type DrumNotationFrame = {
   name: string;
   meter: string;
@@ -37,6 +41,7 @@ export type DrumNotationFrame = {
   playheadStep?: number;
   playheadTransitionMs?: number;
   regions?: DrumNotationRegion[];
+  annotations?: DrumNotationAnnotation[];
   allowedInstruments?: Instrument[];
   guidance?: string[];
   autoFollow?: boolean;
@@ -68,9 +73,12 @@ function displayVoiceForEvent(event: DrumNotationEvent): keyof typeof VOICE_Y {
 function describeEvent(event: DrumNotationEvent, t: (key: string, values?: Record<string, string | number>) => string) {
   const voice = displayVoiceForEvent(event);
   const articulation = event.articulation ? ` · ${t(event.articulation)}` : "";
+  const tuplet = event.tuplet ? ` · ${t("{actual}:{normal} tuplet", { actual: event.tuplet.actualNotes, normal: event.tuplet.normalNotes })}` : "";
+  const grace = event.grace ? ` · ${t("grace note")}` : "";
   const source = event.source === "target" ? ` · ${t("Guide note")}` : event.source === "played" ? ` · ${t("Played")}` : "";
   const review = event.review ? ` · ${t(event.review === "matched" ? "Matched" : event.review === "missed" ? "Missed" : event.review === "violation" ? "Extra" : event.review === "early" ? "Early" : "Late")}` : "";
-  return `${t(VOICE_LABELS[voice])}${event.sticking ? ` · ${event.sticking}` : ""}${event.accent ? ` · ${t("accent")}` : ""}${articulation}${source}${review}`;
+  const timing = event.timingOffsetMs === undefined ? "" : ` · ${Math.abs(event.timingOffsetMs)} ms ${event.timingOffsetMs < 0 ? t("early") : t("late")}`;
+  return `${t(VOICE_LABELS[voice])}${event.sticking ? ` · ${event.sticking}` : ""}${event.accent ? ` · ${t("accent")}` : ""}${articulation}${grace}${tuplet}${source}${review}${timing}`;
 }
 
 export function DrumStaffNotation({ frame, showRhythmStems = true, improvisationControls = false }: { frame: DrumNotationFrame; showRhythmStems?: boolean; improvisationControls?: boolean }) {
@@ -178,8 +186,13 @@ export function DrumStaffNotation({ frame, showRhythmStems = true, improvisation
     </div>}
     {playhead !== null && <button type="button" className="trainer-notation-follow" aria-pressed={followPlayhead} onClick={() => setFollowOverride(!followPlayhead)}>{t(followPlayhead ? "Following playhead · tap to browse" : "Return to playhead")}</button>}
     <div className="trainer-notation-viewport" ref={scroller} tabIndex={0} role="region" aria-label={t("Scrollable drum score")}>
-      <svg className="trainer-notation" width={width} height="172" viewBox={`0 0 ${width} 172`} role={frame.editor || frame.barActions ? "group" : "img"} aria-label={t("Drum staff notation for {name}, {meter}.", { name: frame.name, meter: frame.meter })}>
+      <svg className="trainer-notation" width={width} height="172" viewBox={`0 0 ${width} 172`} role={frame.editor || frame.barActions ? "group" : "img"} aria-label={t("Drum staff notation for {name}, {meter}.{annotations}", { name: frame.name, meter: frame.meter, annotations: frame.annotations?.length ? ` ${t("{count} teacher annotations are marked on the score.", { count: frame.annotations.length })}` : "" })}>
         {playhead !== null && <rect x={xFor(viewStartStep) - 12} y="20" width="26" height="132" rx="5" className="trainer-notation-playhead" style={{ transform: `translateX(${(playhead - viewStartStep) * stepWidth}px)`, transitionDuration: `${frame.playheadTransitionMs ?? 0}ms` }} aria-hidden="true" />}
+        {frame.annotations?.filter(annotation => annotation.step >= viewStartStep - 0.001 && annotation.step < viewEndStep - 0.001).map((annotation, index) => <g key={`teacher-annotation-${index}`} className="trainer-notation-teacher-annotation">
+          <circle cx={xFor(annotation.step) + 5} cy="22" r="7" />
+          <text x={xFor(annotation.step) + 5} y="25">i</text>
+          <title>{t("Teacher comment{voice}: {body}", { voice: annotation.voice ? ` · ${t(annotation.voice)}` : "", body: annotation.body })}</title>
+        </g>)}
         {STAFF_Y.map(y => <line key={y} x1="8" x2={width - 8} y1={y} y2={y} className="trainer-notation-staff" />)}
         {visibleRegions?.map((region, index) => <g key={`${region.kind}-${index}`}>
           <rect x={xFor(region.start) - 9} y="24" width={Math.max(12, (region.end - region.start) * stepWidth)} height="128" rx="4" className="trainer-notation-rest-region" aria-hidden="true" />
@@ -223,16 +236,19 @@ export function DrumStaffNotation({ frame, showRhythmStems = true, improvisation
           const stemX = y <= 72 ? x - 5 : x + 5;
           const stemEnd = y <= 72 ? y + 38 : y - 38;
           const velocity = event.velocity ?? event.velocityTarget;
-          const className = `trainer-notation-event trainer-notation-${source}${velocity !== undefined && velocity < 45 ? " trainer-notation-ghost" : ""}${event.review ? ` trainer-notation-review-${event.review}` : ""}`;
-          const articulationMark = event.articulation === "flam" ? "f" : event.articulation === "drag" ? "d" : event.articulation === "closed-hat" ? "CH" : event.articulation === "open-hat" ? "O" : event.articulation === "pedal-hat" ? "P" : event.articulation === "foot-splash" ? "FS" : event.articulation === "ride" ? "R" : event.articulation === "rimshot" ? "RS" : event.articulation === "side-stick" ? "SS" : event.articulation === "crash" ? "C" : "";
+          const className = `trainer-notation-event trainer-notation-${source}${velocity !== undefined && velocity < 45 ? " trainer-notation-ghost" : ""}${event.grace ? " trainer-notation-grace" : ""}${event.review ? ` trainer-notation-review-${event.review}` : ""}`;
+          const articulationMark = event.articulation === "flam" ? "f" : event.articulation === "drag" ? "d" : event.articulation === "buzz" ? "z" : event.articulation === "closed-hat" ? "CH" : event.articulation === "open-hat" ? "O" : event.articulation === "pedal-hat" ? "P" : event.articulation === "foot-splash" ? "FS" : event.articulation === "ride" ? "R" : event.articulation === "rimshot" ? "RS" : event.articulation === "side-stick" ? "SS" : event.articulation === "crash" ? "C" : "";
           return <g key={`${source}-${event.step}-${event.instrument}-${index}`} className={className}>
             {showRhythmStems && <>
               <line x1={stemX} x2={stemX} y1={y} y2={stemEnd} className="trainer-notation-stem" />
               {Array.from({ length: beamedEvents.has(index) ? 0 : event.flagCount ?? frame.flagCount ?? 1 }, (_, flag) => <path key={`flag-${flag}`} d={y <= 72 ? `M ${stemX} ${stemEnd + flag * 5} q -11 2 -8 11` : `M ${stemX} ${stemEnd - flag * 5} q 11 -2 8 -11`} className="trainer-notation-flag" />)}
             </>}
-            {voice === "hihat" || voice === "crash" ? <path d={`M ${x - 6} ${y - 5} L ${x + 6} ${y + 5} M ${x - 6} ${y + 5} L ${x + 6} ${y - 5}`} className="trainer-notation-cymbal" /> : <ellipse cx={x} cy={y} rx={velocity !== undefined && velocity < 45 ? 4.3 : 6} ry="4.4" className="trainer-notation-drum" transform={`rotate(-20 ${x} ${y})`} />}
+            {voice === "hihat" || voice === "crash" ? <path d={`M ${x - (event.grace ? 4 : 6)} ${y - (event.grace ? 4 : 5)} L ${x + (event.grace ? 4 : 6)} ${y + (event.grace ? 4 : 5)} M ${x - (event.grace ? 4 : 6)} ${y + (event.grace ? 4 : 5)} L ${x + (event.grace ? 4 : 6)} ${y - (event.grace ? 4 : 5)}`} className="trainer-notation-cymbal" /> : <ellipse cx={x} cy={y} rx={event.grace ? 3.8 : velocity !== undefined && velocity < 45 ? 4.3 : 6} ry={event.grace ? 3.3 : 4.4} className="trainer-notation-drum" transform={`rotate(-20 ${x} ${y})`} />}
+            {event.grace && <text x={x - 3} y={y - 14} className="trainer-notation-articulation">gr</text>}
             {event.accent && <text x={x - 4} y={y - 11} className="trainer-notation-accent">&gt;</text>}
+            {event.tuplet && <text x={x - 4} y={y - 20} className="trainer-notation-articulation">{event.tuplet.actualNotes}</text>}
             {event.count && <text x={x + 8} y={y - 9} className="trainer-notation-feedback-count">×{event.count}</text>}
+            {event.timingOffsetMs !== undefined && <text x={x + 8} y={Math.min(150, y + 15)} className="trainer-notation-timing-offset">{event.timingOffsetMs > 0 ? "+" : "−"}{Math.abs(event.timingOffsetMs)} ms</text>}
             {articulationMark && <text x={x + 8} y={y - 7} className="trainer-notation-articulation">{articulationMark}</text>}
             {event.sticking && <text x={x - 3} y={Math.min(148, y + 14)} className="trainer-notation-sticking">{event.sticking}</text>}
             <title>{describeEvent(event, t)} · {t("count {count}", { count: event.step + 1 })}{velocity === undefined ? "" : ` · ${t("velocity {velocity}", { velocity })}`}</title>
@@ -264,6 +280,7 @@ export function DrumStaffNotation({ frame, showRhythmStems = true, improvisation
       </svg>
     </div>
     {playhead !== null && <p className="trainer-notation-live-step" aria-live="polite" aria-atomic="true">{currentReadout}</p>}
+    {frame.annotations?.length ? <ul className="trainer-notation-annotation-list" aria-label={t("Teacher comments on this score")}>{frame.annotations.filter(annotation => annotation.step >= viewStartStep - 0.001 && annotation.step < viewEndStep - 0.001).map((annotation, index) => <li key={`teacher-note-${index}`}>{t("Bar {bar}", { bar: Math.floor(annotation.step / frame.stepsPerBar) + 1 })} · {annotation.voice ? `${t(annotation.voice)} · ` : ""}{annotation.body}</li>)}</ul> : null}
     <details className="trainer-notation-text"><summary>{t("Read notation as a bar-by-bar text score")}</summary><ol className="trainer-notation-transcript">{transcriptBars.map(bar => <li key={bar.number}>
       <h4>{t("Bar {bar}", { bar: bar.number })}</h4>
       <ol>{bar.marks.map((mark, index) => {
@@ -274,22 +291,23 @@ export function DrumStaffNotation({ frame, showRhythmStems = true, improvisation
       })}</ol>
     </li>)}</ol></details>
     {frame.feedback?.length ? <div className="trainer-notation-feedback-legend" aria-label={t("Notation feedback legend")}><span className="trainer-notation-feedback-key matched">{t("Matched")}</span><span className="trainer-notation-feedback-key missed">{t("Missed")}</span><span className="trainer-notation-feedback-key early">{t("Early / late")}</span><span className="trainer-notation-feedback-key violation">{t("Extra")}</span></div> : null}
-    <small>{t("Drum staff · × cymbal · oval drum note · > accent · f flam · d drag · CH closed hi-hat · O open hi-hat · P pedal hi-hat · R ride · C crash · RS rimshot · SS side-stick. Beams group notes; beat counts and subdivisions appear below the staff.")}</small>
+    <small>{t("Drum staff · × cymbal · oval drum note · > accent · f flam · d drag · z buzz roll · CH closed hi-hat · O open hi-hat · P pedal hi-hat · R ride · C crash · RS rimshot · SS side-stick. Beams group notes; beat counts and subdivisions appear below the staff.")}</small>
   </section>;
 }
 
-export function TrainerNotationView({ pattern, currentStep, meter: meterOverride, showRhythmStems = true, compact = false, editor, tupletLabel, grouping, feedback, barActions }: { pattern: PracticePattern; currentStep?: number; meter?: string; showRhythmStems?: boolean; compact?: boolean; editor?: { instrument: Instrument; onToggle: (step: number) => void; isActive: (step: number) => boolean; isEnabled: (step: number) => boolean; label?: (step: number, active: boolean) => string }; tupletLabel?: string; grouping?: number[]; feedback?: Array<{ instrument: Instrument; step: number; review: NonNullable<DrumNotationEvent["review"]>; count?: number }>; barActions?: { selectedBar?: number; onSelect: (bar: number) => void } }) {
+export function TrainerNotationView({ pattern, currentStep, meter: meterOverride, showRhythmStems = true, compact = false, editor, tupletLabel: tupletLabelOverride, grouping, feedback, barActions }: { pattern: PracticePattern; currentStep?: number; meter?: string; showRhythmStems?: boolean; compact?: boolean; editor?: { instrument: Instrument; onToggle: (step: number) => void; isActive: (step: number) => boolean; isEnabled: (step: number) => boolean; label?: (step: number, active: boolean) => string }; tupletLabel?: string; grouping?: number[]; feedback?: Array<{ instrument: Instrument; step: number; review: NonNullable<DrumNotationEvent["review"]>; count?: number }>; barActions?: { selectedBar?: number; onSelect: (bar: number) => void } }) {
   const { t } = useLocalization();
   const stepsPerBeat = pattern.subdivision / 4;
   const totalSteps = Math.max(1, Math.round(pattern.beats * stepsPerBeat));
   const meterLabel = meterOverride ?? ("meter" in pattern && typeof pattern.meter === "string" ? pattern.meter : undefined);
   const meter = meterLabel?.match(/(\d+)\s*\/\s*(\d+)/) ?? null;
   const stepsPerBar = meter ? Number(meter[1]) * pattern.subdivision / Number(meter[2]) : totalSteps;
-  const tupletGroupSteps = tupletLabel === "3" || tupletLabel === "5" ? stepsPerBeat
+  const tupletLabel = tupletLabelOverride ?? pattern.tupletLabel;
+  const tupletGroupSteps = pattern.tupletGroupSteps ?? (tupletLabel === "3" || tupletLabel === "5" ? stepsPerBeat
     : tupletLabel === "3:2" ? stepsPerBeat * 2
     : tupletLabel === "5:4" ? stepsPerBeat * 4
     : tupletLabel === "4:3" || tupletLabel === "5:3" ? stepsPerBar
-    : undefined;
+    : undefined);
   const compoundMeter = meter && Number(meter[2]) === 8 && Number(meter[1]) % 3 === 0;
   const compoundPulseSteps = compoundMeter ? pattern.subdivision * 3 / 8 : stepsPerBeat;
   const groupStepSize = meter && Number(meter[2]) === 8 ? pattern.subdivision / 8 : stepsPerBeat;
@@ -299,7 +317,9 @@ export function TrainerNotationView({ pattern, currentStep, meter: meterOverride
     let cursor = start;
     return groupCounts.map((count, index) => { if (index > 0) cursor += count * groupStepSize; return Math.round(cursor); });
   }).flat() : undefined;
-  const flagCount = pattern.subdivision === 4 ? 0 : pattern.subdivision === 16 || pattern.subdivision === 20 ? 2 : 1;
+  const tupletNormalNotes = Number(tupletLabel?.match(/^\d+:(\d+)$/)?.[1]);
+  const flagCount = tupletNormalNotes ? Math.max(0, Math.min(4, Math.ceil(Math.log2(tupletNormalNotes))))
+    : pattern.subdivision === 4 ? 0 : pattern.subdivision <= 12 ? 1 : pattern.subdivision <= 32 ? 2 : 3;
   const countLabel = (step: number) => {
     const withinBar = step % stepsPerBar;
     if (compoundMeter) {

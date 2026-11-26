@@ -31,8 +31,14 @@ function sightReadingResult(note: string): { accuracy: number; score: number; le
 }
 
 function messageFrom(error: unknown) {
-  return error && typeof error === "object" && "message" in error && typeof error.message === "string"
+  const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
     ? error.message : "The classroom request could not be completed.";
+  const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "";
+  if (/drum_classroom|create_drum_classroom|join_drum_classroom|rotate_drum_classroom_invite/i.test(message)
+    && (/does not exist|could not find|schema cache|not found/i.test(message) || code === "PGRST202" || code === "PGRST205")) {
+    return "Classroom groups are not enabled in this Supabase project yet. Apply supabase/migrations/202611170005_classroom_groups.sql, then reload this page.";
+  }
+  return message;
 }
 
 export function TeacherClassroomGroups() {

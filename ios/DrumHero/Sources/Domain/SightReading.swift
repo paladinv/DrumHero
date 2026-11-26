@@ -7,6 +7,7 @@ struct SightSettings: Codable, Equatable {
     var meter = "4/4"
     var mixedMeters = false
     var articulationFocus: String? = nil
+    var dynamicsFocus = false
     var triplets = false
     var snareOnly = false
     var focusVoice = "mixed"
@@ -28,6 +29,7 @@ struct SightSettings: Codable, Equatable {
         result.mixedMeters = level != .beginner && mixedMeters && result.bars > 1
         let articulations = ["closed-hat", "open-hat", "pedal-hat", "foot-splash", "ride", "crash", "rimshot", "side-stick"]
         result.articulationFocus = level != .beginner && articulationFocus.map { articulations.contains($0) } == true ? articulationFocus : nil
+        result.dynamicsFocus = level == .advanced && dynamicsFocus
         result.triplets = level == .advanced && triplets && result.meter != "7/8" && !result.mixedMeters
         result.snareOnly = level == .beginner && snareOnly
         if result.snareOnly { result.focusVoice = "snare" }
@@ -67,11 +69,12 @@ struct SightSettings: Codable, Equatable {
         if accuracy < 75 || (timingSpreadMs.map { $0 > 95 } ?? false) { return current < 10 ? (current == 0 ? 5 : 10) : nil }
         return nil
     }
-    private enum CodingKeys: String, CodingKey { case level, bpm, bars, meter, mixedMeters, articulationFocus, triplets, snareOnly, focusVoice, focusRhythm, style, density }
-    init(level: LearnerLevel = .beginner, bpm: Int = 80, bars: Int = 10, meter: String = "4/4", mixedMeters: Bool = false, articulationFocus: String? = nil, triplets: Bool = false, snareOnly: Bool = false, focusVoice: String = "mixed", focusRhythm: String = "mixed", style: String = "varied", density: String = "balanced") {
+    private enum CodingKeys: String, CodingKey { case level, bpm, bars, meter, mixedMeters, articulationFocus, dynamicsFocus, triplets, snareOnly, focusVoice, focusRhythm, style, density }
+    init(level: LearnerLevel = .beginner, bpm: Int = 80, bars: Int = 10, meter: String = "4/4", mixedMeters: Bool = false, articulationFocus: String? = nil, dynamicsFocus: Bool = false, triplets: Bool = false, snareOnly: Bool = false, focusVoice: String = "mixed", focusRhythm: String = "mixed", style: String = "varied", density: String = "balanced") {
         self.level = level; self.bpm = bpm; self.bars = bars; self.meter = meter
         self.mixedMeters = mixedMeters
         self.articulationFocus = articulationFocus
+        self.dynamicsFocus = dynamicsFocus
         self.triplets = triplets; self.snareOnly = snareOnly; self.focusVoice = focusVoice
         self.focusRhythm = focusRhythm; self.style = style; self.density = density
     }
@@ -83,6 +86,7 @@ struct SightSettings: Codable, Equatable {
         meter = try values.decodeIfPresent(String.self, forKey: .meter) ?? "4/4"
         mixedMeters = try values.decodeIfPresent(Bool.self, forKey: .mixedMeters) ?? false
         articulationFocus = try values.decodeIfPresent(String.self, forKey: .articulationFocus)
+        dynamicsFocus = try values.decodeIfPresent(Bool.self, forKey: .dynamicsFocus) ?? false
         triplets = try values.decodeIfPresent(Bool.self, forKey: .triplets) ?? false
         snareOnly = try values.decodeIfPresent(Bool.self, forKey: .snareOnly) ?? false
         focusVoice = try values.decodeIfPresent(String.self, forKey: .focusVoice) ?? "mixed"
@@ -93,7 +97,7 @@ struct SightSettings: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(level, forKey: .level); try values.encode(bpm, forKey: .bpm); try values.encode(bars, forKey: .bars)
-        try values.encode(meter, forKey: .meter); try values.encode(mixedMeters, forKey: .mixedMeters); try values.encode(articulationFocus, forKey: .articulationFocus); try values.encode(triplets, forKey: .triplets); try values.encode(snareOnly, forKey: .snareOnly)
+        try values.encode(meter, forKey: .meter); try values.encode(mixedMeters, forKey: .mixedMeters); try values.encode(articulationFocus, forKey: .articulationFocus); try values.encode(dynamicsFocus, forKey: .dynamicsFocus); try values.encode(triplets, forKey: .triplets); try values.encode(snareOnly, forKey: .snareOnly)
         try values.encode(focusVoice, forKey: .focusVoice); try values.encode(focusRhythm, forKey: .focusRhythm); try values.encode(style, forKey: .style); try values.encode(density, forKey: .density)
     }
 }
@@ -125,7 +129,7 @@ struct SightExercise: Codable {
     var stepDuration: TimeInterval { 60 / Double(settings.bpm) * 4 / Double(subdivision) }
     var fingerprint: String {
         let meterSignature = meters.allSatisfy { $0 == meters.first } ? (meters.first ?? settings.meter) : meters.joined(separator: "-")
-        return "\(meterSignature):\(subdivision):" + hits.map { "\($0.step)/\($0.instrument.rawValue)/\($0.accent ? 1 : 0)\($0.midiArticulationTarget.map { "/\($0)" } ?? "")" }.joined(separator: ",")
+        return "\(meterSignature):\(subdivision):" + hits.map { "\($0.step)/\($0.instrument.rawValue)/\($0.accent ? 1 : 0)\($0.midiArticulationTarget.map { "/\($0)" } ?? "")\($0.velocityTarget.map { "/v\($0)" } ?? "")" }.joined(separator: ",")
     }
     var pattern: PracticePattern { PracticePattern(id: "sight-v\(version)-\(seed)", name: sourceLabel ?? "Sight reading", level: settings.level, description: "Read and play", subdivision: subdivision, beats: totalBeats, defaultBpm: settings.bpm, tempoRange: [40, 200], hits: hits) }
     func repeatingBar(_ sourceBar: Int) -> Self {
@@ -138,7 +142,8 @@ struct SightExercise: Codable {
         repeated += sourceHits.map { hit in var copy = hit; copy.step += length; return copy }
         repeated.sort { $0.step != $1.step ? $0.step < $1.step : DrumVoice.allCases.firstIndex(of: $0.instrument)! < DrumVoice.allCases.firstIndex(of: $1.instrument)! }
         var drillSettings = settings; drillSettings.bars = 2; drillSettings.meter = meter; drillSettings.mixedMeters = false
-        return Self(version: drillSettings.articulationFocus == nil ? 1 : 3, seed: seed, settings: drillSettings, subdivision: subdivision, beatsPerBar: SightSettings.beatsPerBar(meter), stepsPerBar: length, barMeters: [meter, meter], hits: repeated, sourceLabel: sourceLabel)
+        let version = drillSettings.dynamicsFocus ? 4 : drillSettings.articulationFocus == nil ? 1 : 3
+        return Self(version: version, seed: seed, settings: drillSettings, subdivision: subdivision, beatsPerBar: SightSettings.beatsPerBar(meter), stepsPerBar: length, barMeters: [meter, meter], hits: repeated, sourceLabel: sourceLabel)
     }
     func repeatingRange(_ startBar: Int, _ endBar: Int, repeats: Int = 2) -> Self {
         let start = min(settings.bars - 1, max(0, startBar)), count = min(4, max(2, repeats))
@@ -152,7 +157,7 @@ struct SightExercise: Codable {
         var drillSettings = settings; drillSettings.bars = rangeBars * count
         let repeatedMeters = Array(repeating: sourceMeters, count: count).flatMap { $0 }
         drillSettings.meter = repeatedMeters.first ?? settings.meter; drillSettings.mixedMeters = Set(repeatedMeters).count > 1
-        let version = drillSettings.articulationFocus != nil ? 3 : drillSettings.mixedMeters ? 2 : 1
+        let version = drillSettings.dynamicsFocus ? 4 : drillSettings.articulationFocus != nil ? 3 : drillSettings.mixedMeters ? 2 : 1
         return Self(version: version, seed: seed, settings: drillSettings.normalized, subdivision: subdivision, beatsPerBar: SightSettings.beatsPerBar(repeatedMeters.first ?? settings.meter), stepsPerBar: Int((SightSettings.beatsPerBar(repeatedMeters.first ?? settings.meter) * Double(subdivision) / 4).rounded()), barMeters: repeatedMeters, hits: repeated, sourceLabel: sourceLabel)
     }
     static func fromPattern(_ pattern: PracticePattern, settings: SightSettings, seed: UInt32) -> Self? {
@@ -167,7 +172,21 @@ struct SightExercise: Codable {
         let hits = pattern.hits.filter { DrumVoice.allCases.contains($0.instrument) && $0.step >= offset && $0.step < offset + bars * steps }.map { hit in var copy = hit; copy.step -= offset; return copy }.sorted { $0.step != $1.step ? $0.step < $1.step : DrumVoice.allCases.firstIndex(of: $0.instrument)! < DrumVoice.allCases.firstIndex(of: $1.instrument)! }
         guard !hits.isEmpty else { return nil }
         var config = settings; config.level = pattern.level; config.meter = normalizedMeter; config.bars = bars; config.bpm = max(40, min(200, settings.bpm)); config.mixedMeters = false; config.articulationFocus = nil
-        return Self(seed: seed, settings: config.normalized, subdivision: pattern.subdivision, beatsPerBar: beats, stepsPerBar: steps, hits: hits, sourceLabel: String(pattern.name.prefix(160)))
+        var resultHits = hits
+        applyDynamicsTargets(&resultHits, settings: config.normalized)
+        return Self(version: config.dynamicsFocus ? 4 : config.articulationFocus == nil ? 1 : 3, seed: seed, settings: config.normalized, subdivision: pattern.subdivision, beatsPerBar: beats, stepsPerBar: steps, hits: resultHits, sourceLabel: String(pattern.name.prefix(160)))
+    }
+    static func fromTemplate(_ template: SightCustomTemplate, settings: SightSettings, seed: UInt32) -> Self {
+        var config = settings
+        config.level = template.level; config.meter = template.meter; config.mixedMeters = false
+        config.articulationFocus = nil; config.bars = max(1, min(80, settings.bars))
+        config = config.normalized
+        let stepsPerBar = Int((template.beats * Double(template.subdivision) / 4).rounded())
+        var hits = (0..<config.bars).flatMap { bar in template.hits.map { hit in var copy = hit; copy.step += bar * stepsPerBar; return copy } }
+        applyDynamicsTargets(&hits, settings: config)
+        return Self(version: config.dynamicsFocus ? 4 : 1, seed: seed, settings: config, subdivision: template.subdivision,
+                    beatsPerBar: template.beats, stepsPerBar: stepsPerBar,
+                    hits: hits.sorted { $0.step != $1.step ? $0.step < $1.step : DrumVoice.allCases.firstIndex(of: $0.instrument)! < DrumVoice.allCases.firstIndex(of: $1.instrument)! }, sourceLabel: template.name)
     }
     static func generate(_ settings: SightSettings, seed: UInt32, previous: String? = nil) -> Self {
         let config = settings.normalized
@@ -253,8 +272,10 @@ struct SightExercise: Codable {
                 if !hits.contains(where: { $0.step >= bar * steps }) { hits.append(PatternHit(step: bar * steps, instrument: DrumVoice(rawValue: config.focusVoice) ?? .snare)) }
             }
             Self.applyArticulationTargets(&hits, settings: config, starts: (0..<config.bars).map { $0 * steps }, lengths: Array(repeating: steps, count: config.bars))
+            Self.applyDynamicsTargets(&hits, settings: config)
             hits.sort { $0.step != $1.step ? $0.step < $1.step : DrumVoice.allCases.firstIndex(of: $0.instrument)! < DrumVoice.allCases.firstIndex(of: $1.instrument)! }
-            let exercise = Self(version: config.articulationFocus == nil ? 1 : 3, seed: actualSeed, settings: config, subdivision: subdivision, beatsPerBar: beats, stepsPerBar: steps, hits: hits)
+            let version = config.dynamicsFocus ? 4 : config.articulationFocus == nil ? 1 : 3
+            let exercise = Self(version: version, seed: actualSeed, settings: config, subdivision: subdivision, beatsPerBar: beats, stepsPerBar: steps, hits: hits)
             if previous == nil || previous != exercise.fingerprint || attempt == 100 { return exercise }
             actualSeed = actualSeed &+ 1
         }
@@ -285,7 +306,9 @@ struct SightExercise: Codable {
             var firstSettings = config; firstSettings.mixedMeters = false; firstSettings.bars = 1
             let first = generate(firstSettings, seed: actualSeed)
             hits.sort { $0.step != $1.step ? $0.step < $1.step : DrumVoice.allCases.firstIndex(of: $0.instrument)! < DrumVoice.allCases.firstIndex(of: $1.instrument)! }
-            let exercise = Self(version: config.articulationFocus == nil ? 2 : 3, seed: actualSeed, settings: config, subdivision: first.subdivision, beatsPerBar: SightSettings.beatsPerBar(barMeters[0]), stepsPerBar: Int((SightSettings.beatsPerBar(barMeters[0]) * Double(first.subdivision) / 4).rounded()), barMeters: barMeters, hits: hits)
+            Self.applyDynamicsTargets(&hits, settings: config)
+            let version = config.dynamicsFocus ? 4 : config.articulationFocus == nil ? 2 : 3
+            let exercise = Self(version: version, seed: actualSeed, settings: config, subdivision: first.subdivision, beatsPerBar: SightSettings.beatsPerBar(barMeters[0]), stepsPerBar: Int((SightSettings.beatsPerBar(barMeters[0]) * Double(first.subdivision) / 4).rounded()), barMeters: barMeters, hits: hits)
             if previous == nil || previous != exercise.fingerprint || retry == 99 { return exercise }
             actualSeed &+= 1
         }
@@ -309,6 +332,15 @@ struct SightExercise: Codable {
                 hits.append(PatternHit(step: step, instrument: voice, midiArticulationTarget: articulation))
                 break
             }
+        }
+    }
+    private static func applyDynamicsTargets(_ hits: inout [PatternHit], settings: SightSettings) {
+        guard settings.dynamicsFocus else { return }
+        for index in hits.indices {
+            let voiceIndex = DrumVoice.allCases.firstIndex(of: hits[index].instrument) ?? 0
+            let target = hits[index].accent ? 105 : (hits[index].step * 11 + voiceIndex * 7) % 7 == 0 ? 45 : 70
+            hits[index].velocityTarget = target
+            hits[index].ghost = target <= 50
         }
     }
     static func generateFresh(_ settings: SightSettings, seed: UInt32, recentFingerprints: [String]) -> Self {
@@ -335,7 +367,7 @@ struct SightExercise: Codable {
             let barStart = startStepForBar(bar), barSteps = stepsForBar(bar)
             let events = (0..<barSteps).map { localStep in
                 let notes = hits.filter { $0.step == barStart + localStep }
-                let content = notes.isEmpty ? "rest" : notes.map { "\($0.instrument.title)\($0.accent ? ", accent" : "")\($0.midiArticulationTarget.map { ", \($0.replacingOccurrences(of: "-", with: " "))" } ?? "")" }.joined(separator: " and ")
+                let content = notes.isEmpty ? "rest" : notes.map { "\($0.instrument.title)\($0.velocityTarget.map { $0 <= 50 ? ", ghost stroke" : $0 >= 100 ? ", accented stroke" : ", normal stroke" } ?? ($0.accent ? ", accent" : ""))\($0.midiArticulationTarget.map { ", \($0.replacingOccurrences(of: "-", with: " "))" } ?? "")" }.joined(separator: " and ")
                 return "\(label(localStep)): \(content)"
             }
             return "Bar \(bar + 1), \(meterForBar(bar)): \(events.joined(separator: "; "))."
@@ -354,6 +386,8 @@ struct SightAttempt: Codable, Identifiable {
     var targetPlayback: Bool? = nil
     var score: Int
     var accuracy: Int
+    var dynamicAccuracy: Int? = nil
+    var contextErrors: [SightContextError]? = nil
     var meanOffsetMs: Int?
     var misses: Int
     var extras: Int
@@ -376,9 +410,10 @@ struct SightAttempt: Codable, Identifiable {
     var inputCalibrationAgeDays: Int? = nil
     var inputTimingCorrectionMs: Int? = nil
     var valid: Bool {
-        (version == 1 || version == 2 || version == 3) && (!settings.mixedMeters || version >= 2) && (settings.articulationFocus == nil || version >= 3) && settings == settings.normalized && ["keyboard", "touch", "midi", "audio-voices"].contains(source) && ["reading", "practice", "assisted"].contains(classification)
+        (version == 1 || version == 2 || version == 3 || version == 4) && (!settings.mixedMeters || version >= 2) && (settings.articulationFocus == nil || version >= 3) && (!settings.dynamicsFocus || version >= 4) && settings == settings.normalized && ["keyboard", "touch", "midi", "audio-voices"].contains(source) && ["reading", "practice", "assisted"].contains(classification)
             && (targetPlayback != true || classification == "assisted") && (0...100).contains(score) && (0...100).contains(accuracy)
             && (meanOffsetMs == nil || (-100...100).contains(meanOffsetMs!)) && (timingSpreadMs == nil || (0...100).contains(timingSpreadMs!))
+            && (dynamicAccuracy == nil || (0...100).contains(dynamicAccuracy!)) && (contextErrors == nil || contextErrors!.count <= 5 && contextErrors!.allSatisfy(\.valid))
             && (pulseRecovery == nil || (0...100).contains(pulseRecovery!)) && (confidence == nil || (1...5).contains(confidence!))
             && (inputCalibrationSpreadMs == nil || (0...240).contains(inputCalibrationSpreadMs!)) && (inputCalibrationAgeDays == nil || (0...100000).contains(inputCalibrationAgeDays!))
             && (inputTimingCorrectionMs == nil || (-250...250).contains(inputTimingCorrectionMs!)) && (earlyHits == nil || (0...100000).contains(earlyHits!))
@@ -390,7 +425,81 @@ struct SightAttempt: Codable, Identifiable {
             && (assignmentDueDate == nil || SightAssignment.validDate(assignmentDueDate!)) && (assignmentMinimumAccuracy == nil || (50...100).contains(assignmentMinimumAccuracy!))
     }
 }
+struct SightContextError: Codable, Equatable {
+    var context: String
+    var count: Int
+    var valid: Bool { ["after-rest", "barline-entry", "group-entry", "offbeat", "voice-change"].contains(context) && (0...100000).contains(count) }
+}
+struct SightCustomTemplate: Codable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var level: LearnerLevel
+    var meter: String
+    var subdivision: Int
+    var beats: Double
+    var hits: [PatternHit]
+    var createdAt: String
+    var valid: Bool {
+        !id.isEmpty && id.count <= 100 && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name.count <= 80 &&
+        SightSettings(level: level, meter: meter).meters.contains(meter) && [4, 8, 12, 16].contains(subdivision) &&
+        !(level != .advanced && (subdivision == 12 || subdivision == 16)) && !(meter == "7/8" && subdivision % 8 != 0) &&
+        abs(beats - SightSettings.beatsPerBar(meter)) < 0.0001 && (1...120).contains(hits.count) &&
+        parsePortableTemplateDate(createdAt) && hits.allSatisfy { $0.step >= 0 && $0.step < Int((beats * Double(subdivision) / 4).rounded()) } &&
+        Set(hits.map { "\($0.step)/\($0.instrument.rawValue)" }).count == hits.count &&
+        Set(hits.map(\.step)).allSatisfy { step in hits.filter { $0.step == step }.count <= 3 }
+    }
+    static func from(exercise: SightExercise, name: String) -> Self? {
+        guard let meter = exercise.meters.first, [4, 8, 12, 16].contains(exercise.subdivision) else { return nil }
+        let start = exercise.startStepForBar(0), end = start + exercise.stepsForBar(0)
+        let hits = exercise.hits.filter { $0.step >= start && $0.step < end }.map { hit in var copy = hit; copy.step -= start; return copy }
+        let value = Self(id: UUID().uuidString.lowercased(), name: String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)), level: exercise.settings.level,
+                         meter: meter, subdivision: exercise.subdivision, beats: SightSettings.beatsPerBar(meter), hits: hits, createdAt: ISO8601DateFormatter().string(from: .now))
+        return value.valid ? value : nil
+    }
+}
+private func parsePortableTemplateDate(_ value: String) -> Bool {
+    let formatter = ISO8601DateFormatter()
+    return formatter.date(from: value) != nil || { formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return formatter.date(from: value) != nil }()
+}
 enum SightAnalytics {
+    static func dynamicAccuracy(exercise: SightExercise, rated: [RatedHit]) -> Int? {
+        guard exercise.settings.dynamicsFocus else { return nil }
+        let targets = exercise.hits.filter { $0.velocityTarget != nil }
+        guard !targets.isEmpty else { return nil }
+        let correct = targets.filter { target in
+            rated.contains { row in
+                row.step == target.step && row.instrument == target.instrument &&
+                    (row.rating == .great || row.rating == .good) && row.velocity != nil &&
+                    abs((row.velocity ?? 0) - (target.velocityTarget ?? 0)) <= 18
+            }
+        }.count
+        return Int((Double(correct) * 100 / Double(targets.count)).rounded())
+    }
+
+    static func contextErrors(exercise: SightExercise, rated: [RatedHit]) -> [SightContextError] {
+        let errors = rated.filter { ($0.rating == .miss || $0.rating == .extra) && $0.step != nil }
+        guard !errors.isEmpty else { return [] }
+        let unitsPerBeat = max(1, exercise.subdivision / 4)
+        var counts: [String: Int] = [:]
+        for error in errors {
+            let step = max(0, min(exercise.totalSteps - 1, error.step ?? 0))
+            let bar = exercise.barIndex(forBeat: Double(step) * 4 / Double(exercise.subdivision))
+            let local = step - exercise.startStepForBar(bar)
+            let meter = exercise.meterForBar(bar)
+            if local == 0 { counts["barline-entry", default: 0] += 1 }
+            let groupStartSteps: Set<Int> = meter == "7/8"
+                ? Set([0, 2 * exercise.subdivision / 8, 4 * exercise.subdivision / 8])
+                : meter == "5/4" ? Set([0, 3 * unitsPerBeat])
+                : meter == "4/4" ? Set([0, 2 * unitsPerBeat])
+                : Set((0..<Int(ceil(SightSettings.beatsPerBar(meter)))).map { $0 * unitsPerBeat })
+            if groupStartSteps.contains(local) { counts["group-entry", default: 0] += 1 }
+            if local % unitsPerBeat != 0 { counts["offbeat", default: 0] += 1 }
+            if local > 0 && !exercise.hits.contains(where: { $0.step == step - 1 }) { counts["after-rest", default: 0] += 1 }
+            if let prior = exercise.hits.last(where: { $0.step < step }), prior.instrument != error.instrument { counts["voice-change", default: 0] += 1 }
+        }
+        return counts.map { SightContextError(context: $0.key, count: $0.value) }.sorted { $0.context < $1.context }
+    }
+
     static func voiceScores(exercise: SightExercise, rated: [RatedHit]) -> [String: Int] {
         Dictionary(uniqueKeysWithValues: DrumVoice.allCases.compactMap { voice in
             let targets = exercise.hits.filter { $0.instrument == voice }
@@ -501,6 +610,7 @@ enum SightAnalytics {
 struct SightPerformedHit: Equatable {
     var instrument: DrumVoice
     var at: TimeInterval
+    var velocity: Int? = nil
 }
 struct SightAssignment: Codable {
     var version = 1
@@ -598,6 +708,7 @@ enum SightHistory {
     static let key = "drumHero.sightReading.v1.default"
     static let goalKey = "drumHero.sightReadingGoal.v1.default"
     static let seenKey = "drumHero.sightReadingSeen.v1.default"
+    static let portableTemplatesKey = "drumHero.sightReadingTemplates.portable.v1.default"
     static func merge(_ device: [SightAttempt], _ cloud: [SightAttempt]) -> [SightAttempt] {
         var byID: [String: SightAttempt] = [:]
         for attempt in cloud + device { byID[attempt.id] = attempt }
@@ -620,4 +731,14 @@ enum SightHistory {
     static func remember(_ fingerprint: String) { var recent = readSeen().filter { $0 != fingerprint }; recent.append(String(fingerprint.prefix(20000))); UserDefaults.standard.set(Array(recent.suffix(32)), forKey: seenKey) }
     static func readGoal() -> SightGoal? { guard let data = UserDefaults.standard.data(forKey: goalKey), let value = try? JSONDecoder().decode(SightGoal.self, from: data), value.valid else { return nil }; return value }
     static func writeGoal(_ goal: SightGoal?) throws { if let goal { UserDefaults.standard.set(try JSONEncoder().encode(goal), forKey: goalKey) } else { UserDefaults.standard.removeObject(forKey: goalKey) } }
+    static func readPortableTemplates() -> Data? { UserDefaults.standard.data(forKey: portableTemplatesKey) }
+    static func writePortableTemplates(_ data: Data?) { if let data { UserDefaults.standard.set(data, forKey: portableTemplatesKey) } else { UserDefaults.standard.removeObject(forKey: portableTemplatesKey) } }
+    static func readTemplates() -> [SightCustomTemplate] {
+        guard let data = readPortableTemplates(), let rows = try? JSONDecoder().decode([SightCustomTemplate].self, from: data) else { return [] }
+        return Array(rows.filter(\.valid).suffix(40))
+    }
+    static func writeTemplates(_ templates: [SightCustomTemplate]) throws {
+        let valid = Array(templates.filter(\.valid).suffix(40))
+        writePortableTemplates(try JSONEncoder().encode(valid))
+    }
 }

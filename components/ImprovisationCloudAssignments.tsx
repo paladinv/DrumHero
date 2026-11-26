@@ -8,7 +8,7 @@ import styles from "./ImprovisationStudio.module.css";
 
 type CloudAssignment = { id: string; name: string; assignment: unknown; created_at: string };
 type CloudSubmission = { id: string; learner_label: string; summary: Record<string, unknown>; created_at: string };
-type CloudFeedback = { id: string; submission_id: string; phrase_index: number | null; bar_index: number | null; body: string; created_at: string };
+export type CloudFeedback = { id: string; submission_id: string; phrase_index: number | null; bar_index: number | null; beat_index: number | null; subdivision_index: number | null; voice: string | null; body: string; created_at: string; session_played_at?: string };
 type Role = "owner" | "editor" | "viewer" | null;
 
 function sanitizedSessionSummary(session: ImprovisationSummary, includeReflection: boolean) {
@@ -44,12 +44,12 @@ function sanitizedSessionSummary(session: ImprovisationSummary, includeReflectio
   };
 }
 
-export function ImprovisationCloudAssignments({ workspace, history, disabled, onSave }: { workspace: ImprovisationWorkspace; history: ImprovisationSummary[]; disabled: boolean; onSave: (workspace: ImprovisationWorkspace) => void }) {
+export function ImprovisationCloudAssignments({ workspace, history, disabled, onSave, onFeedbackLoaded }: { workspace: ImprovisationWorkspace; history: ImprovisationSummary[]; disabled: boolean; onSave: (workspace: ImprovisationWorkspace) => void; onFeedbackLoaded?: (feedback: CloudFeedback[]) => void }) {
   const { t, formatDate } = useLocalization();
   const [cloudAssignments, setCloudAssignments] = useState<CloudAssignment[]>([]), [submissions, setSubmissions] = useState<CloudSubmission[]>([]), [feedback, setFeedback] = useState<CloudFeedback[]>([]), [feedbackSessions, setFeedbackSessions] = useState<Record<string, string>>({});
   const [role, setRole] = useState<Role>(null), [selectedLocalId, setSelectedLocalId] = useState(""), [selectedCloudId, setSelectedCloudId] = useState(""), [selectedSessionId, setSelectedSessionId] = useState(history[0]?.id ?? "");
   const [learnerLabel, setLearnerLabel] = useState("Learner"), [includeReflection, setIncludeReflection] = useState(false), [consent, setConsent] = useState(false), [status, setStatus] = useState("");
-  const [feedbackSubmission, setFeedbackSubmission] = useState(""), [feedbackBody, setFeedbackBody] = useState(""), [feedbackPhrase, setFeedbackPhrase] = useState(""), [feedbackBar, setFeedbackBar] = useState("");
+  const [feedbackSubmission, setFeedbackSubmission] = useState(""), [feedbackBody, setFeedbackBody] = useState(""), [feedbackPhrase, setFeedbackPhrase] = useState(""), [feedbackBar, setFeedbackBar] = useState(""), [feedbackBeat, setFeedbackBeat] = useState(""), [feedbackSubdivision, setFeedbackSubdivision] = useState(""), [feedbackVoice, setFeedbackVoice] = useState("");
   const assignments = workspace.assignments ?? [];
   const selectedCloud = cloudAssignments.find(item => item.id === selectedCloudId);
   const selectedSession = history.find(item => item.id === selectedSessionId);
@@ -124,10 +124,12 @@ export function ImprovisationCloudAssignments({ workspace, history, disabled, on
       setSubmissions(rows);
       setFeedbackSessions(Object.fromEntries(rows.map(row => [row.id, row.created_at])));
       if (rows.length) {
-        const { data: comments, error: commentError } = await client.from("drum_improvisation_feedback").select("id,submission_id,phrase_index,bar_index,body,created_at").in("submission_id", rows.map(row => row.id)).order("created_at", { ascending: true }).limit(1000);
+        const { data: comments, error: commentError } = await client.from("drum_improvisation_feedback").select("id,submission_id,phrase_index,bar_index,beat_index,subdivision_index,voice,body,created_at").in("submission_id", rows.map(row => row.id)).order("created_at", { ascending: true }).limit(1000);
         if (commentError) throw commentError;
-        setFeedback((comments ?? []) as CloudFeedback[]);
-      } else setFeedback([]);
+        const playedAtBySubmission = new Map(rows.map(row => [row.id, typeof row.summary?.playedAt === "string" ? row.summary.playedAt : row.created_at]));
+        const enriched = ((comments ?? []) as CloudFeedback[]).map(comment => ({ ...comment, session_played_at: playedAtBySubmission.get(comment.submission_id) }));
+        setFeedback(enriched); onFeedbackLoaded?.(enriched);
+      } else { setFeedback([]); onFeedbackLoaded?.([]); }
       setStatus(t("Loaded {count} learner summaries. Only summary metrics are stored.", { count: data?.length ?? 0 }));
     } catch (error) { setStatus(error instanceof Error ? error.message : t("Could not load learner summaries.")); }
   };
@@ -135,14 +137,16 @@ export function ImprovisationCloudAssignments({ workspace, history, disabled, on
     if (!selectedCloud) return;
     try {
       const { client, user } = await clientForLibrary();
-      const { data: own, error: ownError } = await client.from("drum_improvisation_submissions").select("id,created_at").eq("assignment_id", selectedCloud.id).eq("learner_id", user.id).order("created_at", { ascending: false }).limit(50);
+      const { data: own, error: ownError } = await client.from("drum_improvisation_submissions").select("id,created_at,summary").eq("assignment_id", selectedCloud.id).eq("learner_id", user.id).order("created_at", { ascending: false }).limit(50);
       if (ownError) throw ownError;
       const ids = (own ?? []).map(row => row.id);
-      if (!ids.length) { setFeedback([]); setStatus(t("No submitted sessions are linked to this account for this assignment yet.")); return; }
-      setFeedbackSessions(Object.fromEntries((own ?? []).map(row => [row.id, row.created_at])));
-      const { data, error } = await client.from("drum_improvisation_feedback").select("id,submission_id,phrase_index,bar_index,body,created_at").in("submission_id", ids).order("created_at", { ascending: true }).limit(500);
+      if (!ids.length) { setFeedback([]); onFeedbackLoaded?.([]); setStatus(t("No submitted sessions are linked to this account for this assignment yet.")); return; }
+      const playedAtBySubmission = new Map((own ?? []).map(row => [row.id, typeof (row.summary as Record<string, unknown> | null)?.playedAt === "string" ? String((row.summary as Record<string, unknown>).playedAt) : row.created_at]));
+      setFeedbackSessions(Object.fromEntries(playedAtBySubmission));
+      const { data, error } = await client.from("drum_improvisation_feedback").select("id,submission_id,phrase_index,bar_index,beat_index,subdivision_index,voice,body,created_at").in("submission_id", ids).order("created_at", { ascending: true }).limit(500);
       if (error) throw error;
-      setFeedback((data ?? []) as CloudFeedback[]);
+      const enriched = ((data ?? []) as CloudFeedback[]).map(comment => ({ ...comment, session_played_at: playedAtBySubmission.get(comment.submission_id) }));
+      setFeedback(enriched); onFeedbackLoaded?.(enriched);
       setStatus(t("Loaded {count} teacher comments for your submitted sessions.", { count: data?.length ?? 0 }));
     } catch (error) { setStatus(error instanceof Error ? error.message : t("Could not load teacher feedback.")); }
   };
@@ -152,12 +156,16 @@ export function ImprovisationCloudAssignments({ workspace, history, disabled, on
     try {
       const { client, user, libraryRole } = await clientForLibrary();
       if (libraryRole !== "owner" && libraryRole !== "editor") throw new Error(t("Only library owners and editors can comment on learner work."));
-      const phrase = feedbackPhrase.trim() ? Number(feedbackPhrase) : null, bar = feedbackBar.trim() ? Number(feedbackBar) : null;
+      const phrase = feedbackPhrase.trim() ? Number(feedbackPhrase) : null, bar = feedbackBar.trim() ? Number(feedbackBar) : null, beat = feedbackBeat.trim() ? Number(feedbackBeat) : null, subdivision = feedbackSubdivision.trim() ? Number(feedbackSubdivision) : null;
       if (phrase !== null && (!Number.isInteger(phrase) || phrase < 1 || phrase > 1000)) throw new Error(t("Phrase number must be between 1 and 1000."));
       if (bar !== null && (!Number.isInteger(bar) || bar < 1 || bar > 32)) throw new Error(t("Bar number must be between 1 and 32."));
-      const { error } = await client.from("drum_improvisation_feedback").insert({ submission_id: submission.id, assignment_id: selectedCloud.id, author_id: user.id, phrase_index: phrase, bar_index: bar, body });
+      if (beat !== null && (!Number.isInteger(beat) || beat < 1 || beat > 32 || bar === null)) throw new Error(t("Choose a bar and a beat between 1 and 32."));
+      if (subdivision !== null && (!Number.isInteger(subdivision) || subdivision < 1 || subdivision > 4 || beat === null)) throw new Error(t("Choose a beat before marking its sixteenth-note position."));
+      const voice = feedbackVoice || null;
+      if (voice !== null && !["kick", "snare", "hihat", "tom", "crash"].includes(voice)) throw new Error(t("Choose a valid drum voice."));
+      const { error } = await client.from("drum_improvisation_feedback").insert({ submission_id: submission.id, assignment_id: selectedCloud.id, author_id: user.id, phrase_index: phrase, bar_index: bar, beat_index: beat, subdivision_index: subdivision, voice, body });
       if (error) throw error;
-      setFeedbackBody(""); setFeedbackPhrase(""); setFeedbackBar(""); setFeedbackSubmission("");
+      setFeedbackBody(""); setFeedbackPhrase(""); setFeedbackBar(""); setFeedbackBeat(""); setFeedbackSubdivision(""); setFeedbackVoice(""); setFeedbackSubmission("");
       await loadSubmissions();
       setStatus(t("Feedback saved and available to this learner."));
     } catch (error) { setStatus(error instanceof Error ? error.message : t("Could not save teacher feedback.")); }
@@ -173,7 +181,7 @@ export function ImprovisationCloudAssignments({ workspace, history, disabled, on
       <button type="button" className="button-secondary" disabled={disabled || !selectedLocalId} onClick={() => void publishLocal()}>{t("Publish to shared library")}</button>
     </div>}
     {cloudAssignments.length > 0 && <div className={styles.settings}>
-      <label>{t("Shared assignment")}<select value={selectedCloudId} onChange={event => { setSelectedCloudId(event.target.value); setSubmissions([]); setFeedback([]); setFeedbackSessions({}); }}><option value="">{t("Choose an assignment")}</option>{cloudAssignments.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+      <label>{t("Shared assignment")}<select value={selectedCloudId} onChange={event => { setSelectedCloudId(event.target.value); setSubmissions([]); setFeedback([]); setFeedbackSessions({}); onFeedbackLoaded?.([]); }}><option value="">{t("Choose an assignment")}</option>{cloudAssignments.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
       <button type="button" className="button-secondary" disabled={disabled || !selectedCloud} onClick={importCloud}>{t("Import to local playlists")}</button>
     </div>}
     {selectedCloud && <details><summary>{t("Submit a session summary")}</summary>
@@ -187,8 +195,8 @@ export function ImprovisationCloudAssignments({ workspace, history, disabled, on
         <button type="button" className="button" disabled={disabled || !consent || !selectedSession} onClick={() => void submitSummary()}>{t("Submit summary")}</button>
       </fieldset>
     </details>}
-    {selectedCloud && role !== "owner" && role !== "editor" && <details><summary>{t("Teacher feedback")}</summary><p>{t("Teachers can attach plain-language comments to a phrase and bar. Comments are shared only with the learner who submitted the summary and the library teachers.")}</p><button type="button" className="button-secondary" disabled={disabled} onClick={() => void loadMyFeedback()}>{t("Load my teacher feedback")}</button>{feedback.filter(comment => feedbackSessions[comment.submission_id]).map(comment => <article className={styles.feedbackComment} key={comment.id}><small>{t("Your session")}: {formatDate(new Date(feedbackSessions[comment.submission_id]), true)} · {formatDate(new Date(comment.created_at), true)}{comment.phrase_index ? ` · ${t("Phrase {number}", { number: comment.phrase_index })}` : ""}{comment.bar_index ? ` · ${t("Bar {number}", { number: comment.bar_index })}` : ""}</small><p>{comment.body}</p></article>)}</details>}
-    {(role === "owner" || role === "editor") && selectedCloud && <details><summary>{t("Review learner summaries")}</summary><button type="button" className="button-secondary" disabled={disabled} onClick={() => void loadSubmissions()}>{t("Load learner summaries")}</button><ul>{submissions.map(submission => <li key={submission.id}><strong>{submission.learner_label}</strong> · {formatDate(new Date(submission.created_at), true)}<pre className={styles.summaryPreview}>{JSON.stringify(submission.summary, null, 2)}</pre><h4>{t("Feedback for learner")}</h4>{feedback.filter(comment => comment.submission_id === submission.id).map(comment => <article className={styles.feedbackComment} key={comment.id}><small>{formatDate(new Date(comment.created_at), true)}{comment.phrase_index ? ` · ${t("Phrase {number}", { number: comment.phrase_index })}` : ""}{comment.bar_index ? ` · ${t("Bar {number}", { number: comment.bar_index })}` : ""}</small><p>{comment.body}</p></article>)}<button type="button" className="button-secondary" disabled={disabled} onClick={() => setFeedbackSubmission(current => current === submission.id ? "" : submission.id)}>{t(feedbackSubmission === submission.id ? "Close feedback form" : "Add teacher feedback")}</button>{feedbackSubmission === submission.id && <fieldset className={styles.settings}><legend>{t("Feedback comment")}</legend><label>{t("Phrase number (optional)")}<input type="number" min="1" max="1000" value={feedbackPhrase} onChange={event => setFeedbackPhrase(event.target.value)} /></label><label>{t("Bar number (optional)")}<input type="number" min="1" max="32" value={feedbackBar} onChange={event => setFeedbackBar(event.target.value)} /></label><label>{t("Comment")}<textarea maxLength={1000} rows={3} value={feedbackBody} onChange={event => setFeedbackBody(event.target.value)} /></label><button type="button" className="button" disabled={disabled || !feedbackBody.trim()} onClick={() => void postFeedback(submission)}>{t("Save feedback")}</button></fieldset>}</li>)}</ul></details>}
+    {selectedCloud && role !== "owner" && role !== "editor" && <details><summary>{t("Teacher feedback")}</summary><p>{t("Teachers can attach comments to a phrase, bar, beat, sixteenth-note position, and drum voice. Comments are shared only with the learner who submitted the summary and the library teachers.")}</p><button type="button" className="button-secondary" disabled={disabled} onClick={() => void loadMyFeedback()}>{t("Load my teacher feedback")}</button>{feedback.filter(comment => feedbackSessions[comment.submission_id]).map(comment => <article className={styles.feedbackComment} key={comment.id}><small>{t("Your session")}: {formatDate(new Date(feedbackSessions[comment.submission_id]), true)} · {formatDate(new Date(comment.created_at), true)}{comment.phrase_index ? ` · ${t("Phrase {number}", { number: comment.phrase_index })}` : ""}{comment.bar_index ? ` · ${t("Bar {number}", { number: comment.bar_index })}` : ""}{comment.beat_index ? ` · ${t("Beat {number}", { number: comment.beat_index })}${comment.subdivision_index ? ` · ${t("sixteenth {number}", { number: comment.subdivision_index })}` : ""}` : ""}{comment.voice ? ` · ${t(comment.voice)}` : ""}</small><p>{comment.body}</p></article>)}</details>}
+    {(role === "owner" || role === "editor") && selectedCloud && <details><summary>{t("Review learner summaries")}</summary><button type="button" className="button-secondary" disabled={disabled} onClick={() => void loadSubmissions()}>{t("Load learner summaries")}</button><ul>{submissions.map(submission => <li key={submission.id}><strong>{submission.learner_label}</strong> · {formatDate(new Date(submission.created_at), true)}<pre className={styles.summaryPreview}>{JSON.stringify(submission.summary, null, 2)}</pre><h4>{t("Feedback for learner")}</h4>{feedback.filter(comment => comment.submission_id === submission.id).map(comment => <article className={styles.feedbackComment} key={comment.id}><small>{formatDate(new Date(comment.created_at), true)}{comment.phrase_index ? ` · ${t("Phrase {number}", { number: comment.phrase_index })}` : ""}{comment.bar_index ? ` · ${t("Bar {number}", { number: comment.bar_index })}` : ""}{comment.beat_index ? ` · ${t("Beat {number}", { number: comment.beat_index })}${comment.subdivision_index ? ` · ${t("sixteenth {number}", { number: comment.subdivision_index })}` : ""}` : ""}{comment.voice ? ` · ${t(comment.voice)}` : ""}</small><p>{comment.body}</p></article>)}<button type="button" className="button-secondary" disabled={disabled} onClick={() => setFeedbackSubmission(current => current === submission.id ? "" : submission.id)}>{t(feedbackSubmission === submission.id ? "Close feedback form" : "Add teacher feedback")}</button>{feedbackSubmission === submission.id && <fieldset className={styles.settings}><legend>{t("Feedback comment")}</legend><label>{t("Phrase number (optional)")}<input type="number" min="1" max="1000" value={feedbackPhrase} onChange={event => setFeedbackPhrase(event.target.value)} /></label><label>{t("Bar number (optional)")}<input type="number" min="1" max="32" value={feedbackBar} onChange={event => setFeedbackBar(event.target.value)} /></label><label>{t("Beat in bar (optional)")}<input type="number" min="1" max="32" value={feedbackBeat} onChange={event => setFeedbackBeat(event.target.value)} /></label><label>{t("Sixteenth-note position in beat (optional)")}<select value={feedbackSubdivision} onChange={event => setFeedbackSubdivision(event.target.value)}><option value="">{t("Any position")}</option>{[1, 2, 3, 4].map(value => <option key={value} value={value}>{value}</option>)}</select></label><label>{t("Drum voice (optional)")}<select value={feedbackVoice} onChange={event => setFeedbackVoice(event.target.value)}><option value="">{t("Any voice")}</option>{["kick", "snare", "hihat", "tom", "crash"].map(voice => <option key={voice} value={voice}>{t(voice)}</option>)}</select></label><label>{t("Comment")}<textarea maxLength={1000} rows={3} value={feedbackBody} onChange={event => setFeedbackBody(event.target.value)} /></label><button type="button" className="button" disabled={disabled || !feedbackBody.trim()} onClick={() => void postFeedback(submission)}>{t("Save feedback")}</button></fieldset>}</li>)}</ul></details>}
     <p role="status" aria-live="polite">{status}</p>
   </section>;
 }

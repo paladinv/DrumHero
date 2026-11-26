@@ -2,23 +2,25 @@ import { classifyOffset, findClosestExpected, stepDurationMs, summarizeHits } fr
 import type { Instrument, PracticePattern, RatedHit } from "./types";
 
 export type EarLevel = "pulse" | "rhythm" | "triplet" | "groove";
-export type EarMode = "play" | "identify" | "meter" | "grouping" | "feel" | "feel-detail" | "dictation" | "error" | "voice" | "voice-change" | "dropout" | "tempo-ramp" | "tempo-transfer" | "tempo-estimate";
+export type EarMode = "play" | "identify" | "meter" | "grouping" | "feel" | "feel-detail" | "dictation" | "error" | "voice" | "voice-change" | "rudiment" | "dropout" | "tempo-ramp" | "tempo-transfer" | "tempo-estimate";
 export type EarMeter = "4/4" | "3/4" | "6/8" | "5/4" | "5/8" | "7/8" | "9/8" | "11/8" | "12/8" | "13/8";
 export type EarFeel = "straight" | "swing" | "shuffle" | "pushed" | "laid-back";
 export type EarFeelDetail = { kind: "swing" | "pocket"; value: number };
+export type EarPhraseBars = 1 | 2 | 4 | 8;
+export type EarRudiment = "single-stroke" | "double-stroke" | "paradiddle" | "flam" | "drag" | "buzz-roll";
 export type EarGrooveStyle = "free" | "rock" | "funk" | "clave";
-export type EarSkill = "rests" | "offbeats" | "sixteenth-notes" | "triplets" | "syncopation" | "voice-separation" | "meter" | "meter-grouping" | "swing" | "pocket" | "error-detection" | "pulse-stability" | "cross-rhythm" | "quintuplets" | "tempo-control";
+export type EarSkill = "rests" | "offbeats" | "sixteenth-notes" | "triplets" | "syncopation" | "voice-separation" | "meter" | "meter-grouping" | "swing" | "pocket" | "error-detection" | "pulse-stability" | "cross-rhythm" | "quintuplets" | "tempo-control" | "rudiments";
 export type EarAttempt = { instrument: Instrument; atMs: number; velocity?: number };
-export type EarExerciseOptions = { meter?: EarMeter; feel?: EarFeel; bars?: 1 | 2; style?: EarGrooveStyle; focus?: EarSkill; complexity?: 1 | 2 | 3; grouping?: number[] };
+export type EarExerciseOptions = { meter?: EarMeter; feel?: EarFeel; bars?: EarPhraseBars; style?: EarGrooveStyle; focus?: EarSkill; complexity?: 1 | 2 | 3; grouping?: number[]; includeChoices?: boolean };
 export type EarComparison = { pattern: PracticePattern; changed: boolean; instrument?: Instrument; fromStep?: number; toStep?: number; changedVoice?: Instrument };
-export type EarExercise = { pattern: PracticePattern; choices: PracticePattern[]; answer: number; meter: EarMeter; feel: EarFeel; bars: 1 | 2; style: EarGrooveStyle; focus?: EarSkill; complexity: 1 | 2 | 3; grouping?: number[]; groupingChoices?: number[][]; comparison?: EarComparison; voice?: Instrument; changedVoice?: Instrument; sourceBpm?: number; feelDetail?: EarFeelDetail; feelDetailChoices?: number[]; lessonId?: string };
+export type EarExercise = { pattern: PracticePattern; choices: PracticePattern[]; answer: number; meter: EarMeter; feel: EarFeel; bars: EarPhraseBars; style: EarGrooveStyle; focus?: EarSkill; complexity: 1 | 2 | 3; grouping?: number[]; groupingChoices?: number[][]; comparison?: EarComparison; voice?: Instrument; changedVoice?: Instrument; sourceBpm?: number; feelDetail?: EarFeelDetail; feelDetailChoices?: number[]; rudiment?: EarRudiment; rudimentChoices?: EarRudiment[]; lessonId?: string };
 export type EarVoiceStats = { instrument: Instrument; expected: number; matched: number; extra: number; meanOffsetMs: number | null };
 export type EarTimingCell = { beat: number; subdivision: number; expected: number; matched: number; missed: number; extra: number; meanOffsetMs: number | null };
 export type EarAssignment = { id: string; learnerName: string; dueAt: string; assignedAt: string };
 export type EarErrorCell = { instrument: Instrument; step: number; rating: "miss" | "extra" | "early" | "late" };
 export type EarTeacherReportResult = { score: number; playedAt: string; bpm?: number; meter?: EarMeter; mode: EarMode; dynamicsScore?: number | null; challengeIndex?: number; itemName?: string; errorCells?: EarErrorCell[] };
 export type EarTeacherReport = { id: string; assignmentId: string; learnerName: string; packName: string; dueAt: string; submittedAt: string; results: EarTeacherReportResult[] };
-export type EarResult = { id: string; playedAt: string; level: EarLevel; mode: EarMode; score: number; replays: number; assisted: boolean; skills?: EarSkill[]; meter?: EarMeter; feel?: EarFeel; grouping?: number[]; bars?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8; style?: EarGrooveStyle; focus?: EarSkill; complexity?: 1 | 2 | 3; voice?: Instrument; lessonId?: string; bpm?: number; sourceBpm?: number; subdivision?: 4 | 8 | 12 | 16 | 20; input?: "pads" | "microphone" | "midi"; meanOffsetMs?: number | null; timedHits?: number; voiceStats?: EarVoiceStats[]; timingCells?: EarTimingCell[]; errorCells?: EarErrorCell[]; dynamicsScore?: number | null; challengePackId?: string; challengePackIndex?: number; assignmentId?: string; weeklyChallengeId?: string };
+export type EarResult = { id: string; playedAt: string; level: EarLevel; mode: EarMode; score: number; replays: number; assisted: boolean; confidence?: 1 | 2 | 3; skills?: EarSkill[]; meter?: EarMeter; feel?: EarFeel; grouping?: number[]; bars?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8; style?: EarGrooveStyle; focus?: EarSkill; complexity?: 1 | 2 | 3; voice?: Instrument; lessonId?: string; bpm?: number; sourceBpm?: number; subdivision?: 4 | 8 | 12 | 16 | 20; input?: "pads" | "microphone" | "midi"; meanOffsetMs?: number | null; timedHits?: number; voiceStats?: EarVoiceStats[]; timingCells?: EarTimingCell[]; errorCells?: EarErrorCell[]; dynamicsScore?: number | null; challengePackId?: string; challengePackIndex?: number; assignmentId?: string; weeklyChallengeId?: string };
 export type EarReviewItem = { skill: EarSkill; dueAt: string; intervalDays: 1 | 2 | 3 | 7 | 14; streak: number; lastScore: number };
 export type EarChallengeItem = { id: string; level: EarLevel; meter: EarMeter; feel: EarFeel; grouping?: number[]; bars: 1 | 2; style: EarGrooveStyle; complexity: 1 | 2 | 3; pattern: PracticePattern };
 export type EarChallengePack = { id: string; name: string; createdAt: string; items: EarChallengeItem[]; assignment?: EarAssignment };
@@ -193,7 +195,7 @@ export function parseEarTeacherReport(raw: string): EarTeacherReport | null {
     if (!assignment || !("packName" in value) || typeof value.packName !== "string" || !("submittedAt" in value) || typeof value.submittedAt !== "string" || !Number.isFinite(Date.parse(value.submittedAt)) || !("results" in value) || !Array.isArray(value.results) || value.results.length > 100) return null;
     const results: EarTeacherReportResult[] = [];
     for (const entry of value.results) {
-      if (!entry || typeof entry !== "object" || !("score" in entry) || !Number.isFinite(entry.score) || entry.score < 0 || entry.score > 100 || !("playedAt" in entry) || typeof entry.playedAt !== "string" || !Number.isFinite(Date.parse(entry.playedAt)) || !("mode" in entry) || typeof entry.mode !== "string" || !["play", "identify", "meter", "grouping", "feel", "feel-detail", "dictation", "error", "voice", "voice-change", "dropout", "tempo-ramp", "tempo-transfer", "tempo-estimate"].includes(entry.mode)) return null;
+      if (!entry || typeof entry !== "object" || !("score" in entry) || !Number.isFinite(entry.score) || entry.score < 0 || entry.score > 100 || !("playedAt" in entry) || typeof entry.playedAt !== "string" || !Number.isFinite(Date.parse(entry.playedAt)) || !("mode" in entry) || typeof entry.mode !== "string" || !["play", "identify", "meter", "grouping", "feel", "feel-detail", "dictation", "error", "voice", "voice-change", "rudiment", "dropout", "tempo-ramp", "tempo-transfer", "tempo-estimate"].includes(entry.mode)) return null;
       if (entry.errorCells !== undefined && !isEarErrorCells(entry.errorCells)) return null;
       results.push({ score: entry.score, playedAt: entry.playedAt, mode: entry.mode as EarMode, ...(typeof entry.bpm === "number" && Number.isFinite(entry.bpm) && entry.bpm >= 40 && entry.bpm <= 200 ? { bpm: entry.bpm } : {}), ...(typeof entry.meter === "string" && EAR_METERS.includes(entry.meter as EarMeter) ? { meter: entry.meter as EarMeter } : {}), ...(typeof entry.dynamicsScore === "number" && Number.isFinite(entry.dynamicsScore) && entry.dynamicsScore >= 0 && entry.dynamicsScore <= 100 ? { dynamicsScore: entry.dynamicsScore } : {}), ...(Number.isInteger(entry.challengeIndex) && Number(entry.challengeIndex) >= 0 && Number(entry.challengeIndex) <= 11 ? { challengeIndex: Number(entry.challengeIndex) } : {}), ...(typeof entry.itemName === "string" ? { itemName: entry.itemName.replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 80) } : {}), ...(entry.errorCells === undefined ? {} : { errorCells: entry.errorCells }) });
     }
@@ -213,7 +215,7 @@ export function parseEarTeacherReports(raw: string | null): EarTeacherReport[] {
   } catch { return []; }
 }
 
-const EAR_SKILLS: EarSkill[] = ["rests", "offbeats", "sixteenth-notes", "triplets", "syncopation", "voice-separation", "meter", "meter-grouping", "swing", "pocket", "error-detection", "pulse-stability", "cross-rhythm", "quintuplets", "tempo-control"];
+const EAR_SKILLS: EarSkill[] = ["rests", "offbeats", "sixteenth-notes", "triplets", "syncopation", "voice-separation", "meter", "meter-grouping", "swing", "pocket", "error-detection", "pulse-stability", "cross-rhythm", "quintuplets", "tempo-control", "rudiments"];
 
 export function createEarComparison(pattern: PracticePattern, seed: number): EarComparison {
   let state = seed >>> 0;
@@ -450,28 +452,28 @@ export function earPatternBank(level: EarLevel, options: EarExerciseOptions = {}
 
 /** Distractors change a single hit's position while preserving the drum voice and note count. */
 function nearbyChoices(pattern: PracticePattern, seed: number) {
-  const candidates: PracticePattern[] = [];
-  const stableHits = pattern.hits.map(hit => ({ ...hit }));
-  const steps = totalSteps(pattern.beats, pattern.subdivision);
-  for (let index = 0; index < stableHits.length; index++) {
-    const source = stableHits[index]!;
-    for (let step = 0; step < steps; step++) {
-      if (stableHits.some((hit, hitIndex) => hitIndex !== index && hit.instrument === source.instrument && hit.step === step)) continue;
-      if (step === source.step) continue;
-      const hits = stableHits.map((hit, hitIndex) => hitIndex === index ? { ...hit, step } : { ...hit });
-      const id = `ear-choice-${hits.map(hit => `${hit.instrument[0]}${hit.step}`).join("-")}`;
-      candidates.push({ ...pattern, id, hits: hits.sort((a, b) => a.step - b.step || a.instrument.localeCompare(b.instrument)) });
-    }
-  }
   let state = seed >>> 0;
   const random = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
-  for (let i = candidates.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [candidates[i], candidates[j]] = [candidates[j]!, candidates[i]!]; }
-  const used = new Set<string>([JSON.stringify(stableHits)]);
-  const choices = candidates.filter(candidate => {
-    const key = JSON.stringify(candidate.hits);
-    if (used.has(key)) return false;
-    used.add(key); return true;
-  }).slice(0, 3);
+  const steps = Math.max(1, Math.round(totalSteps(pattern.beats, pattern.subdivision)));
+  const sourceHits = pattern.hits.map(hit => ({ ...hit }));
+  const choices: PracticePattern[] = [];
+  const signatures = new Set<string>([JSON.stringify(sourceHits)]);
+  for (let choiceIndex = 0; choiceIndex < 3; choiceIndex += 1) {
+    let nextHits: PracticePattern["hits"] | null = null;
+    for (let attempt = 0; attempt < 80 && !nextHits; attempt += 1) {
+      const sourceIndex = Math.floor(random() * sourceHits.length);
+      const source = sourceHits[sourceIndex];
+      if (!source) break;
+      const step = Math.floor(random() * steps);
+      if (step === source.step || sourceHits.some((hit, index) => index !== sourceIndex && hit.instrument === source.instrument && hit.step === step)) continue;
+      nextHits = sourceHits.map((hit, index) => index === sourceIndex ? { ...hit, step } : { ...hit }).sort((a, b) => a.step - b.step || a.instrument.localeCompare(b.instrument));
+      const signature = JSON.stringify(nextHits);
+      if (signatures.has(signature)) nextHits = null;
+      else signatures.add(signature);
+    }
+    if (!nextHits) break;
+    choices.push({ ...pattern, id: `ear-choice-${choiceIndex}-${nextHits.map(hit => `${hit.instrument[0]}${hit.step}`).join("-")}`, hits: nextHits });
+  }
   return choices.length === 3 ? choices : [];
 }
 
@@ -503,7 +505,7 @@ export function createEarExercise(level: EarLevel, seed: number, previousId?: st
   const focused = options.focus ? bank.filter(pattern => supportsFocus(pattern, level, options.focus, meter, feel)) : bank;
   const available = (focused.length ? focused : bank).filter(pattern => pattern.id !== previousId);
   const pattern = available[Math.floor(random() * available.length)]!;
-  const choices = nearbyChoices(pattern, seed ^ 0x6d2b79f5);
+  const choices = options.includeChoices === false ? [] : nearbyChoices(pattern, seed ^ 0x6d2b79f5);
   const answer = Math.floor(random() * 4);
   choices.splice(answer, 0, pattern);
   return { pattern, choices, answer, meter, feel, bars, style, ...(options.grouping ? { grouping: options.grouping } : {}), ...(options.focus ? { focus: options.focus } : {}), complexity };
@@ -548,6 +550,7 @@ export function skillsForEarPattern(pattern: PracticePattern, level: EarLevel, o
     if (pattern.hits.some(hit => hit.step % 2 !== 0)) skills.push("offbeats");
   } else if (pattern.hits.some(hit => hit.step % 2 !== 0)) skills.push("offbeats");
   if (options.focus === "quintuplets") skills.push("quintuplets");
+  if (options.focus === "rudiments" || pattern.hits.some(hit => hit.articulation || hit.sticking)) skills.push("rudiments");
   return [...new Set(skills)];
 }
 
@@ -639,12 +642,13 @@ export function parseEarHistory(raw: string | null): EarResult[] {
     if (!value || typeof value !== "object" || !("version" in value) || value.version !== 1 || !("results" in value) || !Array.isArray(value.results)) return [];
     return value.results.filter((item): item is EarResult => !!item && typeof item === "object"
       && typeof item.id === "string" && typeof item.playedAt === "string" && Number.isFinite(Date.parse(item.playedAt))
-      && EAR_LEVELS.some(level => level.id === item.level) && ["play", "identify", "meter", "grouping", "feel", "feel-detail", "dictation", "error", "voice", "voice-change", "dropout", "tempo-ramp", "tempo-transfer", "tempo-estimate"].includes(item.mode)
+      && EAR_LEVELS.some(level => level.id === item.level) && ["play", "identify", "meter", "grouping", "feel", "feel-detail", "dictation", "error", "voice", "voice-change", "rudiment", "dropout", "tempo-ramp", "tempo-transfer", "tempo-estimate"].includes(item.mode)
       && Number.isFinite(item.score) && item.score >= 0 && item.score <= 100
       && Number.isInteger(item.replays) && item.replays >= 0 && typeof item.assisted === "boolean"
       && (item.meter === undefined || EAR_METERS.includes(item.meter)) && (item.feel === undefined || EAR_FEELS.includes(item.feel))
       && (item.grouping === undefined || Array.isArray(item.grouping) && item.grouping.length <= 7 && item.grouping.every(value => Number.isInteger(value) && value >= 2 && value <= 3) && item.meter?.endsWith("/8") && item.grouping.reduce((sum, value) => sum + value, 0) === Number(item.meter.split("/")[0]))
-      && (item.bars === undefined || item.bars === 1 || item.bars === 2 || item.mode === "dropout" && [3, 4, 5].includes(item.bars) || item.mode === "tempo-ramp" && item.bars === 8)
+      && (item.bars === undefined || item.bars === 1 || item.bars === 2 || item.bars === 4 || item.bars === 8 || item.mode === "dropout" && [3, 4, 5].includes(item.bars))
+      && (item.confidence === undefined || item.confidence === 1 || item.confidence === 2 || item.confidence === 3)
       && (item.style === undefined || EAR_GROOVE_STYLES.includes(item.style))
       && (item.focus === undefined || EAR_SKILLS.includes(item.focus))
       && (item.complexity === undefined || item.complexity === 1 || item.complexity === 2 || item.complexity === 3)

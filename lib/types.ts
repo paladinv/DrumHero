@@ -4,7 +4,7 @@ export type SongInstrument = Instrument | "openhat" | "ride" | "rimshot" | "cowb
 export const SONG_INSTRUMENTS: SongInstrument[] = ["kick", "snare", "hihat", "openhat", "ride", "rimshot", "tom", "crash", "cowbell", "shaker", "tambourine", "custom1", "custom2", "custom3", "custom4", "custom5", "custom6", "custom7", "custom8"];
 export type SongHitArticulation = "normal" | "flam" | "drag" | "buzz" | "roll" | "choke" | "foot-splash";
 export type MidiArticulation = "closed-hat" | "open-hat" | "pedal-hat" | "foot-splash" | "ride" | "crash" | "rimshot" | "side-stick";
-export type SongPartHit = Omit<PatternHit, "instrument" | "articulation"> & { instrument: SongInstrument; velocity?: number; ghost?: boolean; articulation?: SongHitArticulation; sticking?: "R" | "L"; timingOffsetMs?: number };
+export type SongPartHit = Omit<PatternHit, "instrument" | "articulation" | "tuplet" | "grace"> & { instrument: SongInstrument; velocity?: number; ghost?: boolean; articulation?: SongHitArticulation; sticking?: "R" | "L"; timingOffsetMs?: number };
 
 export type PatternHit = {
   step: number;
@@ -17,6 +17,10 @@ export type PatternHit = {
   /** Optional engraving override used by notation-first rhythm dictation. */
   flagCount?: number;
   articulation?: "flam" | "drag" | "buzz";
+  /** MusicXML tuplet ratio retained for exact score rendering and export. */
+  tuplet?: { actualNotes: number; normalNotes: number };
+  /** A MusicXML grace stroke, kept separate from its principal note. */
+  grace?: true;
   /** MIDI kit articulation required for this hit when articulation scoring is enabled. */
   midiArticulationTarget?: MidiArticulation;
 };
@@ -26,13 +30,17 @@ export type PracticePattern = {
   name: string;
   level: Level;
   description: string;
-  subdivision: 4 | 8 | 12 | 16 | 20;
+  /** Grid divisions per whole note. Trainer imports may use denser grids for exact tuplets. */
+  subdivision: number;
   beats: number;
   defaultBpm: number;
   tempoRange: [number, number];
   hits: PatternHit[];
   /** Section ranges that should be scored and summarized as fills. */
   trainerFillStepRanges?: Array<[number, number]>;
+  /** Score-derived tuplet ratio and visual grouping for notation-first display. */
+  tupletLabel?: string;
+  tupletGroupSteps?: number;
 };
 
 export type Lesson = {

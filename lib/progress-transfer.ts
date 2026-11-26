@@ -5,6 +5,7 @@ import { parseWeeklyGoal, type WeeklyGoal } from "./weekly-practice-goal";
 import { normalizeSong, type DrumSong } from "./song-library";
 import { parseCustomGrooves } from "./custom-grooves";
 import { parsePortableEarHistory, type EarResult } from "./ear-training";
+import { parseSightGoal, parseSightHistory, parseSightTemplates, type SightAttempt, type SightCustomTemplate, type SightGoal } from "./sight-reading";
 import type { Groove } from "./types";
 import type { ProgressState, SessionResult } from "./types";
 import { parseTrainerPortableCoachFeedback, parseTrainerPortableCueSequences, parseTrainerPortableRounds, parseTrainerPortableRoutine, type TrainerPortableData } from "./trainer";
@@ -29,6 +30,7 @@ export type PortableProgressTransfer = {
   customGrooves?: Groove[];
   trainerPractice?: TrainerPortableData;
   earTraining?: EarResult[];
+  sightReading?: { attempts: SightAttempt[]; goal?: SightGoal; templates?: SightCustomTemplate[] };
 };
 
 export type ProgressTransferMerge = {
@@ -43,7 +45,7 @@ const isDate = (value: unknown): value is string => typeof value === "string" &&
 export function createProgressTransfer(
   progress: ProgressState,
   exportedAt = new Date().toISOString(),
-  extras: { guidedPracticeSession?: DailyPracticeSession | null; weeklyGoal?: WeeklyGoal; personalSongs?: DrumSong[]; customGrooves?: Groove[]; trainerPractice?: TrainerPortableData; earTraining?: EarResult[] } = {}
+  extras: { guidedPracticeSession?: DailyPracticeSession | null; weeklyGoal?: WeeklyGoal; personalSongs?: DrumSong[]; customGrooves?: Groove[]; trainerPractice?: TrainerPortableData; earTraining?: EarResult[]; sightReading?: PortableProgressTransfer["sightReading"] } = {}
 ): PortableProgressTransfer {
   const transfer: PortableProgressTransfer = {
     application: "Drum Hero",
@@ -61,6 +63,7 @@ export function createProgressTransfer(
   if (extras.customGrooves?.length) transfer.customGrooves = extras.customGrooves.slice(0, 100);
   if (extras.trainerPractice) transfer.trainerPractice = extras.trainerPractice;
   if (extras.earTraining?.length) transfer.earTraining = extras.earTraining.slice(-100);
+  if (extras.sightReading) transfer.sightReading = { attempts: extras.sightReading.attempts.slice(-100), ...(extras.sightReading.goal ? { goal: extras.sightReading.goal } : {}), ...(extras.sightReading.templates?.length ? { templates: extras.sightReading.templates.slice(-40) } : {}) };
   return transfer;
 }
 
@@ -115,6 +118,18 @@ export function parseProgressTransfer(raw: string): PortableProgressTransfer {
   }
   const earTraining = value.earTraining === undefined ? undefined : parsePortableEarHistory(value.earTraining);
   if (value.earTraining !== undefined && !earTraining) throw new Error("The learning archive contains invalid ear-training history.");
+  let sightReading: PortableProgressTransfer["sightReading"];
+  if (value.sightReading !== undefined) {
+    const rawSight = value.sightReading;
+    if (!rawSight || typeof rawSight !== "object" || !Array.isArray(rawSight.attempts) || rawSight.attempts.length > 100 ||
+        (rawSight.goal !== undefined && !parseSightGoal(JSON.stringify(rawSight.goal))) ||
+        (rawSight.templates !== undefined && (!Array.isArray(rawSight.templates) || rawSight.templates.length > 40 || parseSightTemplates(JSON.stringify(rawSight.templates)).length !== rawSight.templates.length))) {
+      throw new Error("The learning archive contains invalid sight-reading data.");
+    }
+    const parsedAttempts = parseSightHistory(JSON.stringify({ version: 1, attempts: rawSight.attempts }));
+    if (parsedAttempts.length !== rawSight.attempts.length || new Set(parsedAttempts.map(row => row.id)).size !== parsedAttempts.length) throw new Error("The learning archive contains invalid sight-reading attempts.");
+    sightReading = { attempts: parsedAttempts, ...(rawSight.goal ? { goal: parseSightGoal(JSON.stringify(rawSight.goal))! } : {}), ...(rawSight.templates?.length ? { templates: parseSightTemplates(JSON.stringify(rawSight.templates)) } : {}) };
+  }
   const sessionIds = new Set<string>();
   for (const session of value.practiceSessions) {
     if (!session || typeof session.id !== "string" || !session.id || session.id.length > 120 || sessionIds.has(session.id) ||
@@ -133,7 +148,8 @@ export function parseProgressTransfer(raw: string): PortableProgressTransfer {
     personalSongs: value.personalSongs?.map(song => normalizeSong(song)!).filter(song => song.bundled !== true),
     customGrooves: value.customGrooves === undefined ? undefined : parseCustomGrooves(JSON.stringify(value.customGrooves)),
     trainerPractice,
-    earTraining
+    earTraining,
+    sightReading
   } as PortableProgressTransfer;
 }
 

@@ -7,6 +7,8 @@ export type BackingAudioAnalysis = { bpm: number; firstBeatSeconds: number; anal
 export type MicrophoneOnset = { timeSeconds: number; confidence: number };
 export type ArrangementHitSuggestion = { barIndex: number; measure: number; sectionId: string; sectionName: string; partId: string; partName: string; hits: DrumPart['hits']; confidence: number };
 export type ReferenceTempoSuggestion = { anchors: Array<{ beat: number; seconds: number }>; firstBeatSeconds: number; medianBpm: number; windows: Array<{ fromSeconds: number; toSeconds: number; bpm: number }> };
+export type StemAlignmentSuggestion = { id: string; name: string; currentDownbeat: number; suggestedDownbeat: number; offsetSeconds: number; confidence: number; driftMsPerMinute: number };
+export type ReferenceStructureSegment = { startMeasure: number; endMeasure: number; name: string; kind: "intro" | "verse" | "chorus" | "bridge" | "outro" | "other"; confidence: number; energy: number; density: number; repeatOf?: string; repeatConfidence?: number };
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 
@@ -164,6 +166,147 @@ export async function suggestReferenceTempoMap(blob: Blob): Promise<ReferenceTem
     const median = [...windows].map(item => item.bpm).sort((a, b) => a - b)[Math.floor(windows.length / 2)] ?? 100;
     return { anchors, firstBeatSeconds: Math.round(firstBeatSeconds * 1000) / 1000, medianBpm: median, windows };
   } finally { await context.close(); }
+}
+
+async function onsetEnvelope(blob: Blob, frameSeconds = 0.02) {
+  const Context = window.AudioContext;
+  if (!Context) throw new Error("Audio analysis is unavailable in this browser.");
+  const context = new Context();
+  try {
+    const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+    if (buffer.duration > 10 * 60) throw new Error("This browser can analyze tracks up to ten minutes long.");
+    const frameSize = Math.max(1, Math.round(buffer.sampleRate * frameSeconds));
+    const frames = Math.floor(buffer.length / frameSize), energy = new Float32Array(frames), flux = new Float32Array(frames);
+    for (let frame = 0; frame < frames; frame += 1) {
+      const first = frame * frameSize, last = Math.min(buffer.length, first + frameSize);
+      let sum = 0;
+      for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+        const samples = buffer.getChannelData(channel);
+        for (let index = first; index < last; index += 1) sum += (samples[index] ?? 0) ** 2;
+      }
+      energy[frame] = Math.sqrt(sum / Math.max(1, (last - first) * buffer.numberOfChannels));
+      if (frame) flux[frame] = Math.max(0, energy[frame]! - energy[frame - 1]!);
+    }
+    return { flux, frameSeconds, duration: buffer.duration };
+  } finally { await context.close(); }
+}
+
+function bestEnvelopeLag(main: Float32Array, other: Float32Array, start: number, count: number, maxLag: number) {
+  let bestLag = 0, bestScore = -1;
+  for (let lag = -maxLag; lag <= maxLag; lag += 1) {
+    const first = Math.max(start, -lag), last = Math.min(start + count, main.length, other.length - lag);
+    if (last - first < 100) continue;
+    let meanA = 0, meanB = 0;
+    for (let index = first; index < last; index += 1) { meanA += main[index] ?? 0; meanB += other[index + lag] ?? 0; }
+    const length = last - first; meanA /= length; meanB /= length;
+    let dot = 0, energyA = 0, energyB = 0;
+    for (let index = first; index < last; index += 1) {
+      const a = (main[index] ?? 0) - meanA, b = (other[index + lag] ?? 0) - meanB;
+      dot += a * b; energyA += a * a; energyB += b * b;
+    }
+    const score = dot / Math.sqrt(Math.max(1e-12, energyA * energyB));
+    if (score > bestScore) { bestScore = score; bestLag = lag; }
+  }
+  return { lag: bestLag, confidence: Math.max(0, bestScore) };
+}
+
+/** Suggests per-stem downbeat offsets using transient-envelope correlation; results always need review. */
+export async function suggestStemAlignments(mainBlob: Blob, stems: Array<{ id: string; name: string; blob: Blob; downbeat: number }>): Promise<StemAlignmentSuggestion[]> {
+  if (!stems.length) return [];
+  const main = await onsetEnvelope(mainBlob);
+  const windowCount = Math.min(Math.round(30 / main.frameSeconds), main.flux.length);
+  const maxLag = Math.round(3 / main.frameSeconds);
+  return await Promise.all(stems.map(async stem => {
+    const other = await onsetEnvelope(stem.blob, main.frameSeconds);
+    const count = Math.min(windowCount, other.flux.length);
+    const first = bestEnvelopeLag(main.flux, other.flux, 0, count, maxLag);
+    const lastStart = Math.max(0, Math.min(main.flux.length, other.flux.length) - count);
+    const last = bestEnvelopeLag(main.flux, other.flux, lastStart, count, maxLag);
+    const offsetSeconds = first.lag * main.frameSeconds;
+    const suggestedDownbeat = Math.max(-30, Math.min(other.duration, stem.downbeat + offsetSeconds));
+    const analysisDuration = Math.max(1, Math.min(main.duration, other.duration) - count * main.frameSeconds);
+    const driftMsPerMinute = (last.lag - first.lag) * main.frameSeconds * 60_000 / analysisDuration;
+    return { id: stem.id, name: stem.name, currentDownbeat: stem.downbeat, suggestedDownbeat, offsetSeconds, confidence: Math.round(((first.confidence + last.confidence) / 2) * 100) / 100, driftMsPerMinute: Math.round(driftMsPerMinute) };
+  }));
+}
+
+/** Finds broad form changes from per-measure energy and onset density, without assigning exact chords or instruments. */
+export async function suggestReferenceStructure(blob: Blob, bpm: number, meter: string, firstBeatSeconds: number): Promise<ReferenceStructureSegment[]> {
+  const envelope = await onsetEnvelope(blob, 0.1);
+  const [, numeratorText, denominatorText] = meter.match(/(\d+)\s*\/\s*(\d+)/) ?? [];
+  const numerator = Math.max(1, Number(numeratorText) || 4), denominator = Math.max(1, Number(denominatorText) || 4);
+  const beatsPerMeasure = numerator * 4 / denominator;
+  const measureSeconds = beatsPerMeasure * 60 / Math.max(40, Math.min(200, bpm));
+  const availableSeconds = Math.max(0, envelope.duration - Math.max(0, firstBeatSeconds));
+  const measureCount = Math.min(1024, Math.floor(availableSeconds / measureSeconds));
+  if (measureCount < 4) throw new Error("At least four estimated measures are needed to suggest song form.");
+  const windowFrames = Math.max(1, Math.round(measureSeconds / envelope.frameSeconds));
+  const measures = Array.from({ length: measureCount }, (_, measure) => {
+    const first = Math.floor(Math.max(0, firstBeatSeconds) / envelope.frameSeconds) + measure * windowFrames;
+    const last = Math.min(envelope.flux.length, first + windowFrames);
+    let energy = 0, density = 0;
+    for (let index = first; index < last; index += 1) { const value = envelope.flux[index] ?? 0; density += value > 0.0015 ? 1 : 0; energy += value; }
+    const length = Math.max(1, last - first);
+    return { energy: energy / length, density: density / length };
+  });
+  const maxEnergy = Math.max(1e-6, ...measures.map(item => item.energy)), maxDensity = Math.max(1e-6, ...measures.map(item => item.density));
+  const features = measures.map(item => ({ energy: item.energy / maxEnergy, density: item.density / maxDensity }));
+  const distances = features.map((item, index) => {
+    if (index < 2 || index >= features.length - 2) return 0;
+    const before = features.slice(index - 2, index).reduce((acc, value) => ({ energy: acc.energy + value.energy / 2, density: acc.density + value.density / 2 }), { energy: 0, density: 0 });
+    const after = features.slice(index, index + 2).reduce((acc, value) => ({ energy: acc.energy + value.energy / 2, density: acc.density + value.density / 2 }), { energy: 0, density: 0 });
+    return Math.sqrt((after.energy - before.energy) ** 2 + (after.density - before.density) ** 2);
+  });
+  const boundaries = [0];
+  for (let index = 4; index < measureCount - 2; index += 1) {
+    if (boundaries.length >= 31) break;
+    const lastBoundary = boundaries[boundaries.length - 1] ?? 0;
+    if (index - lastBoundary < 4 || index % 2 !== 0) continue;
+    const score = distances[index] ?? 0;
+    if (score >= 0.34 && score >= (distances[index - 1] ?? 0) && score >= (distances[index + 1] ?? 0)) boundaries.push(index);
+  }
+  if (measureCount - (boundaries[boundaries.length - 1] ?? 0) < 2) boundaries.pop();
+  boundaries.push(measureCount);
+  const counts = { verse: 0, chorus: 0 };
+  const segments = boundaries.slice(0, -1).map((start, index) => {
+    const end = boundaries[index + 1] ?? measureCount;
+    const slice = features.slice(start, end);
+    const energy = slice.reduce((sum, item) => sum + item.energy, 0) / Math.max(1, slice.length);
+    const density = slice.reduce((sum, item) => sum + item.density, 0) / Math.max(1, slice.length);
+    const boundaryScore = index ? distances[start] ?? 0 : 0;
+    const previous = index ? segmentsPlaceholder(boundaries, features, index - 1) : null;
+    const change = previous ? energy - previous.energy : 0;
+    const kind: ReferenceStructureSegment["kind"] = index === 0 && energy < 0.38 ? "intro" : index === boundaries.length - 2 ? "outro" : change > 0.12 && energy > 0.55 ? "chorus" : change < -0.14 ? "bridge" : "verse";
+    const name = kind === "verse" ? `Verse ${++counts.verse}` : kind === "chorus" ? `Chorus ${++counts.chorus}` : kind === "intro" ? "Intro" : kind === "outro" ? "Outro" : "Bridge";
+    return { startMeasure: start + 1, endMeasure: end, name, kind, confidence: Math.max(0.2, Math.min(0.92, boundaryScore * 0.65 + Math.abs(change) * 0.25 + 0.2)), energy, density };
+  });
+  const profiles = segments.map(segment => {
+    const start = segment.startMeasure - 1, end = segment.endMeasure;
+    const source = features.slice(start, end);
+    return Array.from({ length: 8 }, (_, bin) => {
+      const first = Math.floor(bin * source.length / 8), last = Math.max(first + 1, Math.floor((bin + 1) * source.length / 8));
+      const rows = source.slice(first, last);
+      return { energy: rows.reduce((sum, item) => sum + item.energy, 0) / Math.max(1, rows.length), density: rows.reduce((sum, item) => sum + item.density, 0) / Math.max(1, rows.length) };
+    });
+  });
+  return segments.map((segment, index) => {
+    let best: { name: string; score: number } | undefined;
+    const currentLength = segment.endMeasure - segment.startMeasure + 1;
+    for (let prior = 0; prior < index; prior += 1) {
+      const earlier = segments[prior]!;
+      const earlierLength = earlier.endMeasure - earlier.startMeasure + 1;
+      if (Math.abs(currentLength - earlierLength) / Math.max(currentLength, earlierLength) > 0.25) continue;
+      const distance = profiles[index]!.reduce((sum, item, bin) => sum + Math.abs(item.energy - profiles[prior]![bin]!.energy) + Math.abs(item.density - profiles[prior]![bin]!.density), 0) / 16;
+      const score = Math.max(0, 1 - distance);
+      if (!best || score > best.score) best = { name: earlier.name, score };
+    }
+    return best && best.score >= 0.88 ? { ...segment, repeatOf: best.name, repeatConfidence: Math.round(best.score * 100) / 100 } : segment;
+  });
+}
+
+function segmentsPlaceholder(boundaries: number[], features: Array<{ energy: number; density: number }>, index: number) {
+  const start = boundaries[index] ?? 0, end = boundaries[index + 1] ?? start + 1, slice = features.slice(start, end);
+  return { energy: slice.reduce((sum, item) => sum + item.energy, 0) / Math.max(1, slice.length) };
 }
 
 /** Detects likely acoustic drum strikes in a short microphone take. Results are deliberately unclassified. */
